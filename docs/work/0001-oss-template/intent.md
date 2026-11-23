@@ -4,7 +4,7 @@
 
 ## The problem
 
-Okja intends to run every repository, private or public, like open source, yet none has a repeatable, AI-native contribution practice: `ai-native-sdlc` writes one down, but each new repository starts from scratch. The seven earlier public ones, set up by hand, differ:
+Okja intends to run every repository, private or public, like open source, yet none has a repeatable, AI-native contribution practice: the upstream AI-native SDLC process writes one down, but each new repository starts from scratch. The seven earlier public ones, set up by hand, differ:
 
 - Agent instructions: three share a cross-agent file, one has editor rules, three have none.
 - One pins CI actions by commit (since 2026-10-12); six use mutable tags, which Scorecard flags.
