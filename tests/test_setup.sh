@@ -37,4 +37,12 @@ out=$(cd "$R" && CDPATH=.:/nonexistent bin/setup 2>&1)
 assert_status 0 "$?" "bin/setup run by a relative path under CDPATH exits 0"
 assert_eq ".githooks" "$(git -C "$R" config --get core.hooksPath)" "  and sets core.hooksPath"
 
+# The clone's own setting decides, not one inherited from the user's
+# global config, which could change under it.
+git -C "$R" config --unset core.hooksPath
+printf '[core]\n\thooksPath = .githooks\n' >"$SCRATCH/global.gitconfig"
+out=$(GIT_CONFIG_GLOBAL="$SCRATCH/global.gitconfig" "$R/bin/setup" 2>&1)
+assert_eq ".githooks" "$(git -C "$R" config --local --get core.hooksPath)" \
+  "a global core.hooksPath does not stand in for the clone's own"
+
 assert_done

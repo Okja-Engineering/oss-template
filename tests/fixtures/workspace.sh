@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # A fixture workspace for the workspace's suites: a repository holding the
-# workspace's bin/check, bin/setup and .githooks/, the product libraries they
-# source, and only the fixture checks a suite names. Git is isolated by the
-# product's fixture library, whose mutations the suites also use.
+# workspace's bin/check, bin/setup and .githooks/, the product libraries and
+# bin/setup they call, and only the fixture checks a suite names. Git is
+# isolated by the product's fixture library, whose mutations the suites also
+# use.
 #
 # usage: . tests/fixtures/workspace.sh; ws_fixture DIR [CHECK...]
 #        ws_real_check DIR NAME   (the workspace's own bin/checks/NAME)
@@ -23,6 +24,7 @@ ws_fixture() {
     cp -Rp "$WS_ROOT/.githooks" "$dir/.githooks" || return 1
   fi
   cp -p "$WS_ROOT"/foundation/bin/lib/*.sh "$dir/foundation/bin/lib/" || return 1
+  cp -p "$WS_ROOT/foundation/bin/setup" "$dir/foundation/bin/setup" || return 1
   for c in "$@"; do
     cp -p "$WS_ROOT/tests/fixtures/checks/$c" "$dir/bin/checks/$c" || return 1
   done
