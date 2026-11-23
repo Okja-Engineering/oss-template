@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# Always-on budgets, stage folders and routing, contract shape, Inputs discipline
+# modes: tree staged range
+#
+# AC1: CLAUDE.md is exactly @AGENTS.md; AGENTS.md is at most 80 lines.
+# AC2: CONTEXT.md is at most 60 lines and its `## Routing` table names each
+#   stages/NN-slug/ in exactly one row, and nothing else; each stage folder
+#   is named NN-slug, holds CONTEXT.md and an output/.gitignore of exactly
+#   `*` and `!.gitignore`, and nothing else under output/; each contract is
+#   at most 80 lines with the sections Inputs, Process, [Checkpoints],
+#   [Audit], Outputs, in that order and no others.
+# AC3: each Inputs row names one file in backticks, relative to its stage
+#   folder, that is a tracked file not in a later stage, or an earlier
+#   stage's ../NN-slug/output/<name>/FILE that stage's Outputs lists; every
+#   file in a stage's references/ is one of its Inputs.
+set -u
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
+. "$here/../../foundation/bin/lib/tree.sh"
+
+src=$(tree_source)
+listing=$(tree_list "$src") || exit 2
+paths=$(printf '%s\n' "$listing" | sed 's/^[^	]*	//')
+refused=0
+
+refuse() {
+  printf '%s\n' "$1"
+  refused=1
+}
+has_path() { printf '%s\n' "$paths" | grep -Fxq -- "$1"; }
+has_dir() { printf '%s\n' "$paths" | awk -v p="$1/" 'index($0, p) == 1 { f = 1 } END { exit !f }'; }
+lines_of() { tree_cat "$src" "$1" | awk 'END { print NR }'; }
+
+# section FILE NAME: the lines of FILE's `## NAME` section, outside fences.
+section() {
+  tree_cat "$src" "$1" | awk -v want="## $2" '
+    /^```/ { fence = !fence }
+    !fence && /^## / { insec = ($0 == want); next }
+    insec { print }'
+}
+# h2s FILE: FILE's level-2 headings, in order, on one line.
+h2s() {
+  tree_cat "$src" "$1" | awk '
+    /^```/ { fence = !fence }
+    !fence && /^## / { printf "%s%s", sep, substr($0, 4); sep = " " }'
+}
+# body_rows: a Markdown table's rows after its header and separator.
+body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
+# normalize PATH: resolve . and .. segments; empty when it leaves the root.
+normalize() {
+  printf '%s\n' "$1" | awk -F/ '{
+    n = 0
+    for (i = 1; i <= NF; i++) {
+      if ($i == "" || $i == ".") continue
+      if ($i == "..") { if (n == 0) { print ""; exit } n--; continue }
+      s[++n] = $i
+    }
+    out = ""
+    for (i = 1; i <= n; i++) out = out (i > 1 ? "/" : "") s[i]
+    print out
+  }'
+}
+stage_num() { case "$1" in [0-9][0-9]-*) printf '%s' "${1%%-*}" ;; *) printf '' ;; esac; }
+# outputs_of STAGE: the backticked names in STAGE's ## Outputs.
+# shellcheck disable=SC2016 # a literal backtick, the Markdown code span
+outputs_of() { section "stages/$1/CONTEXT.md" Outputs | grep -o '`[^`]*`' | tr -d '`'; }
+
+# --- AC1 ---------------------------------------------------------------------
+if has_path CLAUDE.md; then
+  claude=$(tree_cat "$src" CLAUDE.md && printf x)
+  claude=${claude%x}
+  if [ "$claude" != "@AGENTS.md" ] && [ "$claude" != "@AGENTS.md
+" ]; then
+    refuse "CLAUDE.md: not exactly the line @AGENTS.md"
+  fi
+else
+  refuse "CLAUDE.md: missing"
+fi
+if has_path AGENTS.md; then
+  count=$(lines_of AGENTS.md)
+  [ "$count" -le 80 ] || refuse "AGENTS.md: $count lines, over 80"
+else
+  refuse "AGENTS.md: missing"
+fi
+
+# --- AC2: stage folders ------------------------------------------------------
+stages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "stages" && NF >= 3 { print $2 }' | sort -u)
+for s in $stages; do
+  printf '%s\n' "$s" | grep -Eq '^[0-9][0-9]-[a-z]+(-[a-z]+)*$' ||
+    refuse "stages/$s/: the name is not NN-slug (NN-[a-z]+(-[a-z]+)*)"
+  has_path "stages/$s/CONTEXT.md" || refuse "stages/$s/: no CONTEXT.md"
+  if has_path "stages/$s/output/.gitignore"; then
+    ignore=$(tree_cat "$src" "stages/$s/output/.gitignore")
+    [ "$ignore" = '*
+!.gitignore' ] || refuse "stages/$s/output/.gitignore: not exactly the lines * and !.gitignore"
+  else
+    refuse "stages/$s/output/.gitignore: missing"
+  fi
+  for p in $(printf '%s\n' "$paths" | awk -v p="stages/$s/output/" 'index($0, p) == 1'); do
+    [ "$p" = "stages/$s/output/.gitignore" ] || refuse "$p: a tracked file under output/"
+  done
+done
+
+# --- AC2: CONTEXT.md and its routing table -----------------------------------
+if has_path CONTEXT.md; then
+  count=$(lines_of CONTEXT.md)
+  [ "$count" -le 60 ] || refuse "CONTEXT.md: $count lines, over 60"
+  if tree_cat "$src" CONTEXT.md | grep -qx '## Routing'; then
+    # Each row counts a stage once, however often it mentions it.
+    routed=$(section CONTEXT.md Routing | body_rows | while IFS= read -r row; do
+      printf '%s\n' "$row" | grep -o 'stages/[^/[:space:]`|()]*/' | sort -u
+    done | sed 's|^stages/||; s|/$||')
+    for s in $stages; do
+      times=$(printf '%s\n' "$routed" | grep -Fxc -- "$s")
+      [ "$times" -eq 1 ] || refuse "CONTEXT.md: the routing table names stages/$s/ $times times, not once"
+    done
+    for s in $(printf '%s\n' "$routed" | sort -u); do
+      printf '%s\n' "$stages" | grep -Fxq -- "$s" ||
+        refuse "CONTEXT.md: the routing table names stages/$s/, which is not a stage folder"
+    done
+  else
+    refuse "CONTEXT.md: no ## Routing table"
+  fi
+else
+  refuse "CONTEXT.md: missing"
+fi
+
+# --- AC2, AC3: each contract -------------------------------------------------
+for s in $stages; do
+  contract="stages/$s/CONTEXT.md"
+  has_path "$contract" || continue
+  num=$(stage_num "$s")
+  count=$(lines_of "$contract")
+  [ "$count" -le 80 ] || refuse "$contract: $count lines, over 80"
+  case "$(h2s "$contract")" in
+    "Inputs Process Outputs" | "Inputs Process Checkpoints Outputs" | \
+      "Inputs Process Audit Outputs" | "Inputs Process Checkpoints Audit Outputs") ;;
+    *) refuse "$contract: sections are not Inputs, Process, [Checkpoints], [Audit], Outputs, in order" ;;
+  esac
+
+  inputs=""
+  rows=$(section "$contract" Inputs | body_rows)
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    cell=$(printf '%s\n' "$row" | awk -F'|' '{ c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }')
+    path=${cell#\`}
+    path=${path%\`}
+    case "$cell" in
+      '`'*'`') ;;
+      *) path="" ;;
+    esac
+    case "$path" in
+      '' | *'`'*)
+        refuse "$contract: an Inputs row does not name one file in backticks: $cell"
+        continue
+        ;;
+      *'*'* | *'?'* | *'['*)
+        refuse "$contract: Inputs \`$path\` is a glob"
+        continue
+        ;;
+      */)
+        refuse "$contract: Inputs \`$path\` is a directory"
+        continue
+        ;;
+    esac
+    target=$(normalize "stages/$s/$path")
+    if [ -z "$target" ]; then
+      refuse "$contract: Inputs \`$path\` does not resolve"
+      continue
+    fi
+    inputs="$inputs$target
+"
+    if has_path "$target"; then
+      case "$target" in
+        stages/*/*)
+          other=${target#stages/}
+          other=${other%%/*}
+          onum=$(stage_num "$other")
+          if [ -n "$num" ] && [ -n "$onum" ] && [ "$onum" -gt "$num" ]; then
+            refuse "$contract: Inputs \`$path\` is in a later stage"
+          fi
+          ;;
+      esac
+    elif has_dir "$target"; then
+      refuse "$contract: Inputs \`$path\` is a directory"
+    else
+      other=${target#stages/}
+      other=${other%%/*}
+      file=${target##*/}
+      if [ "$target" = "stages/$other/output/<name>/$file" ] && printf '%s\n' "$stages" | grep -Fxq -- "$other"; then
+        onum=$(stage_num "$other")
+        if [ -z "$num" ] || [ -z "$onum" ] || [ "$onum" -ge "$num" ]; then
+          refuse "$contract: Inputs \`$path\` is an output of the same or a later stage"
+        elif ! outputs_of "$other" | grep -Fxq -e "$file" -e "output/<name>/$file"; then
+          refuse "$contract: Inputs \`$path\` is not in stages/$other/'s Outputs"
+        fi
+      else
+        refuse "$contract: Inputs \`$path\` does not resolve"
+      fi
+    fi
+  done <<EOF
+$rows
+EOF
+
+  for p in $(printf '%s\n' "$paths" | awk -v p="stages/$s/references/" 'index($0, p) == 1'); do
+    printf '%s' "$inputs" | grep -Fxq -- "$p" || refuse "$p: in references/ but not in the stage's Inputs"
+  done
+done
+
+printf 'examined CLAUDE.md, AGENTS.md, CONTEXT.md and %s stage folders in %s\n' \
+  "$(printf '%s' "$stages" | grep -c .)" "$src"
+exit "$refused"

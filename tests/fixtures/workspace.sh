@@ -5,6 +5,7 @@
 # product's fixture library, whose mutations the suites also use.
 #
 # usage: . tests/fixtures/workspace.sh; ws_fixture DIR [CHECK...]
+#        ws_real_check DIR NAME   (the workspace's own bin/checks/NAME)
 
 WS_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/tests/lib/fixture.sh
@@ -30,4 +31,10 @@ ws_fixture() {
   git init -q --bare -b main "$dir-origin.git" || return 1
   git -C "$dir" remote add origin "$dir-origin.git" || return 1
   git -C "$dir" push -q -u origin main 2>/dev/null || return 1
+}
+
+# ws_real_check DIR NAME: install the workspace's own check NAME, the code
+# under test, into the fixture workspace's bin/checks/.
+ws_real_check() {
+  cp -p "$WS_ROOT/bin/checks/$2" "$1/bin/checks/$2" 2>/dev/null
 }

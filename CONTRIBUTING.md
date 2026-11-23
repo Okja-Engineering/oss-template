@@ -36,6 +36,7 @@ Claude Code applies the list; the workspace has no command guard of its own.
 | Enforcer | What it stops | When |
 |---|---|---|
 | `.githooks/commit-msg`, `.githooks/pre-commit`, `.githooks/pre-push` | whatever `bin/check` refuses | at commit and at push, after `bin/setup` |
+| `bin/check disclosure` | `CLAUDE.md` other than `@AGENTS.md`; `AGENTS.md` over 80 lines or `CONTEXT.md` over 60; a stage folder, routing table or contract out of shape; an Inputs row that is not one earlier, existing file; an unnamed reference | in `bin/check`, so in the hooks |
 | `.claude/settings.json` (Claude Code) | an agent reading a `.env` file | in Claude Code |
 
 ## What is not enforced
