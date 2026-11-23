@@ -214,6 +214,22 @@ valid
 put stages/02-render/references/extra.md 'extra'
 refused "a file in references/ its Inputs do not name" "stages/02-render/references/extra.md"
 
+# --- paths are judged literally, never split or expanded -------------------------
+valid
+put 'stages/01-ask/output/.gitignor[e]' 'TOKEN=x'
+git -C "$R" add -f 'stages/01-ask/output/.gitignor[e]'
+refused "a tracked file under output/ whose name globs to .gitignore" 'stages/01-ask/output/.gitignor[e]'
+valid
+put 'stages/02-render/references/note[s].md' 'unnamed'
+refused "an unnamed reference whose name globs to a named one" 'stages/02-render/references/note[s].md'
+valid
+git -C "$R" mv stages/02-render/references/notes.md 'stages/02-render/references/my notes.md'
+fixture_replace "$R/$C2" '`references/notes.md`' '`references/my notes.md`'
+passes "a named reference whose name holds a space"
+valid
+add_stage '04-a b'
+refused "a stage folder whose name holds a space" 'stages/04-a b/: the name is not NN-slug'
+
 # --- judged through the tree reader --------------------------------------------
 valid
 fixture_append "$R/CLAUDE.md" "More."

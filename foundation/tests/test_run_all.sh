@@ -108,12 +108,28 @@ assert_status 0 "$status" "run-all.sh with no argument passes on its own directo
 assert_contains "$out" "$COPY/test_own.sh" "and ran the suite beside it"
 assert_contains "$out" "1 suites passed" "and only that suite"
 
+# --- tracked suites are matched by their literal names ----------------------
+ODD="$SCRATCH/odd"
+mkdir "$ODD"
+git -C "$ODD" init -q -b main
+write_suite "$ODD/test_a b.sh" spaced
+write_suite "$ODD/test_caf$(printf '\303\251').sh" accented
+git -C "$ODD" add -A
+out=$(bash "$RUN_ALL" "$ODD" 2>&1)
+assert_status 0 "$?" "tracked suites whose names hold a space or a non-ASCII letter pass"
+assert_contains "$out" "2 suites passed" "  and both are counted"
+assert_not_contains "$out" "did not run" "  and none is reported missing"
+printf 'not an index' >"$ODD/.git/index"
+out=$(bash "$RUN_ALL" "$ODD" 2>&1)
+assert_status 1 "$?" "a git failure listing the tracked suites fails the runner"
+assert_contains "$out" "could not list" "  and says so"
+
 # --- the real suite directory is cross-checked ------------------------------
 gone=""
-for t in $(git -C "$TEST_DIR" ls-files -- 'test_*.sh' 2>/dev/null); do
+while IFS= read -r -d '' t; do
   case "$t" in */*) continue ;; esac
   [ -f "$TEST_DIR/$t" ] || gone="$gone $t"
-done
+done < <(git -C "$TEST_DIR" ls-files -z -- 'test_*.sh')
 assert_eq "" "$gone" "no suite git tracks beside this one is missing"
 
 assert_done

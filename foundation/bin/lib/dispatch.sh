@@ -19,7 +19,8 @@
 # option).
 
 dispatch_main() {
-  local dir=$1 mode=tree base="" head="" names="" msg="" arg top
+  local dir=$1 mode=tree base="" head="" msg="" arg top named=0
+  local -a names=()
   shift
   export LC_ALL=C
 
@@ -57,7 +58,10 @@ dispatch_main() {
         mode=report
         ;;
       -*) dispatch__usage "unknown option: $arg"; return 2 ;;
-      *) names="$names $arg" ;;
+      *)
+        names+=("$arg")
+        named=1
+        ;;
     esac
   done
 
@@ -71,7 +75,7 @@ dispatch_main() {
 
   dispatch__bases "$mode" "$base" "$head" || return 2
   export CHECK_MODE=$mode CHECK_MSG_FILE=$msg
-  dispatch__run "$dir" "$mode" "$names"
+  dispatch__run "$dir" "$mode" "$named" ${names[@]+"${names[@]}"}
 }
 
 # dispatch__bases MODE BASE HEAD: export CHECK_BASE, CHECK_HEAD, CHECK_REF
@@ -139,18 +143,21 @@ EOF
   git rev-list --topo-order --reverse "$head" $exclude
 }
 
-# dispatch__run DIR MODE NAMES: run the named checks, or every check whose
-# modes include MODE; print ok or FAIL per check with its output.
+# dispatch__run DIR MODE NAMED [NAME...]: run the NAMEs given (NAMED is 1),
+# or every check whose modes include MODE; print ok or FAIL per check with
+# its output. A name is taken as given, never split or expanded.
 dispatch__run() {
-  local dir=$1 mode=$2 names=$3 all="" name file modes selected="" out st worst=0 ran=0 failed=0
-  if [ -d "$dir" ]; then
+  local dir=$1 mode=$2 named=$3 name file modes out st worst=0 ran=0 failed=0
+  local -a selected=()
+  shift 3
+  if [ "$named" = 0 ] && [ -d "$dir" ]; then
     for file in "$dir"/*; do
-      [ -f "$file" ] && all="$all ${file##*/}"
+      [ -f "$file" ] && set -- "$@" "${file##*/}"
     done
   fi
-  for name in ${names:-$all}; do
+  for name in "$@"; do
     file="$dir/$name"
-    case "$name" in */* | .*) file="" ;; esac
+    case "$name" in '' | */* | .*) file="" ;; esac
     if [ -z "$file" ] || [ ! -f "$file" ]; then
       printf 'bin/check: unknown check: %s\n' "$name" >&2
       return 2
@@ -158,9 +165,9 @@ dispatch__run() {
     modes=$(dispatch__header "$file" modes) ||
       { printf 'bin/check: %s has no "# modes:" third line\n' "$name" >&2; return 2; }
     case " $modes " in
-      *" $mode "*) selected="$selected $name" ;;
+      *" $mode "*) selected+=("$name") ;;
       *)
-        if [ -n "$names" ]; then
+        if [ "$named" = 1 ]; then
           printf 'bin/check: %s does not run in %s mode\n' "$name" "$mode" >&2
           return 2
         fi
@@ -168,7 +175,7 @@ dispatch__run() {
     esac
   done
 
-  for name in $selected; do
+  for name in ${selected[@]+"${selected[@]}"}; do
     ran=$((ran + 1))
     out=$("$dir/$name" 2>&1 </dev/null)
     st=$?

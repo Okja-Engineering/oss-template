@@ -35,12 +35,22 @@ runner_main() {
 
   # Every suite git tracks here has to have run: a suite that disappeared
   # from the checkout must not read as a smaller pass. A committed deletion
-  # is not caught, since git then tracks nothing either.
+  # is not caught, since git then tracks nothing either. Names are read
+  # from git's NUL-delimited list, as they are, never split or quoted.
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    for tracked in $(git -C "$dir" ls-files -- 'test_*.sh' 2>/dev/null); do
-      case "$tracked" in */*) continue ;; esac
-      [ -f "$dir/$tracked" ] || missing="$missing $tracked"
-    done
+    tracked=$(
+      set -o pipefail
+      git -C "$dir" ls-files -z -- 'test_*.sh' | tr '\0' '\n'
+    ) || {
+      printf 'run-all: could not list the suites git tracks in %s\n' "$dir" >&2
+      return 1
+    }
+    while IFS= read -r suite; do
+      case "$suite" in '' | */*) continue ;; esac
+      [ -f "$dir/$suite" ] || missing="$missing $suite"
+    done <<EOF
+$tracked
+EOF
   else
     printf 'run-all: %s is not in a git work tree, so the suite list was not cross-checked\n' "$dir"
   fi

@@ -72,6 +72,24 @@ run "$SCRATCH/nogit" pass
 assert_status 2 "$ST" "outside a git repository exits 2"
 assert_contains "$OUT" "not inside a git repository" "and says so"
 
+# --- check names are taken literally, never split or expanded ------------------
+N=$(repo names pass fail)
+run "$N" '*'
+assert_status 2 "$ST" "a glob as a check name is an unknown check"
+assert_contains "$OUT" "unknown check: *" "  named as given, not expanded"
+run "$N" ''
+assert_status 2 "$ST" "an empty check name exits 2, not nothing to run"
+run "$N" --staged ' '
+assert_status 2 "$ST" "a blank check name in staged mode exits 2"
+run "$N" --range HEAD HEAD ''
+assert_status 2 "$ST" "an empty check name in range mode exits 2"
+mv "$N/bin/checks/fail" "$N/bin/checks/my fail"
+run "$N"
+assert_status 1 "$ST" "a check whose file name holds a space runs"
+assert_contains "$OUT" "FAIL my fail" "  under its whole name"
+run "$N" 'my fail'
+assert_status 1 "$ST" "  and runs when named"
+
 # --- --list --------------------------------------------------------------------
 run "$R" --list
 assert_status 0 "$ST" "--list exits 0"
