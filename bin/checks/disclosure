@@ -9,7 +9,8 @@
 #   `*` and `!.gitignore`, and nothing else under output/; each contract is
 #   at most 80 lines with the sections Inputs, Process, [Checkpoints],
 #   [Audit], Outputs, in that order and no others.
-# AC3: each Inputs row names one file in backticks, relative to its stage
+# AC3: each Inputs entry (a table row or a list item; any other line is
+#   refused) names one file in backticks, relative to its stage
 #   folder, that is a tracked file not in a later stage, or an earlier
 #   stage's ../NN-slug/output/<name>/FILE that stage's Outputs lists; every
 #   file in a stage's references/ is one of its Inputs.
@@ -49,6 +50,33 @@ h2s() {
 }
 # body_rows: a Markdown table's rows after its header and separator.
 body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
+# input_entries: for each non-blank line of an Inputs section, `ENTRY<TAB>X`,
+# X the first cell of a table body row or what a list item (`- ` or `* `)
+# names, its leading code span when nothing after it holds a backtick; or
+# `BAD<TAB>LINE` for any other line, so nothing in Inputs goes unread. A
+# table is a header row, a separator row, then body rows, unindented.
+# shellcheck disable=SC2016 # a literal backtick, the Markdown code span
+input_entries() {
+  awk '
+    /^[ \t]*$/ { t = 0; next }
+    /^\|/ {
+      t++
+      if (t == 1) next
+      if (t == 2) {
+        if ($0 ~ /^\|([ \t]*:?-+:?[ \t]*\|)+[ \t]*$/) next
+        print "BAD\t" $0; next
+      }
+      c = $0; sub(/^\|/, "", c); sub(/\|.*/, "", c); gsub(/^[ \t]+|[ \t]+$/, "", c)
+      print "ENTRY\t" c; next
+    }
+    { t = 0 }
+    /^[-*] / {
+      c = substr($0, 3)
+      if (match(c, /^`[^`]*`/) && index(substr(c, RLENGTH + 1), "`") == 0) c = substr(c, 1, RLENGTH)
+      print "ENTRY\t" c; next
+    }
+    { print "BAD\t" $0 }'
+}
 # normalize PATH: resolve . and .. segments; empty when it leaves the root.
 normalize() {
   printf '%s\n' "$1" | awk -F/ '{
@@ -157,10 +185,14 @@ while IFS= read -r s <&3; do
   esac
 
   inputs=""
-  rows=$(section "$contract" Inputs | body_rows)
+  rows=$(section "$contract" Inputs | input_entries)
   while IFS= read -r row; do
     [ -n "$row" ] || continue
-    cell=$(printf '%s\n' "$row" | awk -F'|' '{ c = $2; gsub(/^[ \t]+|[ \t]+$/, "", c); print c }')
+    cell=${row#*	}
+    if [ "${row%%	*}" = BAD ]; then
+      refuse "$contract: an Inputs line is neither a table row nor a list item: $cell"
+      continue
+    fi
     path=${cell#\`}
     path=${path%\`}
     case "$cell" in
@@ -169,7 +201,7 @@ while IFS= read -r s <&3; do
     esac
     case "$path" in
       '' | *'`'*)
-        refuse "$contract: an Inputs row does not name one file in backticks: $cell"
+        refuse "$contract: an Inputs entry does not name one file in backticks: $cell"
         continue
         ;;
       *'*'* | *'?'* | *'['*)

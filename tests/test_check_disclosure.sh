@@ -201,6 +201,28 @@ inputs_case "an input above the workspace" '`../../../outside.txt`' "does not re
 inputs_case "an input from a later stage's output" '`../02-render/output/<name>/render.md`' "later"
 inputs_case "an input from a later stage's folder" '`../02-render/references/notes.md`' "later"
 inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' "one file in backticks"
+
+# Every non-blank line of Inputs is a table row or a list item naming one
+# file, judged by the same rules, or a refusal: nothing is skipped unread.
+TABLE='| File | Why |
+|---|---|
+| `../../shared/answers.tsv` | the fields |'
+list_case() { # DESCRIPTION REPLACEMENT NEEDLE
+  valid
+  fixture_replace "$R/$C1" "$TABLE" "$2"
+  refused "$1" "$3"
+}
+valid
+fixture_replace "$R/$C1" "$TABLE" '- `../../shared/answers.tsv`: the fields'
+passes "Inputs as a list item naming one file"
+list_case "a list item naming a glob" '- `../../stages/*`' "glob"
+list_case "a list item naming a directory" '- `../../`' "directory"
+list_case "a list item naming a stage that does not exist" '- `../09-later/output/<name>/x.md`' "does not resolve"
+list_case "a list item naming two files" '- `../../shared/answers.tsv` and `../../CONTEXT.md`' "one file in backticks"
+list_case "a prose line in Inputs" 'the whole repository' "the whole repository"
+list_case "an indented table row" "$(printf '%s\n' "$TABLE" | sed 's/^/  /')" "  | File | Why |"
+list_case "a table without its separator row" '| File | Why |
+| `../../shared/answers.tsv` | the fields |' "answers.tsv"
 inputs_case "an Inputs row naming two files" "$A \`../../shared/other.tsv\`" "one file in backticks"
 valid
 fixture_replace "$R/$C2" "| \`references/notes.md\` | notes |" \
