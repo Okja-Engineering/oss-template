@@ -66,10 +66,13 @@ run docs --report
 assert_status 0 "$ST" "docs --report runs"
 assert_contains "$OUT" "docs ran in report mode" "in report mode"
 
-# With no checks at all, there is nothing to refuse.
+# An empty bin/checks/ has nothing to refuse; a missing one cannot run.
+rm -f "$R"/bin/checks/*
+run
+assert_status 0 "$ST" "a workspace with an empty bin/checks/ passes"
+assert_contains "$OUT" "no checks run" "and says so"
 rm -rf "$R/bin/checks"
 run
-assert_status 0 "$ST" "a workspace with no checks passes"
-assert_contains "$OUT" "no checks run" "and says so"
+assert_status 2 "$ST" "a workspace with no bin/checks/ exits 2"
 
 assert_done

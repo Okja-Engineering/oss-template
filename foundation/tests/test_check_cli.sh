@@ -90,6 +90,46 @@ assert_contains "$OUT" "FAIL my fail" "  under its whole name"
 run "$N" 'my fail'
 assert_status 1 "$ST" "  and runs when named"
 
+# --- a check the dispatcher cannot schedule is an error, never "nothing ran" ---
+# header DIR NAME LINE3: a refusing check in DIR whose third line is LINE3.
+header() {
+  printf '#!/usr/bin/env bash\n# A check with a planted header\n%s\nexit 1\n' "$3" >"$1/bin/checks/$2"
+  chmod +x "$1/bin/checks/$2"
+}
+H=$(repo headers pass)
+for line in '# modes: tree,staged,range' '# modes:  ' '# modes: tree bogus' '# modes tree' 'set -u'; do
+  header "$H" planted "$line"
+  for args in "" "--staged" "--range HEAD HEAD"; do
+    # shellcheck disable=SC2086 # the mode's words
+    run "$H" $args
+    assert_status 2 "$ST" "third line '$line', ${args:-tree mode}: exits 2"
+  done
+  assert_contains "$OUT" "planted" "  and names the check"
+done
+header "$H" planted '# modes:  tree  staged range '
+run "$H"
+assert_status 1 "$ST" "known modes, however spaced, run the check"
+rm "$H/bin/checks/planted"
+cp -p "$H/bin/checks/pass" "$H/bin/checks/.hidden"
+run "$H" .hidden
+assert_status 2 "$ST" "a name with a leading dot is an unknown check"
+run "$H" ../checks/pass
+assert_status 2 "$ST" "a name holding a slash is an unknown check"
+run "$H" --staged pass --report
+assert_status 2 "$ST" "--report with another mode exits 2"
+run "$H" --list pass
+assert_status 2 "$ST" "--list with anything else exits 2"
+rm -rf "$H/bin/checks"
+run "$H"
+assert_status 2 "$ST" "a missing checks directory exits 2"
+assert_contains "$OUT" "no checks directory" "  and says so"
+run "$H" --list
+assert_status 2 "$ST" "--list with no checks directory exits 2"
+mkdir "$H/bin/checks"
+run "$H"
+assert_status 0 "$ST" "an empty checks directory has nothing to refuse"
+assert_contains "$OUT" "no checks run" "  and says so"
+
 # --- --list --------------------------------------------------------------------
 run "$R" --list
 assert_status 0 "$ST" "--list exits 0"

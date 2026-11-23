@@ -16,7 +16,8 @@
 #   --list                        each check and its description
 # Exit 0 when every check passes, 1 on a refusal, 2 when any check or the
 # dispatcher itself cannot run (outside a repository, an unknown check or
-# option).
+# option, no checks directory, a check whose third line names no mode or an
+# unknown one): a check it cannot schedule is never "nothing ran".
 
 dispatch_main() {
   local dir=$1 mode=tree base="" head="" msg="" arg top named=0
@@ -150,7 +151,8 @@ dispatch__run() {
   local dir=$1 mode=$2 named=$3 name file modes out st worst=0 ran=0 failed=0
   local -a selected=()
   shift 3
-  if [ "$named" = 0 ] && [ -d "$dir" ]; then
+  [ -d "$dir" ] || { printf 'bin/check: no checks directory: %s\n' "$dir" >&2; return 2; }
+  if [ "$named" = 0 ]; then
     for file in "$dir"/*; do
       [ -f "$file" ] && set -- "$@" "${file##*/}"
     done
@@ -163,7 +165,7 @@ dispatch__run() {
       return 2
     fi
     modes=$(dispatch__header "$file" modes) ||
-      { printf 'bin/check: %s has no "# modes:" third line\n' "$name" >&2; return 2; }
+      { dispatch__bad_modes "$name"; return 2; }
     case " $modes " in
       *" $mode "*) selected+=("$name") ;;
       *)
@@ -210,14 +212,38 @@ dispatch__header() {
   esac
   case "$2:$line" in
     desc:'# '?*) printf '%s\n' "${line#'# '}" ;;
-    modes:'# modes: '?*) printf '%s\n' "${line#'# modes: '}" ;;
+    modes:'# modes: '?*) dispatch__modes "${line#'# modes: '}" ;;
     *) return 1 ;;
   esac
 }
 
+DISPATCH_MODES="tree staged range commit-msg pr report"
+
+# dispatch__modes WORDS: WORDS, space-separated, when there is at least one
+# and each is a mode; exit 1 otherwise.
+dispatch__modes() {
+  local word known=""
+  while IFS= read -r word; do
+    [ -n "$word" ] || continue
+    case " $DISPATCH_MODES " in
+      *" $word "*) known="$known $word" ;;
+      *) return 1 ;;
+    esac
+  done <<EOF
+$(printf '%s\n' "$1" | tr ' ' '\n')
+EOF
+  [ -n "$known" ] || return 1
+  printf '%s\n' "${known# }"
+}
+
+dispatch__bad_modes() {
+  printf 'bin/check: %s: the third line is not "# modes: " and one or more of: %s\n' \
+    "$1" "$DISPATCH_MODES" >&2
+}
+
 dispatch__list() {
   local file desc
-  [ -d "$1" ] || return 0
+  [ -d "$1" ] || { printf 'bin/check: no checks directory: %s\n' "$1" >&2; return 2; }
   for file in "$1"/*; do
     [ -f "$file" ] || continue
     desc=$(dispatch__header "$file" desc) || desc="(no description)"
