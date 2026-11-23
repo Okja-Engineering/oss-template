@@ -214,6 +214,7 @@ Human docs are the source of truth; agent files point at them (§ 6.2). Agent fi
 15. Issue form required fields outside GitHub's web form.
 16. Script injection in workflows (`env:` is the convention; CodeQL's `actions` analysis reports it in public repositories).
 17. The code of conduct and the security acknowledgment target.
+18. Absolute links (upstream documents, GitHub URLs). `links` resolves relative links only, so an upstream heading rename breaks a link silently.
 
 ### 11. Measures (from the intent)
 
