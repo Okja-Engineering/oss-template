@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Run this repository's checks, in bin/checks/ (C4). `bin/check --list` lists them.
+set -u
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=lib/dispatch.sh
+. "$here/lib/dispatch.sh"
+dispatch_main "$here/checks" "$@"

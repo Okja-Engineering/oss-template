@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# A fixture check that refuses judged.txt holding BAD
+# modes: tree staged range
+export LC_ALL=C
+# shellcheck source-path=SCRIPTDIR source=../../../bin/lib/tree.sh
+. "$(dirname "$0")/../lib/tree.sh"
+src=$(tree_source)
+text=$(tree_cat "$src" judged.txt) || exit 2
+echo "examined judged.txt in $src"
+case "$text" in *BAD*) echo "judged.txt holds BAD"; exit 1 ;; esac
+exit 0

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A fixture check that cannot run
+# modes: tree staged range
+export LC_ALL=C
+echo "a required tool is missing"
+exit 2
