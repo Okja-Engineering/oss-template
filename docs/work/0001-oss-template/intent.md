@@ -1,6 +1,6 @@
 # 0001 oss-template: intent
 
-**Status:** accepted 2026-11-22 by the decider; amended 2026-11-22 by the decider (direction change: ICM workflow). **Decider:** Matthew Van Dusen. **Rests on:** [`research.md`](research.md), [`decisions.md`](decisions.md).
+**Status:** accepted 2026-11-22 by the decider; amended 2026-11-22 under ruling 14 by the chief of staff; pending the decider's acceptance. **Decider:** Matthew Van Dusen. **Rests on:** [`research.md`](research.md), [`decisions.md`](decisions.md).
 
 ## The problem
 
