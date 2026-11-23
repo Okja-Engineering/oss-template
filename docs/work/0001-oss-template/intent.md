@@ -1,48 +1,43 @@
 # 0001 oss-template: intent
 
-**Status:** accepted 2026-11-22 by the decider. **Decider:** Matthew Van Dusen. **Rests on:** [`research.md`](research.md).
+**Status:** accepted 2026-11-22 by the decider; amended 2026-11-22 by the decider (direction change: ICM workflow). **Decider:** Matthew Van Dusen. **Rests on:** [`research.md`](research.md), [`decisions.md`](decisions.md).
 
 ## The problem
 
-Okja intends to run every repository, private or public, like open source, yet none has a repeatable, AI-native contribution practice: `ai-native-sdlc` (2026-09-23) writes it down, but each new repository still starts from scratch. The seven earlier public ones, set up by hand, differ:
+Okja intends to run every repository, private or public, like open source, yet none has a repeatable, AI-native contribution practice: `ai-native-sdlc` writes one down, but each new repository starts from scratch. The seven earlier public ones, set up by hand, differ:
 
-- **Instructions for agents working in the repository:** three share one cross-agent file, one has editor rules, three have none.
-- **CI actions:** one pins by commit (since 2026-10-12); six use mutable tags, which Scorecard flags.
-- **Reverts:** one refuses git's revert subject at push and in CI. Bypassing its push hook skips its secret scan.
+- Agent instructions: three share a cross-agent file, one has editor rules, three have none.
+- One pins CI actions by commit (since 2026-10-12); six use mutable tags, which Scorecard flags.
+- One refuses git's revert subject at push and in CI; bypassing its push hook skips its secret scan.
 
 ## Terms
 
-- **The repository** (as agents and readers see it): its files plus the Okja documents they link to.
-- **Build PR:** the pull request building the template.
-- **Launch:** the dated announcement, after measure 3 and a real-generation measure 1 pass.
-- **Reserved decisions:** accepting documents and approving changes; a named person's only.
+- **Workspace:** this repository: a staged workflow an agent runs to create a **produced repository**, with an **operator** deciding at checkpoints.
+- **Build PR:** the PR that builds the workspace.
+- **Launch:** the dated announcement, after measures 1 and 3 pass on a real run.
+- **Reserved decisions:** accepting documents and approving changes. Only a named person makes them.
 
 ## Who it serves, and what changes
 
-- **Maintainers** of every new Okja repository start from one shared, self-checking foundation.
-- **Outside contributors**, where a repository has them, know up front what a change needs and who decides.
-- **Coding agents** find the process in the repository and are refused where a rule must hold.
+- **Operators** answer one questionnaire and decide at checkpoints instead of assembling repositories.
+- **Maintainers** of every produced repository start from one shared, self-checking foundation.
+- **Outside contributors**, where any exist, know up front what a change needs and who decides.
+- **Coding agents** find the process written down and are refused where a rule must hold.
 - **Assessors** can trace each enforcement claim to its check.
 
 ## How we'll know it worked
 
-Each measure states how it fails; the spec sets thresholds and fixtures.
+Each measure states how it fails; the spec sets thresholds and fixtures. Checks, not agents' accounts, carry the guarantees; the workflow ends in deterministic verification.
 
-1. **New repositories pass on their first commit.** Judged exactly as GitHub generates it, before any init or rename. Pass: every workflow run it triggers succeeds, one running `bin/check`; if nothing runs, it fails. *Gates the build PR* on a simulated GitHub generation (root commit "Initial commit", new repository), and *launch* on a real one.
+1. **Produced repositories pass on their first commit.** Judged on the first commit the workflow pushes: `bin/check` exits 0 and every workflow run it triggers concludes without failure, one running `bin/check`; if nothing runs, it fails. *Gates the build PR* via a scripted fixed-answer run, *launch* via an agent's real run.
 2. **Checks refuse only what they should.** Each check fails on a planted violation and passes, unbypassed, on legitimate unusual input: git's and GitHub's revert and merge subjects, git's reapply subject, and "Initial commit". *Gates the build PR.*
-3. **Agents follow the process untold.**
-   - **Setup:** a clean environment (no user- or org-level instructions, skills, plugins or memory; linked Okja documents reachable), a generated repository seeded with a small program, and a prompt naming only the change.
-   - **Doc fix:** only a PR.
-   - **Bug fix:** an issue with intent and validation method, a failing test before the fix, then a PR with evidence.
-   - **Capability:** intent, spec and plan, each followed by a person's decision; none starts while a `[NEEDS CLARIFICATION]` is open.
-   - **Always:** reserved decisions stay with a named person.
-
-   A person grades runs against a prewritten rubric, recording agent, version and configuration. Claude Code (current) must pass; one other cross-agent-file reader is reported, not gating. Rerun on process changes. *Gates launch.*
-4. **Claims and rules trace to a source.** In the repository's own files (excluding linked and work-in-progress documents), rule-stating sentences name their check or say they're unenforced; agent-instruction rules link to human-facing text. Pass: zero exceptions; counting checks flag planted bad cases. Limits: matching is by wording; enforcement and linked-text agreement go unverified. *Gates the build PR.*
-5. **A cold reader can answer the basics.** A senior engineer outside Okja, chosen by the decider and unnamed here, answers from the repository: which change needs which artifact, who decides, what is and isn't enforced, and the rule on AI-assisted contributions (an agent may evaluate, not approve; no tool or model credit). Pass: answers match a prewritten key, graded by someone else. *Reports after launch.*
-6. **It is used.** Every Okja repository created after launch, private or public, came from the template (per GitHub) or says why not in its first issue. Counted at 3 and 6 months. None qualifying is no result. *Reports after launch.*
-7. **PR templates get filled in.** In generated repositories with outside PRs, from launch, over the first 20 or 6 months (whichever first), count required sections deleted, empty or placeholder; above the spec's threshold fails. Okja's public repositories have had none; under 20, report without conclusion. *Reports after launch.*
+3. **Agents follow the process untold.** In a clean environment (no user- or org-level instructions, skills, plugins or memory; linked Okja documents reachable), an agent given only the workspace and "create a repository called X" completes every stage, stopping at each checkpoint and taking no reserved decision. In a produced repository, an agent prompted only with a change produces just what it needs: a PR for a doc fix; for a bug fix, an issue with intent and validation method, a failing test, then a PR with evidence; for a capability, intent, spec and plan, each decided by a person, none begun while a `[NEEDS CLARIFICATION]` is open. A person grades against a prewritten rubric, recording agent, version and configuration; Claude Code (current) must pass, one other cross-agent-file reader is reported; rerun on process changes. *Gates launch.*
+4. **Claims and rules trace to a source.** In the workspace's and produced repositories' own files (not linked or work-in-progress documents), rule-stating sentences name their check or say they're unenforced; agent rules link to human text. Pass: zero exceptions; counting checks flag planted bad cases. Limits: matching is by wording; enforcement and agreement go unverified. *Gates the build PR.*
+5. **Same answers, same foundation.** Two runs with identical questionnaire answers produce identical foundation files, apart from fields the spec lists as run-specific. *Gates the build PR.*
+6. **A cold reader can answer the basics.** A senior engineer outside Okja, chosen by the decider and unnamed here, answers from a produced repository and its linked documents: which change needs which artifact, who decides, what is enforced, and how AI-assisted contributions are handled. Pass: answers match a prewritten key, graded by someone else. *Reports after launch.*
+7. **It is used.** Every Okja repository created after launch records that the workflow produced it or says why not in its first issue; counted at 3 and 6 months. None qualifying is no result. *Reports after launch.*
+8. **PR templates get filled in.** From launch, in produced repositories with outside PRs (first 20 or 6 months), count required sections deleted, empty or placeholder; above the spec's threshold fails; under 20, report without conclusion. *Reports after launch.*
 
 ## What this deliberately won't do
 
-It won't restate the Okja process, choose a stack, promise a full Scorecard score at creation (it and some GitHub features differ in private repositories), give agents reserved decisions, retrofit existing repositories, add large-project governance, or sync generated repositories.
+In v1 it won't restate the Okja process, add stack-specific tooling beyond what the questionnaire selects, retrofit existing repositories, ship as a plugin (exportable means self-contained, runnable by any `AGENTS.md` reader), promise a full Scorecard score at creation (it and some GitHub features differ in private repositories), give agents reserved decisions, add large-project governance, or sync produced repositories.

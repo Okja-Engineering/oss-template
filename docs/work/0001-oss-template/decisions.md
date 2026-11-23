@@ -25,6 +25,28 @@ The decider's rulings during intake, in his words, and every call made for him u
 
 **Ruling 12, 18:35.** "I'm leaning on you a lot for some of these decision making. I don't need you to check with me. […] we talked a bunch about what we want to do and why, and I think that you should just build it." The intent is accepted. The review stops after the spec and after the plan are waived, and the chief of staff makes the spec and plan calls. Ruling 12 waives the stops, not the decisions: the spec and plan stay `draft`, and the decider accepts them, or doesn't, when he acks the build PR. Merging the build PR still needs his ack at its head.
 
+**Ruling 14, 19:46 (direction change; amends the accepted intent).** "I was kind of wondering if this repo should not just be an icm /claude repo where we provide exportable sequenced workflow for creating a new repo […] instead of a strict template is a starting point […] structured like process and can be consumed by a ai agent to create a new repo". Asked whether to build the template first and add the ICM workflow next, or switch to ICM now, he answered: "Switch to ICM now".
+
+What it changes:
+- The repository becomes an ICM workspace: a sequenced workflow that an agent runs to create a new Okja repository. It is no longer a strict GitHub template.
+- The intent is amended (its status line records the amendment). The spec and plan are rewritten.
+- The build of the template plan stops.
+- Calls 1–43 below were made for the template design. The rewritten spec says which of them still hold.
+
+**Ruling 15, 20:17 (approves the workflow sketch's shape).** "Yeah, I'd go with anything that's like agentic. I mean, that air quoted agentic workflow is that it's 60% deterministic, 30% orchestration, and 10% judgment." The design follows that split: scripts do the deterministic work, stage contracts orchestrate, and the agent's judgment is the small remainder.
+
+**Launch item, the decider's call: the name.** `oss-template` no longer describes the repository, since it is not a template and its output need not be open source. Renaming it is the decider's call, and nothing in the workspace depends on the current name.
+
+### Calls made under rulings 12 and 14 for the amended intent
+
+These were made by the chief of staff's drafting agent, as delegated ("I don't need you to check with me"). None is the decider's.
+- **v1 is stack-agnostic.** The only tooling is what the questionnaire selects; stack adaptation is a later stage.
+- **No retrofitting of existing repositories in v1.** A later stage may add it.
+- **"Exportable" means self-contained.** The workspace runs when any `AGENTS.md`-reading agent is pointed at it. There is no plugin or marketplace packaging in v1.
+- **Guarantees are deterministic.** The workflow ends in a verification stage. Identical questionnaire answers must produce identical foundation files (new measure 5).
+- **Measure 1 is gated two ways.** The build PR is gated by a scripted run with fixed answers, no agent involved. Launch is gated by an agent's real run.
+- **Measure 7 changes its record.** It counts a produced repository's own record that the workflow made it, replacing GitHub's template record, which an ICM-produced repository does not have.
+
 ## Calls made under ruling 12
 
 Each call below was made by the chief of staff (an agent), or drafted by an agent it dispatched and taken by the chief of staff at a review gate, delegated under ruling 12. None is the decider's. Each gives the option taken and what was rejected.
