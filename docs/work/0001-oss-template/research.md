@@ -337,6 +337,17 @@ Reject:
 - Its nesting rule, "The closest AGENTS.md to the edited file wins", as a description of Claude Code. Claude Code loads every `AGENTS.md` from the working directory upward, plus subdirectory ones on Read (memory.md "When Claude Code reads AGENTS.md").
 - Note that agents.md does not list Claude Code among supporting tools, although Claude Code supports it.
 
+### 19. Interpretable Context Methodology (github.com/RinDig/Interpretable-Context-Methodology, `02ba5d85c7`, MIT; added 2026-11-22 for the ICM direction)
+Take:
+- Numbered stage folders, each with a `CONTEXT.md` contract; one agent reads the right files at each step instead of a multi-agent framework.
+- Five layers loaded progressively: `CLAUDE.md` (always), `CONTEXT.md` (on entry), the stage contract (per task), reference material and working artifacts (selectively). "No agent reads everything."
+- Every stage output is a file a person can read and edit before the next stage runs.
+- "Configure the factory, not the product": a one-time `setup/questionnaire.md`.
+
+Depart (recorded in `decisions.md`):
+- Scripts carry the transforms that must be deterministic (ruling 15); ICM keeps all process in Markdown.
+- The rendered repository is a handoff outside `output/`, and Layer 0 is `CLAUDE.md` as `@AGENTS.md` with routing in `CONTEXT.md`.
+
 ---
 
 ## Verified facts
