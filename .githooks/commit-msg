@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Check the commit message with the workspace's bin/check commit-msg.
+set -u
+export LC_ALL=C
+root=$(git rev-parse --show-toplevel) || exit 2
+exec "$root/bin/check" commit-msg "$1"

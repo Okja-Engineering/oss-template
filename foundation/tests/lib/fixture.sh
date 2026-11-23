@@ -9,12 +9,15 @@
 FIXTURE_FOUNDATION=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 # Git in a fixture reads no global or system configuration, inherits no
-# repository from its caller (a hook's GIT_DIR, say) and has an identity.
+# repository from its caller (a hook's GIT_DIR, say) and has an identity; and
+# no check variable leaks in from the caller (CI sets CHECK_REF, say).
 fixture__isolate() {
   local v
   for v in $(git rev-parse --local-env-vars); do
     unset "$v"
   done
+  unset CHECK_MODE CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE CHECK_MSG_FILE \
+    PR_TITLE PR_BODY PR_NUMBER
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
   export GIT_AUTHOR_NAME='A Person' GIT_AUTHOR_EMAIL='person@example.invalid'
   export GIT_COMMITTER_NAME='A Person' GIT_COMMITTER_EMAIL='person@example.invalid'

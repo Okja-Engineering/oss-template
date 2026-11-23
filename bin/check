@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run the workspace's own checks, in bin/checks/, through the product's
+# dispatcher (C4). `bin/check --list` lists them.
+set -u
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../foundation/bin/lib/dispatch.sh
+. "$here/../foundation/bin/lib/dispatch.sh"
+dispatch_main "$here/checks" "$@"

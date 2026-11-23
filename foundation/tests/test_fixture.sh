@@ -57,6 +57,8 @@ fi
 # --- the caller's git configuration does not leak in -----------------------
 assert_eq "/dev/null" "${GIT_CONFIG_GLOBAL:-}" "global git configuration is ignored"
 assert_eq "" "${GIT_DIR:-}" "an inherited GIT_DIR is unset"
+assert_eq "" "$(CHECK_REF=main bash -c '. "$1"; printf %s "${CHECK_REF:-}"' _ "$TEST_DIR/lib/fixture.sh")" \
+  "an inherited CHECK_REF is unset"
 
 # --- mutations that change something pass -----------------------------------
 fixture_replace "$R/GOVERNANCE.md" "- A Person" "- Another Person"

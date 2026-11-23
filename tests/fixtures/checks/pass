@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A fixture check that passes
+# modes: tree staged range
+export LC_ALL=C
+echo "examined nothing, passed on purpose"
+exit 0

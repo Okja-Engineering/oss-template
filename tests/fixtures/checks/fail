@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A fixture check that refuses
+# modes: tree staged range
+export LC_ALL=C
+echo "planted refusal"
+exit 1

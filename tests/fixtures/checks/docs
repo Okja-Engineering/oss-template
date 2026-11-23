@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# A fixture check standing in for docs and its report
+# modes: tree report
+export LC_ALL=C
+echo "docs ran in $CHECK_MODE mode"
+exit 0

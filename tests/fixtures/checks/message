@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# A fixture check that refuses a commit message holding BAD
+# modes: commit-msg
+export LC_ALL=C
+echo "examined $CHECK_MSG_FILE"
+grep -q BAD "$CHECK_MSG_FILE" && { echo "the message holds BAD"; exit 1; }
+exit 0
