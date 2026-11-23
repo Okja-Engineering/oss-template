@@ -4,168 +4,122 @@
 
 ## Approach
 
-Build the checks first, then the things they check. One task is one commit, and each task starts with the test that fails without it. Work runs as four packages with disjoint write sets (A–D) after one shared first task (A1), then a serial integration package (E). Packages branch from `feat/initial-template` after A1 lands and merge back into it; E runs on the merged branch, which becomes the build PR.
+One builder, serially, on `feat/initial-template`. One task is one commit, in the order below. Each task starts with the test named in its row, seen failing, then the change that makes it pass. **Every commit is green**: before committing, the builder runs `CI=true bin/check` and `tests/run-all.sh` (once they exist) under macOS `/bin/bash` 3.2, and both pass. The order makes that possible: a check lands only after the files it judges exist, or in the same commit; a human doc that names a script lands after the script.
 
-How this fits what already exists:
+Commits are conventional, carry no `Co-Authored-By` or tool credit, and neither does the build PR body (upstream `AGENTS.md` § Commits).
 
-- **The repository today** holds `README.md`, `LICENSE` and this folder. `README.md` is rewritten (D5). `LICENSE` is untouched. `intent.md` and `research.md` are untouched; the intent's status line already conforms to contract C1.
-- **Taken from upstream, where it is sound:** `tests/run-all.sh` (including its tracked-suite cross-check), `tests/lib/assert.sh`, the throwaway-repository-and-bare-remote pattern of `tests/test_hooks.sh`, the fail-closed `never-publish` list, the built-in secret patterns, "prove the suite can fail", `permissions: contents: read`.
-- **Upstream defects fixed at the root, not patched:** one subject classifier used by every enforcement point (upstream had three copies of the regex that disagreed on merges, and all three refuse `Revert "…"`); attribution signatures narrowed; imperative check dropped; actions pinned by SHA.
-- **Structure that keeps packages independent:** every rule lives in `bin/check`; git hooks and CI call it; Claude Code hooks share its status-line library (`bin/lib/docs.sh`). Nothing parses a status line, a subject, or frontmatter in a second place.
+How this fits what exists:
+
+- **The repository today** holds `README.md`, `LICENSE`, and this folder. `README.md` is rewritten (T32); `LICENSE`, `intent.md` and `research.md` are untouched. The intent's status line already conforms to C1, and `GOVERNANCE.md` (T16) lands before the `docs` check (T17) that reads its § Deciders.
+- **Taken from upstream where sound:** `tests/run-all.sh` with its tracked-suite cross-check, `tests/lib/assert.sh`, the throwaway-repository-and-bare-remote hook tests, the fail-closed `never-publish` list, the built-in secret patterns, the runner self-test, read-only workflow permissions.
+- **Upstream defects fixed at the root:** upstream had three copies of the subject regex that disagreed on merges, and all three refuse `Revert "…"`; here one classifier serves every enforcement point. Also: tool-credit matching narrowed, imperative check dropped, actions pinned by SHA.
+- **One parser per format.** Subjects: `bin/lib/classify.sh`. Status lines: `bin/lib/docs.sh`, used by `bin/check`, `bin/new` and `guard-docs.sh`. Frontmatter: inside `bin/check`'s `agents` check. Git hooks and CI call `bin/check`; they hold no rules of their own. Claude Code hooks hold their own command patterns (`guard-bash.sh`), which no other component needs.
+
+**Before T9** the builder needs `shellcheck` installed locally (`brew install shellcheck`; not a repository dependency). Installing it is a change to the machine, so it needs the chief of staff's go-ahead.
 
 ## File tree
 
 ```
-AGENTS.md  CLAUDE.md                                   C
-README.md  CONTRIBUTING.md  GOVERNANCE.md  SECURITY.md
-CODE_OF_CONDUCT.md  CHANGELOG.md                       D
-LICENSE                                                (unchanged)
-.gitignore                                             A
-.claude/settings.json                                  C
-.claude/hooks/{guard-bash,guard-docs,session-start}.sh C
-.claude/hooks/lib/input.sh                             C
-.claude/rules/{docs,workflows,scripts}.md              C
-.claude/skills/{new-work,new-rfc,new-adr}/SKILL.md     C
-.claude/agents/reviewer.md                             C
-.githooks/{commit-msg,pre-commit,pre-push,never-publish}  A
-.github/{CODEOWNERS,labels.yml,dependabot.yml,pull_request_template.md}  B
-.github/ISSUE_TEMPLATE/{bug,change,tracking,config}.yml                  B
-.github/workflows/{ci,pr,labels,scorecard,codeql}.yml                    B
-bin/check  bin/setup  bin/lib/**                       A
-bin/new  bin/init                                      D
-docs/adr/{0001..0005}-*.md                             D
-docs/rfcs/README.md                                    D
-docs/templates/{intent,spec,plan,rfc,adr}.md           D
-docs/work/0001-oss-template/{research,intent,spec,plan}.md  (exists)
-tests/run-all.sh  tests/lib/**  tests/fixtures/runner/**    A
-tests/test_docs_lib.sh  tests/test_run_all.sh  tests/test_check_*.sh
-tests/test_githooks.sh  tests/test_setup.sh                 A
-tests/test_github.sh                                   B
-tests/test_claude_hooks.sh  tests/fixtures/hooks/**    C
-tests/test_new.sh  tests/test_init.sh                  D
-tests/test_generation.sh                               E
+AGENTS.md  CLAUDE.md  README.md  CONTRIBUTING.md  GOVERNANCE.md  SECURITY.md
+CODE_OF_CONDUCT.md  CHANGELOG.md  LICENSE  .gitignore
+.claude/settings.json
+.claude/hooks/{guard-bash,guard-docs,session-start}.sh
+.claude/rules/{docs,workflows,scripts}.md
+.claude/skills/{new-work,new-rfc,new-adr}/SKILL.md
+.claude/agents/reviewer.md
+.githooks/{commit-msg,pre-commit,pre-push,never-publish}
+.github/{CODEOWNERS,labels.yml,dependabot.yml,pull_request_template.md}
+.github/ISSUE_TEMPLATE/{bug,change,tracking,config}.yml
+.github/workflows/{ci,pr,labels,scorecard}.yml
+bin/{check,setup,new,init}  bin/lib/{docs,classify}.sh
+docs/adr/{0001..0005}-*.md  docs/rfcs/README.md  docs/templates/{intent,spec,plan,rfc,adr}.md
+docs/work/0001-oss-template/{research,intent,spec,plan}.md
+tests/run-all.sh  tests/lib/{assert,fixture}.sh  tests/fixtures/{runner,hooks}/**
+tests/test_*.sh   (one per row below that names one)
 ```
 
-## Shared contracts
+## Tasks
 
-Packages build against the spec's contracts, not against each other's code: **C1** status line and decider field; **C2** names and directories; **C3** frontmatter subset; **C4** `bin/check` interface and exit codes; **C5** heading anchors in human docs; **C6** hook input reader. Two more, stated here:
+| # | Task (one commit) | Test written first | ACs |
+|---|---|---|---|
+| T1 | `tests/run-all.sh`, `tests/lib/assert.sh`, runner fixtures | `test_run_all.sh`: fails on the failing fixture and on a tracked suite missing from the tree; passes on the passing one | AC27, AC43 |
+| T2 | `bin/lib/docs.sh` (C1) | `test_docs_lib.sh`: each C1 state, a bad state, the accepted intent's line; deciders "Matthew Van Dusen." and "J. Smith."; markers bare, in a code span, in a fence | AC2, AC5–AC7 |
+| T3 | `tests/lib/fixture.sh`: minimal valid repository in a temp dir; mutations that change nothing fail the suite | `test_fixture.sh`: the fixture has every file C1–C4 need; a no-op mutation is reported | AC43 |
+| T4 | `bin/check` dispatcher: C4 modes, `--skip`, `--list`, exit codes, range resolution | `test_check_cli.sh`: 0/1/2 cases, unknown check, outside a repo, empty and all-zero `BASE` | AC38 |
+| T5 | `bin/lib/classify.sh`; `commits`; `commit-msg` mode (comment lines and scissors stripped; UTF-8 locale pinned) | `test_check_commits.sh`: every AC8 and AC9 case as real commits (root, amended root, two-parent, amended merge, `git revert`, `Reapply` via `git commit -m`) | AC8, AC9 |
+| T6 | `pr` mode | `test_check_pr.sh`: titles from AC8/AC9; body with tool credit; body with a person's `Co-authored-by:` | AC28 |
+| T7 | `never-publish`, `.githooks/never-publish`, `.gitignore` | `test_check_never_publish.sh`: staged `.scuba/x`, pushed match, missing list, comment-only list, deletion passes, every entry in `.gitignore` | AC32 |
+| T8 | `secrets` | `test_check_secrets.sh`: each pattern family, built at runtime, in a range and in the index; a clean diff passes | AC33 |
+| T9 | `scripts` | `test_check_scripts.sh`: mode `100644` script, syntax error, `shellcheck` finding, sourced lib not mode-checked, `never-publish` ignored, invalid `settings.json`, missing hook script | AC15, AC37 |
+| T10 | `workflows` | `test_check_workflows.sh`: tag ref, SHA without comment, no top-level permissions, `pull_request_target`; `permissions: {}` and `./` actions pass | AC30 |
+| T11 | `.githooks/commit-msg`, `.githooks/pre-commit` | `test_githooks.sh`: bad subject refused; `git revert`, `git merge`, root `Initial commit`, amended root all commit; staged `.scuba/x` refused | AC9, AC31 |
+| T12 | `.githooks/pre-push` | `test_githooks.sh`: fixup refused; new branch checks `--not --remotes`; ref deletion skipped; `docs` runs with no remote ref | AC31 |
+| T13 | `bin/setup` | `test_setup.sh`: `core.hooksPath` set; versions and each tool's installed/missing printed; second run changes nothing | AC34 |
+| T14 | `.claude/hooks/guard-bash.sh` | `test_claude_hooks.sh`: every AC17 refusal and pass as JSON in `tests/fixtures/hooks/`; `jq` hidden from `PATH` exits 2; garbage input exits 2 | AC16, AC17 |
+| T15 | `.claude/hooks/guard-docs.sh` | ADR body edit (2); status-line-only supersede (0); `Write` moving a spec to `accepted` (2); `MultiEdit` whose second edit adds a `**Decider:**` (2); non-doc edit (0) | AC16, AC18 |
+| T16 | `GOVERNANCE.md` | `test_docs_lib.sh`: decider lookup against the real file finds `Matthew Van Dusen` | AC40 |
+| T17 | `docs` and `docs --report` | `test_check_docs.sh`: AC2–AC7 cases, incl. plan with no spec, edited accepted ADR, ADR rename, duplicate ADR number, dangling `superseded by`, RFC `0000-` with `PR_NUMBER`, RFC `accepted` without decider, RFC bad status; exact report lines | AC2–AC7 |
+| T18 | `.claude/hooks/session-start.sh` | prints the report for an in-flight fixture folder; nothing otherwise; exits 0 when `bin/check` fails | AC19 |
+| T19 | `.claude/settings.json` | `test_claude_hooks.sh` asserts permissions, matchers, `onFailure`; `scripts` passes | AC15 |
+| T20 | `docs/templates/*`, `bin/new` | `test_new.sh`: every AC35 command; missing or marked predecessor, existing target, bad slug refused; template length, status line, prompts | AC35 |
+| T21 | ADRs 0001–0005, `docs/rfcs/README.md` | `docs` passes; `test_new.sh` asserts each ADR has the four sections and is `proposed` | AC6, AC7 |
+| T22 | Issue forms, `config.yml` | `test_github.sh`: keys, `required: true`, `blank_issues_enabled: false`, absolute `https` contact links | AC22 |
+| T23 | `pull_request_template.md` | `test_github.sh`: file equals `## Summary` block + upstream text pinned in the test | AC23 |
+| T24 | `CODEOWNERS`, `labels.yml`, `workflows/labels.yml` | exact label set; workflow has checkout, `contents: read`, `issues: write`, deletion on, no path filter | AC24, AC25 |
+| T25 | `dependabot.yml` | prefix `chore`, no scope, no groups, label; `bin/check pr` passes the longest real title | AC26 |
+| T26 | `workflows/ci.yml` | `test_github.sh`: `fetch-depth: 0`, `env:` values, range call, macOS `--skip scripts`, runner self-test; `workflows` passes | AC27 |
+| T27 | `workflows/pr.yml` | event types; `bin/check pr` with `env:` title and body | AC28 |
+| T28 | `workflows/scorecard.yml` (pins re-resolved with `gh api`) | private-repository condition; `workflows` passes | AC29 |
+| T29 | `claims` | `test_check_claims.sh`: the AC13 pair; ADR and `docs/work/` out of scope; zero exceptions on the tree | AC13 |
+| T30 | `CONTRIBUTING.md` | `claims` passes; `test_github.sh` asserts the § What is enforced rows equal `bin/check --list` | AC1, AC39 |
+| T31 | `SECURITY.md`, `CODE_OF_CONDUCT.md` | `claims` passes; no email address | AC41 |
+| T32 | `README.md` rewrite, `CHANGELOG.md` | `claims` passes; `template-only` markers balanced | AC41 |
+| T33 | `trace` | `test_check_trace.sh`: rule file with no source, unresolved `source:`, unresolved anchor, unlinked "never" line; "never" in a code span passes | AC12 |
+| T34 | `AGENTS.md` | `trace` passes; three gates present | AC1, AC11 |
+| T35 | `agents`, `CLAUDE.md` | `test_check_agents.sh`: `CLAUDE.md` with extra content, 101-line `AGENTS.md`, unquoted glob, CSV `paths`, unknown key, skill name ≠ directory, 1,025-character description, subagent with an unknown key | AC10, AC14, AC20, AC21 |
+| T36 | `.claude/rules/*.md` | `agents` and `trace` pass | AC14 |
+| T37 | Skills `new-work`, `new-rfc`, `new-adr` | `agents` and `trace` pass | AC20 |
+| T38 | `.claude/agents/reviewer.md` | `agents` and `trace` pass | AC21 |
+| T39 | `bin/init` | `test_init.sh`: bad name, dirty tree, `config.yml` rewrite with and without `origin`, no other file rewritten, Deciders placeholder, blocks stripped, deletions staged, nothing committed, itself gone, `bin/check` passes after | AC36 |
+| T40 | `tests/test_generation.sh` | root `Initial commit` from `git archive HEAD` passes `bin/check --range "" HEAD` and `tests/run-all.sh` (recursion guard); passes again after `bin/init demo`; email allowlist | AC41, AC42, AC43 |
 
-- **Check names** are exactly those in spec § 10. `CONTRIBUTING.md` § What is enforced (D) and `bin/check --list` (A) use the same names.
-- **Fixtures.** `tests/lib/fixture.sh` (A1) builds a minimal valid repository in a temp directory (agent files, human docs with C5 headings, `GOVERNANCE.md` § Deciders, one work folder, `.githooks/never-publish`, a copy of `bin/`). Every check suite mutates one thing in it. A mutation that changes nothing fails the suite (upstream's `mutate.sh` lesson). Secret-shaped strings are assembled at runtime, never committed.
+## Gate steps before the build PR is ready (no commits)
 
-## Packages
+- **G1** On the installed Claude Code (2.1.221): `.claude/settings.json` loads with `onFailure` present, and each hook fires under `claude -p` on one refused and one allowed call. Record the version. If `onFailure` is rejected rather than ignored, drop it and say so in the PR.
+- **G2** A person runs `/memory` and confirms each rule loads only for its paths.
+- **G3** The reviewer subagent's dry run on the build PR, output pasted into the PR.
+- **G4** Simulated generation (AC42): two throwaway repositories, public and private; root commit `Initial commit` pushed as `main`; run conclusions and URLs in the PR; repositories deleted. Creating and deleting them needs the chief of staff's go-ahead.
 
-### A1 — shared first task (serial, before everything)
-
-Write set: `tests/run-all.sh`, `tests/lib/assert.sh`, `tests/lib/fixture.sh`, `tests/fixtures/runner/**`, `tests/test_run_all.sh`, `tests/test_docs_lib.sh`, `bin/lib/docs.sh`.
-
-- **A1** Test harness and status-line library. *Tests first:* `test_run_all.sh` (runner exits non-zero on the failing fixture and on a missing tracked suite); `test_docs_lib.sh` (`doc_state` on the accepted intent, each C1 state, a bad state; `doc_decider` on "Matthew Van Dusen." and "J. Smith."; `doc_markers` counting a bare marker and ignoring one in a code span or fence). *Serves:* C1, AC5, AC65.
-
-### Package A — `bin/check`, git hooks, setup
-
-Write set: `bin/check`, `bin/setup`, `bin/lib/**`, `.githooks/**`, `.gitignore`, `tests/test_check_*.sh`, `tests/test_githooks.sh`, `tests/test_setup.sh`, `tests/lib/**`. Depends on: A1.
-
-| Task | Test written first | ACs |
-|---|---|---|
-| A2 `bin/check` dispatcher: C4 modes, `--list`, exit codes 0/1/2, range resolution (empty or zero base = all of `HEAD`) | `test_check_cli.sh` | C4 |
-| A3 Subject classifier (`bin/lib/classify.sh`); `commits`; `commit-msg` and `pr` modes | `test_check_commits.sh`, `test_check_pr.sh`: every subject in AC17–AC19 and both bodies in AC18, as real commits (root, two-parent, `git revert`, revert of a revert) | AC17–AC20, AC44 |
-| A4 `work` and `work --report` | `test_check_work.sh`: plan with no spec; spec while intent has a marker; accepted doc with a marker; duplicate number; bad folder name; undeclared decider; report lines and empty report | AC4–AC8 |
-| A5 `adr` and `rfc` | `test_check_adr.sh`: edited accepted ADR (fail), status-line-only supersede (pass), deletion, bad transition, dangling `superseded by`, root base; `test_check_rfc.sh`: `0000-` with `PR_NUMBER`, wrong number, right number | AC10, AC11, AC13–AC15 |
-| A6 `agents`, `trace`, `claims` | `test_check_agents.sh`: `CLAUDE.md` with extra content, 101-line `AGENTS.md`, budget overflow, unquoted glob, CSV `paths`, unknown key, skill name ≠ directory; `test_check_trace.sh`: rule file with no source, unlinked "never" line, "never" in a code span (pass), agent-only line (counted); `test_check_claims.sh`: the AC26 pair | AC21, AC22, AC24–AC28, AC67 |
-| A7 `links`, `workflows`, `scripts` | `test_check_links.sh`, `test_check_workflows.sh` (tag ref, SHA without version comment, no top-level permissions, `pull_request_target`), `test_check_scripts.sh` (mode `100644`, syntax error, settings naming a missing hook) | AC30, AC46, AC54 |
-| A8 `secrets`, `never-publish`, `.githooks/never-publish`, `.gitignore` | `test_check_secrets.sh` (runtime-built key in range and in index), `test_check_never_publish.sh` (`.scuba/x` staged, missing list, comment-only list, deletion allowed) | AC48 |
-| A9 `.githooks/{commit-msg,pre-commit,pre-push}`, `bin/setup` | `test_githooks.sh`: throwaway repo and bare remote; `git revert`, `git merge`, root `Initial commit` all pass the hooks; bad subject refused at commit; fixup pushed refused; `.scuba/` commit refused. `test_setup.sh`: run twice, same config | AC18, AC47, AC49 |
-
-### Package B — `.github/`
-
-Write set: `.github/**`, `tests/test_github.sh`. Depends on: A1 (assert library). Uses the C4 interface in workflows; A need not be merged to write them.
-
-| Task | Test written first | ACs |
-|---|---|---|
-| B1 Issue forms and `config.yml` | `test_github.sh`: each form has `name`, `description`, `body`; validation method `required: true`; `blank_issues_enabled: false`; contact links | AC37 |
-| B2 PR template and `CODEOWNERS` | headings and their order exactly as AC38; no "AI" heading; `CODEOWNERS` line | AC38, AC39 |
-| B3 `labels.yml`, `workflows/labels.yml`, `dependabot.yml` | every label name matches `^[CASP]-`; the AC40 set; one color per prefix; labels workflow has no `paths:`; Dependabot prefix, scope, group, label | AC40–AC42 |
-| B4 `workflows/ci.yml`, `workflows/pr.yml` | jobs, matrix, `bin/check --range`, runner self-test, `env:` for event values, `pr.yml` event types | AC43, AC44 |
-| B5 `workflows/scorecard.yml`, `workflows/codeql.yml` | private-repository job condition; `languages: actions`; `bin/check workflows` passes on `.github/workflows/` once A7 is merged (skipped with a notice before) | AC45, AC46 |
-
-B re-resolves every pin with `gh api` at build time (research § Action pins lists the 2026-11-22 values and the codeql `releases/latest` trap).
-
-### Package C — `.claude/`, `AGENTS.md`, `CLAUDE.md`
-
-Write set: `.claude/**`, `AGENTS.md`, `CLAUDE.md`, `tests/test_claude_hooks.sh`, `tests/fixtures/hooks/**`. Depends on: A1 (`bin/lib/docs.sh`, assert library); A4 for C4's `work --report` output; A6 to validate its files; D's headings (C5) for links to resolve. C writes against the contracts and goes green at integration where it can't sooner.
-
-| Task | Test written first | ACs |
-|---|---|---|
-| C1 `.claude/hooks/lib/input.sh` | `test_claude_hooks.sh`: fields with escaped quotes, backslashes, `\n`, Unicode; pretty-printed input; missing field; garbage input exits 2 through a caller | C6, AC34 |
-| C2 `guard-bash.sh` | every refusal and pass in AC32 as JSON samples in `tests/fixtures/hooks/`; current branch set in a temp repo | AC32 |
-| C3 `guard-docs.sh` | edit body of accepted ADR (2); status-line-only edit (0); `Write` to accepted ADR (2); setting `accepted` on a draft spec (2); edit to a non-doc file (0) | AC31 |
-| C4 `session-start.sh` | prints the report for an in-flight fixture folder; prints nothing when none; never exits 2 | AC33 |
-| C5 `.claude/settings.json` | `bin/check scripts` passes; permissions and hook matchers as AC30 (asserted in `test_claude_hooks.sh`) | AC30 |
-| C6 `AGENTS.md`, `CLAUDE.md` | `bin/check agents trace` fail on their absence, then pass | AC2, AC21–AC23 |
-| C7 `.claude/rules/*.md` | `bin/check agents trace`; `/memory` check recorded in the PR by a person | AC25, AC28, AC29 |
-| C8 Skills `new-work`, `new-rfc`, `new-adr` | `bin/check agents trace` | AC35 |
-| C9 `.claude/agents/reviewer.md` | `bin/check agents trace`; one dry run against this PR's diff and spec, output pasted in the PR | AC36 |
-
-### Package D — human docs, ADRs, templates, `bin/new`, `bin/init`
-
-Write set: `README.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `docs/adr/**`, `docs/rfcs/**`, `docs/templates/**`, `bin/new`, `bin/init`, `tests/test_new.sh`, `tests/test_init.sh`. Depends on: A1 (`bin/lib/docs.sh`, assert library). Its enforcement claims name scripts from A and C; `claims` goes green at integration.
-
-| Task | Test written first | ACs |
-|---|---|---|
-| D1 `docs/templates/*`, `bin/new` | `test_new.sh`: each AC50 command; refusal on a missing or marked predecessor, existing target, bad slug; template length, status line and prompts | AC50, AC51 |
-| D2 `CONTRIBUTING.md` | `bin/check links claims` on the C5 anchors; the § 10 check names and not-enforced list present | AC1, AC3, AC9, AC12, AC20, AC56 |
-| D3 `GOVERNANCE.md` | `test_docs_lib.sh`'s decider lookup against the real file | AC57 |
-| D4 `SECURITY.md`, `CODE_OF_CONDUCT.md` | `bin/check links`; no `@` address | AC58, AC59 |
-| D5 `README.md` rewrite, `CHANGELOG.md` | `bin/check links`; template-only markers balanced | AC55, AC60 |
-| D6 ADRs 0001–0005, `docs/rfcs/README.md` | `bin/check adr`; each `proposed`; no relative link into `docs/work/0001-oss-template/` and no `Okja-Engineering/oss-template` slug (both are removed or rewritten by `bin/init`; ADRs cite the template by absolute URL instead) | AC14, AC16 |
-| D7 `bin/init` | `test_init.sh`: bad name, dirty tree, slug rewrite with and without an `origin` remote, blocks stripped, deletions staged, nothing committed, itself gone | AC52 |
-
-### Package E — integration (serial, after A–D merge)
-
-Write set: `tests/test_generation.sh`, plus any file for cross-package fixes (one fix per commit, in the owning package's terms).
-
-| Task | Test written first | ACs |
-|---|---|---|
-| E1 `tests/test_generation.sh` | root commit from `git archive HEAD` passes `bin/check --range "" HEAD` and `tests/run-all.sh`; after `bin/init demo` both pass again; email allowlist | AC53, AC61, AC63 |
-| E2 Whole tree green | `bin/check` and `tests/run-all.sh` on bash 3.2 (`/bin/bash` on macOS) and bash 5; `trace` and `claims` at zero exceptions; hooks smoke-tested once under `claude -p` on the installed version | AC65, AC67 |
-| E3 Simulated generation | two throwaway repositories (public, private), root commit `Initial commit` pushed as `main`; run conclusions and URLs recorded in the build PR; repositories deleted. Creating and deleting them needs the chief of staff's go-ahead | AC62 |
-
-## ADRs the build creates
-
-All `proposed`; written in D6. They cite this folder by absolute URL to the template repository.
+## ADRs the build creates (T21, all `proposed`)
 
 | ADR | Decision |
 |---|---|
-| 0001 | Record decisions as ADRs; once decided, only the status line changes; reversal is a new ADR that supersedes |
+| 0001 | Record decisions as ADRs; once decided, only the status line changes; a reversal is a new ADR |
 | 0002 | `AGENTS.md` is the single agent file; `CLAUDE.md` is `@AGENTS.md` |
 | 0003 | A capability goes through intent, spec and plan in a work folder, each decided by a named person |
-| 0004 | Agent files only link to, summarize or operationalize human docs; `bin/check trace` checks it |
-| 0005 | Subjects that git or GitHub writes are exempt from the commit format; one classifier everywhere (diverges from upstream) |
+| 0004 | Agent files only link to, summarize or operationalize human docs; `trace` checks it |
+| 0005 | Subjects git or GitHub writes pass one classifier; tool credit, not human co-authorship, is banned |
+
+`bin/init` deletes them with this folder, so they may link here relatively; `CONTRIBUTING.md` links them by URL to the template.
 
 ## Risks
 
-- **R1, most likely to need rework: the wording-based checks (`trace`, `claims`).** False positives will push authors to reword or reach for `agent-only`. E2 tunes the vocabulary against the real docs; if it needs more than one round, narrow the vocabulary rather than add exceptions.
-- **R2 Claude Code drift.** Hooks are tested against the documented input shape on 2.1.221; a format change makes them fail closed, which blocks every Bash call until fixed. Loud, not silent, by design. `paths:` behaviour is checked by a person with `/memory` after upgrades.
-- **R3 Run conclusion when every job is skipped** (Scorecard and CodeQL on a private repository) is not documented. E3 observes it. If it is anything but `success` or `skipped`, add a one-step job to each that always runs and prints why analysis was skipped.
-- **R4 Review rule versus a single decider.** GitHub does not let a person approve their own PR. If the decider authors PRs (directly or through an agent on their account), a ruleset requiring an approving review blocks every merge. The ruleset's review requirement is a rollout decision.
-- **R5 Number races.** Two open PRs can take the same work-folder or ADR number; the second to merge turns `main` red. Mitigation: ruleset "require branches to be up to date"; renumber on conflict.
-- **R6 Secret patterns matching the template's own text.** E1 scans the whole root commit; reword, don't exempt.
-- **R7 macOS minutes** on private generated repositories (D19).
-- **R8 Pins go stale.** Dependabot proposes updates as `chore(deps)` PRs, which pass the classifier.
+- **R1, most likely to need rework: the wording-based checks (`trace`, `claims`).** False positives push authors to reword. If T29–T34 need more than one round of tuning, narrow the vocabulary rather than add exceptions; there is no escape hatch.
+- **R2 Claude Code drift.** Hooks are tested against the documented input on 2.1.221; current is 2.1.296 or later. A format change makes hooks fail closed, blocking every Bash call until fixed: loud by design. Re-verification is a launch item.
+- **R3 All-skipped run conclusion** (Scorecard on a private repository) is undocumented. G4 observes it; if it is not `success` or `skipped`, add an always-running step that prints why analysis was skipped.
+- **R4 Number races.** Two open PRs can take the same work-folder or ADR number; the second to merge turns `main` red. Mitigation: require branches to be up to date; renumber.
+- **R5 Secret patterns matching the template's own text.** T40 scans the whole root commit; reword, don't exempt.
+- **R6 Upstream PR template drift.** T23 pins upstream's text in the test; an upstream change needs a matching change here.
 
-## Rollout
+## Rollout (the decider's steps; listed, not executed)
 
-The decider's steps, listed and not executed here:
+1. Accept or amend this spec and plan; decide ADRs 0001–0005.
+2. Set the code of conduct contact; create the `maintainers` team with write access.
+3. Post `Ack at <head SHA>` on the build PR; merge with rebase or a merge commit to keep one task per commit, quoting the ack.
+4. Mark `oss-template` as a template repository; run the labels workflow (`gh workflow run labels.yml`).
+5. Organization or repository settings: turn off "Allow GitHub Actions to create and approve pull requests"; ruleset on the default branch requiring a pull request, checks `check (ubuntu-latest)`, `check (macos-latest)`, `pr-text`, and blocking force push and deletion; a required review only where two or more deciders are listed.
+6. Turn on private vulnerability reporting for new public repositories.
+7. Re-verify hooks on current Claude Code; then M1 on a real generation of each visibility and M3 (AC42, AC44). Launch after both pass.
+8. After launch: M5 key written before the reader starts; M6 and M7 counts scheduled.
 
-1. Accept or amend this spec and plan, and decide ADRs 0001–0005.
-2. Set the code of conduct reporting contact; create the `maintainers` team with write access (spec § Reserved for the decider).
-3. Merge the build PR with rebase or a merge commit, keeping one task per commit (a squash also passes the checks).
-4. Mark `oss-template` as a template repository.
-5. Run the labels workflow on the template (`gh workflow run labels.yml`); it also runs on the merge push.
-6. Organization ruleset for template-generated repositories (by name pattern or custom property): pull request required; required checks `check (ubuntu-latest)`, `check (macos-latest)`, `pr-text`; force push and deletion blocked on the default branch; review requirement per R4.
-7. Organization setting: private vulnerability reporting on for new public repositories.
-8. Generate one public and one private repository with "Use this template" and record M1 (AC64).
-9. Build the M3 kit and run it (AC66). Launch after both pass.
-10. After launch: write the M5 answer key before the reader starts, and schedule the M6 and M7 counts (AC68–AC70).
-
-Upstream follow-ups, to raise as issues in `ai-native-sdlc` and not done here: the Summary line in the PR template; the generated-subject exemption (ADR-0005); SHA-pinned actions; narrower attribution signatures; the caveats on the Kubernetes template figure (research source 1).
+**Upstream follow-ups** (issues in `ai-native-sdlc`, not done here): the `## Summary` section; the generated-subject exemption; tool credit versus human `Co-authored-by:`; approval as an `Ack at <SHA>` comment rather than the merge; the `CLAUDE.md` import shim for Claude Code before 2.1.277; issue forms; dropping the imperative-mood check; deciders listed in `GOVERNANCE.md` and named in a status line; SHA-pinned actions; the caveats on the Kubernetes template figure (research source 1).
