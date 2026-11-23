@@ -12,7 +12,7 @@ Repo state, for context: `Okja-Engineering/oss-template` is **public** and `is_t
 4. **The Kubernetes "~92% ignored" figure is real, but narrower than our docs state it.** See source 1 and *Where sources disagree*.
 5. **Okja removed AI-use disclosure on 2026-10-03, while Rust and Kubernetes both require it.** This is a policy call for the user (source 1, source 5).
 6. **Contributor Covenant 3.0 is current (announced 2025-07-28), not 2.1.** 3.0 has a `[NOTE` placeholder for the reporting method, so it cannot be adopted purely by reference. A contact has to be filled in.
-7. **ai-native-sdlc refuses git's generated revert subjects at push and in CI, not at commit.**
+7. **The upstream AI-native SDLC process refuses git's generated revert subjects at push and in CI, not at commit.**
    - These are `Revert "..."`, and `Reapply "..."`, which git writes when reverting a revert.
    - `git revert` does not run the `commit-msg` hook. Reproduced on git 2.50.1 with and without the editor: a `commit-msg` that always exits 1 did not fire, and both commits were created. So `.githooks/commit-msg` never sees either subject.
    - `.githooks/pre-push` refuses it (L93–96, the six-type regex over `git rev-list --no-merges`).
@@ -25,7 +25,7 @@ Repo state, for context: `Okja-Engineering/oss-template` is **public** and `is_t
 
 ## Okja's own (conventions come from here; the template applies them and must not duplicate them)
 
-### 1. Okja-Engineering/ai-native-sdlc (main, last push 2026-10-05)
+### 1. The upstream AI-native SDLC process (main, last push 2026-10-05)
 Files read: `README.md`, `AGENTS.md`, `CONTROLS.md`, `STANDARDS.md`, `SOURCES.md`, `.github/ISSUE_TEMPLATE/capability.md`, `.github/pull_request_template.md`, `.github/workflows/ci.yml`, `.githooks/{commit-msg,pre-push,never-publish}`.
 
 Confirmed:
@@ -45,7 +45,7 @@ Confirmed:
   - `AGENTS.md`: "A prose promise is not a control."
 
 Take:
-- Conventional-commit and trailer rules by reference to `ai-native-sdlc/AGENTS.md` § Commits. Ship the hook plus a CI job, because hooks are bypassable (`AGENTS.md` § CI).
+- Conventional-commit and trailer rules by reference to the upstream AI-native SDLC process's `AGENTS.md` § Commits. Ship the hook plus a CI job, because hooks are bypassable (`AGENTS.md` § CI).
 - The issue/PR split and both template bodies nearly verbatim. They are already the shortest defensible shape.
 - The `CONTROLS.md` pattern at template scale: one table mapping each convention to the gate that enforces it, or "unenforced".
 - The pre-push never-publish list (`.githooks/never-publish`, currently `.scuba/*` and `.devin/eval/*`). Scratch folders are a real leak path for a public repo.
@@ -67,7 +67,7 @@ Take:
   - `name` matches the directory, ≤ 64 chars, `[a-z0-9-]`. `description` ≤ 1,024 chars.
   - Refuses unknown keys.
   - The same check should cover `.claude/agents/*.md` and `.claude/rules/*.md` `paths:`, because Claude Code silently ignores unknown fields and unparseable YAML (sub-agents.md, skills.md, memory.md).
-- "Do not restate these rules in project files" (`AGENTS.md` last line). The template links to Okja/skills and ai-native-sdlc rather than copying them.
+- "Do not restate these rules in project files" (`AGENTS.md` last line). The template links to Okja/skills and the upstream AI-native SDLC process rather than copying them.
 - CI asserts git index modes (`120000` symlink, `100755` scripts) because review does not show modes (`ci.yml`). Useful for template hook scripts.
 
 Reject:
@@ -126,7 +126,7 @@ Take:
 - FCP with a stated disposition (merge, close or postpone).
   - Sign-off from all subteam members before FCP. FCP runs 10 calendar days.
   - A *summary comment* before the FCP motion on long threads.
-  - Map this to a disposition field plus a named decider (ai-native-sdlc `DECIDERS.md`), not to a team vote.
+  - Map this to a disposition field plus a named decider (the upstream AI-native SDLC process's `DECIDERS.md`), not to a team vote.
 - Numbering. Copy `0000-template.md` to `text/0000-name.md`, then rename to the PR number **once the PR is open**, not on merge (README § What the process is). Accepted RFCs are not substantially changed. A substantial change is a new RFC plus a note on the original.
 - Postponed: closed with a `postponed` label and re-openable. Use "close" when the answer is "never".
 - Template sections: Summary, Motivation, Guide-level, Reference-level, Drawbacks, Rationale and alternatives, Prior art, Unresolved questions, Future possibilities.
@@ -142,7 +142,7 @@ Take:
 - Disclosure for every conditionally allowed use, an `llm-assisted` label, and lying about LLM use as a conduct violation.
 - A pre-arranged named reviewer for LLM-created PRs.
 - "held to a higher standard than human-created PRs" on tests. If no suite exists, write one or close the PR.
-- LLM review is advisory only. It is never sufficient to merge or reject. This matches ai-native-sdlc `STANDARDS.md` §3.
+- LLM review is advisory only. It is never sufficient to merge or reject. This matches the upstream AI-native SDLC process's `STANDARDS.md` §3.
 - Agent files must not be the only place where something is documented (the page's ❌ list).
 
 Reject:
@@ -233,7 +233,7 @@ Take:
 
 Reject:
 - Citing adr.github.io for immutability. The site does not state it (its pages carry no "immutable" or "superseded" text). The rule is Nygard's, and MADR only implies it through the status value.
-- The full MADR template (Decision Drivers, Pros and Cons per option). Okja's ai-native-sdlc already has options and decision records with a named decider.
+- The full MADR template (Decision Drivers, Pros and Cons per option). The upstream AI-native SDLC process already has options and decision records with a named decider.
 
 ### 10. Conventional Commits, Keep a Changelog, Contributor Covenant
 - Conventional Commits **1.0.0 is current** (conventionalcommits.org/en/v1.0.0, licence CC BY 3.0).
@@ -303,7 +303,7 @@ Take:
 Reject:
 - "Policy-as-code" in `CLAUDE.md` (Security chapter). Best practices (source 11) says `CLAUDE.md` is non-deterministic, so it is not a control.
 - Branch-specific `CLAUDE.md`: drift for little gain.
-- The ROI metrics: sprint throughput, time-to-completion, lines of code accepted, suggestion accept rate. They are activity and speed measures that ai-native-sdlc `STANDARDS.md` §6 and `AGENTS.md` reject.
+- The ROI metrics: sprint throughput, time-to-completion, lines of code accepted, suggestion accept rate. They are activity and speed measures that the upstream AI-native SDLC process's `STANDARDS.md` §6 and `AGENTS.md` reject.
 
 ### 16. Claude Code docs: memory, settings, permissions, hooks, hooks-guide, skills, subagents (code.claude.com/docs/en/*.md via llms.txt)
 Take: everything under *Verified facts* below.
@@ -391,27 +391,27 @@ Traps found while resolving these:
 ## Where sources disagree
 
 1. **`CLAUDE.md` alongside `AGENTS.md`.**
-   - ai-native-sdlc: none, and rely on shadowing (`AGENTS.md` intro).
+   - The upstream AI-native SDLC process: none, and rely on shadowing (`AGENTS.md` intro).
    - Okja/skills: a symlink (`README.md`, CI asserts it).
    - Claude Code docs: none is needed on ≥ 2.1.277; use `@AGENTS.md` for older versions, Windows, or when a `CLAUDE.local.md` exists (memory.md).
    - **The import is the only option that works in every case listed**, and it is deduplicated.
 2. **`AGENTS.md` nesting.** agents.md: closest file wins. Claude Code: every one from the cwd upward is loaded.
 3. **Pinning.** Both Okja repos use `@v4` tags. Scorecard wants a SHA or an immutable-release tag.
 4. **How much to enforce.**
-   - ai-native-sdlc: every convention has a gate or is labelled unenforced.
+   - The upstream AI-native SDLC process: every convention has a gate or is labelled unenforced.
    - Claude Code best practices: delete hooks for preferences and keep the set small.
    - Reconcilable: label preferences "unenforced" in the conventions table rather than hooking them.
 5. **Where policy lives.**
    - Scaling PDF: security policy in `CLAUDE.md`.
-   - Best practices and ai-native-sdlc: `CLAUDE.md` is advisory, and a prose promise is not a control.
+   - Best practices and the upstream AI-native SDLC process: `CLAUDE.md` is advisory, and a prose promise is not a control.
 6. **Measurement.**
    - Scaling PDF and the Anthropic-teams blog: throughput, time-to-completion, lines accepted.
-   - ai-native-sdlc `STANDARDS.md` §6 and `AGENTS.md`: no speed claims; measure outcomes.
+   - The upstream AI-native SDLC process's `STANDARDS.md` §6 and `AGENTS.md`: no speed claims; measure outcomes.
    - spec-kit's example success criteria are time-based too.
 7. **AI disclosure.**
    - Rust: required, with an `llm-assisted` label, and concealment is a conduct violation (forge policy).
    - Kubernetes: a YES/NO + how field since 2026-08-12 (kubernetes PR #141199).
-   - Okja ai-native-sdlc: **removed** its "AI use" PR section on 2026-10-03 (commit `79ca5d069c`). The reasons: nothing consumed it, it had adoption evidence only, and it contradicted the trailer ban.
+   - The upstream AI-native SDLC process: **removed** its "AI use" PR section on 2026-10-03 (commit `79ca5d069c`). The reasons: nothing consumed it, it had adoption evidence only, and it contradicted the trailer ban.
    - The commit `eb080e1` message still describes the rule as present.
 8. **Who writes PR and issue prose.** Rust bans LLM-originated PR descriptions, issue bodies and docs (`AGENTS.md` § Prohibited text). Kubernetes and Okja do not.
 9. **Proposal numbering.**
@@ -424,7 +424,7 @@ Traps found while resolving these:
 13. **Code of conduct version.** The mandate assumed 2.1. 3.0 is current.
 14. **spec-kit flow.** The mandate lists specify → clarify → plan. The current README puts converge last and makes clarify optional.
 15. **The Kubernetes figure.**
-    - ai-native-sdlc: "a template section that about 92% of contributors ignored".
+    - The upstream AI-native SDLC process: "a template section that about 92% of contributors ignored".
     - Primary source: a single contributor's count of a section that was allowed to be blank.
     - Use it as "most PRs left it empty or absent", not as abandonment.
 16. **Skill portability.** Okja/skills says `SKILL.md` carries no vendor-specific keys, but admits `disable-model-invocation`, which Claude Code documents as a Claude Code extension.
