@@ -20,7 +20,7 @@ Write the failing test first and see it fail for the reason you expect. The work
 
 ## Git hooks
 
-Run `bin/setup` once per clone: it points git at `.githooks/`, whose `commit-msg`, `pre-commit` and `pre-push` hooks call `bin/check`. `pre-push` judges each pushed ref's own commits and tree, not your working tree. `git commit --no-verify` and `git push --no-verify` skip the hooks.
+Run `bin/setup` once per clone: it points git at `.githooks/`, whose `commit-msg`, `pre-commit` and `pre-push` hooks call `bin/check`. `pre-push` judges each pushed ref's own commits and tree, not your working tree. `git commit --no-verify` and `git push --no-verify` skip the hooks; `.github/workflows/ci.yml` runs the same checks on every pull request, where they cannot be skipped.
 
 ## Agent guards
 
@@ -38,10 +38,11 @@ Claude Code applies the list; the workspace has no command guard of its own.
 | `.githooks/commit-msg`, `.githooks/pre-commit`, `.githooks/pre-push` | whatever `bin/check` refuses | at commit and at push, after `bin/setup` |
 | `bin/check disclosure` | `CLAUDE.md` other than `@AGENTS.md`; `AGENTS.md` over 80 lines or `CONTEXT.md` over 60; a stage folder, routing table or contract out of shape; an Inputs row that is not one earlier, existing file; an unnamed reference | in `bin/check`, so in the hooks |
 | `.claude/settings.json` (Claude Code) | an agent reading a `.env` file | in Claude Code |
+| `.github/workflows/ci.yml` | a pull request or push to `main` that fails `bin/check --range`, either suite, or the runners' self-test | on Ubuntu (bash 5, `shellcheck` v0.11.0) and macOS (bash 3.2) |
 
 ## What is not enforced
 
-- The git hooks, under `--no-verify` or before `bin/setup` runs.
+- The git hooks, under `--no-verify` or before `bin/setup` runs; CI still runs their checks.
 - Commit subjects and tool credit, until the `commits` and `pr` checks land.
 - `git` and `gh` commands an agent types in the workspace: there is a deny list, not a command guard.
 - Who made a reserved decision; [GOVERNANCE.md](GOVERNANCE.md#reserved-decisions) lists them.

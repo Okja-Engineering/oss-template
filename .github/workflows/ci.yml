@@ -1,0 +1,86 @@
+name: ci
+
+# The workspace's CI. Git hooks are local and skippable (--no-verify, or no
+# bin/setup); this runs the same checks where they cannot be skipped, on
+# bash 5 (Ubuntu, with shellcheck) and the macOS /bin/bash 3.2 floor.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      # From the event, through env: rather than inline in scripts. On a push,
+      # an all-zero BASE is a new ref, and CHECK_REF names the pushed branch.
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      CHECK_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The head SHA itself, not a merge commit, with full history so the
+          # range and its merge base resolve.
+          ref: ${{ env.HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install shellcheck v0.11.0
+        if: runner.os == 'Linux'
+        env:
+          SHELLCHECK_URL: https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "$SHELLCHECK_URL"
+          echo "$SHELLCHECK_SHA256  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-v0.11.0" >>"$GITHUB_PATH"
+          echo "REQUIRE_SHELLCHECK=1" >>"$GITHUB_ENV"
+
+      # On macOS each step narrows PATH so every script runs on /bin/bash 3.2.
+      - name: Record the shell under test
+        run: |
+          [ "$RUNNER_OS" != macOS ] || export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          command -v bash
+          bash --version | head -n 1
+          if command -v shellcheck >/dev/null; then shellcheck --version | sed -n 2p; else echo "no shellcheck"; fi
+
+      - name: bin/check --range
+        run: |
+          [ "$RUNNER_OS" != macOS ] || export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          bin/check --range "$BASE" "$HEAD"
+
+      - name: The product's suites
+        run: |
+          [ "$RUNNER_OS" != macOS ] || export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          foundation/tests/run-all.sh
+
+      - name: The workspace's suites
+        run: |
+          [ "$RUNNER_OS" != macOS ] || export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          tests/run-all.sh
+
+      - name: Each runner fails a failing suite
+        # A runner that swallows a failure makes every suite vacuous while
+        # reporting green, so the job fails unless both runners fail this one.
+        run: |
+          [ "$RUNNER_OS" != macOS ] || export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+          for runner in foundation/tests/run-all.sh tests/run-all.sh; do
+            if "$runner" foundation/tests/fixtures/runner/failing >/dev/null 2>&1; then
+              echo "::error::$runner passed a deliberately failing suite"
+              exit 1
+            fi
+          done
+          echo "both runners fail a failing suite"
