@@ -1,12 +1,31 @@
 #!/usr/bin/env bash
-# Check each pushed ref with the workspace's bin/check --range, judging that
-# ref's own commits and tree: an updated ref from the remote's old SHA, a new
-# ref from an empty base with CHECK_REF set to it. A deleted ref is skipped.
+# Check each pushed ref with bin/check --range, run from that ref's own
+# commit, so its own checks judge its own commits and tree whatever the
+# working tree holds: an updated ref from the remote's old SHA, a new ref
+# from an empty base with CHECK_REF set to it (bin/check judges a remote SHA
+# this clone never fetched the same way). A deleted ref and a notes ref are
+# skipped; a ref on anything but a commit cannot be judged.
 set -u
+set -o pipefail
 export LC_ALL=C
 root=$(git rev-parse --show-toplevel) || exit 2
+cd "$root" || exit 2
+scratch=$(mktemp -d) || exit 2
+trap 'rm -rf "$scratch"' EXIT
 worst=0
-while read -r _local_ref local_sha remote_ref remote_sha; do
+
+# own_check COMMIT DIR: COMMIT's bin/ and foundation/bin/ in DIR, through a
+# private index; exit nonzero when COMMIT has no bin/check.
+own_check() {
+  GIT_INDEX_FILE="$2.index" git read-tree "$1" &&
+    GIT_INDEX_FILE="$2.index" git ls-files -z -- bin foundation/bin |
+    GIT_INDEX_FILE="$2.index" git checkout-index -z --stdin --prefix="$2/" &&
+    [ -x "$2/bin/check" ]
+}
+
+# A last line without its newline (by hand, not from git) is still judged.
+while read -r _local_ref local_sha remote_ref remote_sha || [ -n "${local_sha:-}" ]; do
+  st=0
   case "$local_sha" in
     *[!0]*) ;;
     *)
@@ -14,12 +33,27 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
       continue
       ;;
   esac
+  case "$remote_ref" in
+    refs/notes/*)
+      printf 'pre-push: %s is a notes ref, which bin/check does not judge\n' "$remote_ref"
+      continue
+      ;;
+  esac
   case "$remote_sha" in
     *[!0]*) base=$remote_sha ;;
     *) base="" ;;
   esac
-  CHECK_REF=${remote_ref#refs/heads/} "$root/bin/check" --range "$base" "$local_sha" </dev/null
-  st=$?
+  if ! commit=$(git rev-parse -q --verify "$local_sha^{commit}"); then
+    printf 'pre-push: %s is not a commit, so bin/check cannot judge it\n' "$remote_ref" >&2
+    st=2
+  elif ! own_check "$commit" "$scratch/$commit"; then
+    printf 'pre-push: %s has no bin/check of its own to judge it with\n' "$remote_ref" >&2
+    st=2
+  else
+    CHECK_REF=${remote_ref#refs/heads/} "$scratch/$commit/bin/check" --range "$base" "$commit" </dev/null
+    st=$?
+  fi
   [ "$st" -gt "$worst" ] && worst=$st
+  local_sha=""
 done
 exit "$worst"

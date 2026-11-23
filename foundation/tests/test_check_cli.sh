@@ -210,6 +210,29 @@ assert_eq "" "$(value DOCS_BASE)" "CHECK_REF=main: the root is checked, so no do
 OUT=$(cd "$R" && CHECK_REF=refs/heads/main bin/check --range "" HEAD env 2>&1)
 assert_eq "" "$(value DOCS_BASE)" "CHECK_REF as a full ref name works the same"
 
+# --- range mode: a BASE this clone does not have -------------------------------
+# A remote's old SHA this clone never fetched (a force-push over another
+# clone's commit; CI after a force-push) is judged as a new ref.
+R=$(repo unfetched env)
+git -C "$R" checkout -q -b feature
+fixture_write "$R/f.txt" "f"
+fixture_commit "$R" "test: f"
+GONE=1234567890abcdef1234567890abcdef12345678
+run "$R" --range "$GONE" feature env
+assert_status 0 "$ST" "a BASE object id this clone lacks is judged, not 'cannot run'"
+assert_eq "" "$(value CHECK_BASE)" "  as a new ref, with no base"
+assert_eq "$(git -C "$R" rev-parse main)" "$(value DOCS_BASE)" \
+  "  whose docs base is the parent of its oldest commit on no remote ref"
+assert_contains "$OUT" "not in this clone" "  and says so"
+run "$R" --range no-such-rev feature env
+assert_status 2 "$ST" "a BASE that is not an object id and does not resolve exits 2"
+# A git failure while finding a new ref's commits is an error, not "nothing
+# changed".
+printf '%s\n' "$GONE" >"$R/.git/refs/remotes/origin/ghost"
+run "$R" --range "" feature env
+assert_status 2 "$ST" "a remote ref git cannot follow exits 2"
+rm "$R/.git/refs/remotes/origin/ghost"
+
 # --- AC22: a commit on an unborn branch ----------------------------------------
 U="$SCRATCH/unborn"
 git init -q -b main "$U"

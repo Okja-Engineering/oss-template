@@ -2,5 +2,6 @@
 # Check the commit message with the workspace's bin/check commit-msg.
 set -u
 export LC_ALL=C
+[ "$#" -eq 1 ] || { printf 'commit-msg: git passes one FILE, the message\n' >&2; exit 2; }
 root=$(git rev-parse --show-toplevel) || exit 2
 exec "$root/bin/check" commit-msg "$1"

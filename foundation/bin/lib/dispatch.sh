@@ -8,7 +8,9 @@
 #
 # usage: . dispatch.sh; dispatch_main CHECKS_DIR [ARGS...]
 #   [CHECK...]                    tree mode
-#   --range BASE HEAD [CHECK...]  range mode; an empty or all-zero BASE is a new ref
+#   --range BASE HEAD [CHECK...]  range mode; an empty or all-zero BASE is a
+#                                 new ref, and so is an object id this clone
+#                                 does not have (a remote's unfetched commit)
 #   --staged [CHECK...]           staged mode
 #   commit-msg FILE               commit-msg mode
 #   pr                            pr mode (PR_TITLE, PR_BODY)
@@ -80,9 +82,10 @@ dispatch_main() {
 }
 
 # dispatch__bases MODE BASE HEAD: export CHECK_BASE, CHECK_HEAD, CHECK_REF
-# and DOCS_BASE for MODE. Exit 2 on a BASE or HEAD that is not a commit.
+# and DOCS_BASE for MODE. Exit 2 on a HEAD that is not a commit, a BASE that
+# names no commit and is not an object id, or a git failure.
 dispatch__bases() {
-  local mode=$1 base=$2 head=$3 at up oldest
+  local mode=$1 base=$2 head=$3 at up commits newref=1
   at=$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || at=""
   CHECK_REF=${CHECK_REF:-}
   CHECK_REF=${CHECK_REF#refs/heads/}
@@ -105,22 +108,36 @@ dispatch__bases() {
         { printf 'bin/check: HEAD is not a commit: %s\n' "$head" >&2; return 2; }
       case "$base" in
         *[!0]*)
-          CHECK_BASE=$(git rev-parse -q --verify "$base^{commit}" 2>/dev/null) ||
-            { printf 'bin/check: BASE is not a commit: %s\n' "$base" >&2; return 2; }
-          DOCS_BASE=$(git merge-base "$CHECK_BASE" "$CHECK_HEAD" 2>/dev/null) || DOCS_BASE=""
-          ;;
-        *)
-          # A new ref: the checked commits are those on no remote ref but
-          # CHECK_REF, and the docs base is the parent of the oldest; a root
-          # has none. With nothing to check, nothing changed since HEAD.
-          oldest=$(dispatch_checked_commits "$CHECK_HEAD" | head -n 1)
-          if [ -z "$oldest" ]; then
-            DOCS_BASE=$CHECK_HEAD
+          if CHECK_BASE=$(git rev-parse -q --verify "$base^{commit}" 2>/dev/null); then
+            DOCS_BASE=$(git merge-base "$CHECK_BASE" "$CHECK_HEAD" 2>/dev/null) || DOCS_BASE=""
+            newref=0
+          elif dispatch__object_id "$base"; then
+            # The remote moved to a commit this clone never fetched, so what
+            # it holds is unknown here: judge HEAD as a new ref.
+            printf 'bin/check: BASE %s is not in this clone; judging %s as a new ref\n' \
+              "$base" "$head" >&2
+            CHECK_BASE=""
           else
-            DOCS_BASE=$(git rev-parse -q --verify "$oldest^" 2>/dev/null) || DOCS_BASE=""
+            printf 'bin/check: BASE is not a commit: %s\n' "$base" >&2
+            return 2
           fi
           ;;
       esac
+      if [ "$newref" = 1 ]; then
+        # A new ref: the checked commits are those on no remote ref but
+        # CHECK_REF, and the docs base is the parent of the oldest; a root
+        # has none. With nothing to check, nothing changed since HEAD.
+        commits=$(dispatch_checked_commits "$CHECK_HEAD") || {
+          printf 'bin/check: could not list the commits %s adds\n' "$head" >&2
+          return 2
+        }
+        if [ -z "$commits" ]; then
+          DOCS_BASE=$CHECK_HEAD
+        else
+          # The oldest is the first line.
+          DOCS_BASE=$(git rev-parse -q --verify "${commits%%[!0-9a-f]*}^" 2>/dev/null) || DOCS_BASE=""
+        fi
+      fi
       ;;
   esac
   export CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE
@@ -129,19 +146,27 @@ dispatch__bases() {
 # dispatch_checked_commits HEAD: for a range with no BASE, the commits
 # reachable from HEAD and from no remote ref other than CHECK_REF, oldest
 # first. Symbolic remote refs (origin/HEAD) alias real ones and are skipped.
+# Exit nonzero when git fails.
 dispatch_checked_commits() {
-  local head=$1 want=${CHECK_REF:-} ref sym exclude=""
+  local head=$1 want=${CHECK_REF:-} refs ref sym
+  local -a exclude=()
   want=${want#refs/heads/}
+  refs=$(git for-each-ref --format='%(refname) %(symref)' refs/remotes/) || return 2
   while read -r ref sym; do
     [ -n "$ref" ] || continue
     [ -z "$sym" ] || continue
     [ -n "$want" ] && [ "${ref#refs/remotes/*/}" = "$want" ] && continue
-    exclude="$exclude ^$ref"
+    exclude+=("^$ref")
   done <<EOF
-$(git for-each-ref --format='%(refname) %(symref)' refs/remotes/)
+$refs
 EOF
-  # shellcheck disable=SC2086 # ref names hold no whitespace
-  git rev-list --topo-order --reverse "$head" $exclude
+  git rev-list --topo-order --reverse "$head" ${exclude[@]+"${exclude[@]}"}
+}
+
+# dispatch__object_id WORD: WORD is a full object id (SHA-1 or SHA-256).
+dispatch__object_id() {
+  case "$1" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
 }
 
 # dispatch__run DIR MODE NAMED [NAME...]: run the NAMEs given (NAMED is 1),
