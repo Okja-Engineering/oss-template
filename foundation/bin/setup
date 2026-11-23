@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Point git at this repository's hooks in .githooks/. A second run changes nothing.
+set -u
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd)
+top=$(git -C "$here/.." rev-parse --show-toplevel 2>/dev/null) || {
+  printf 'bin/setup: not inside a git repository\n' >&2
+  exit 2
+}
+if [ "$(git -C "$top" config --get core.hooksPath)" = .githooks ]; then
+  printf 'bin/setup: core.hooksPath is already .githooks\n'
+  exit 0
+fi
+git -C "$top" config core.hooksPath .githooks || exit 2
+printf 'bin/setup: core.hooksPath set to .githooks\n'
