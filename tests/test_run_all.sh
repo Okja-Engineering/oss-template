@@ -4,7 +4,7 @@
 # and fails when one of them fails.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 ROOT=$(cd "$TEST_DIR/.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$ROOT/foundation/tests/lib/assert.sh"

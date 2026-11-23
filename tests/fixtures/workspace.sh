@@ -7,7 +7,7 @@
 # usage: . tests/fixtures/workspace.sh; ws_fixture DIR [CHECK...]
 #        ws_real_check DIR NAME   (the workspace's own bin/checks/NAME)
 
-WS_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+WS_ROOT=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/tests/lib/fixture.sh
 . "$WS_ROOT/foundation/tests/lib/fixture.sh"
 

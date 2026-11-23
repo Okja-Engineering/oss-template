@@ -3,7 +3,7 @@
 # run changes nothing.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=fixtures/workspace.sh
@@ -29,5 +29,12 @@ assert_status 0 "$st" "the second run exits 0 without writing"
 assert_eq ".githooks" "$(git -C "$R" config --get core.hooksPath)" "core.hooksPath is still .githooks"
 assert_eq "$before" "$(cksum <"$R/.git/config")" "the second run leaves .git/config as it was"
 assert_contains "$out" "already" "and says nothing needed doing"
+
+# A caller's CDPATH does not move a script off its own directory: run by a
+# relative path, `cd bin` must not resolve through CDPATH.
+git -C "$R" config --unset core.hooksPath
+out=$(cd "$R" && CDPATH=.:/nonexistent bin/setup 2>&1)
+assert_status 0 "$?" "bin/setup run by a relative path under CDPATH exits 0"
+assert_eq ".githooks" "$(git -C "$R" config --get core.hooksPath)" "  and sets core.hooksPath"
 
 assert_done

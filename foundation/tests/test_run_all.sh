@@ -4,7 +4,7 @@
 # than no runner.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/assert.sh
 . "$TEST_DIR/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/fixture.sh
@@ -107,6 +107,9 @@ status=$?
 assert_status 0 "$status" "run-all.sh with no argument passes on its own directory"
 assert_contains "$out" "$COPY/test_own.sh" "and ran the suite beside it"
 assert_contains "$out" "1 suites passed" "and only that suite"
+out=$(cd "$SCRATCH" && CDPATH=.:/nonexistent bash copy/run-all.sh 2>&1)
+assert_status 0 "$?" "run-all.sh run by a relative path under CDPATH passes"
+assert_contains "$out" "1 suites passed" "  on its own directory"
 
 # --- tracked suites are matched by their literal names ----------------------
 ODD="$SCRATCH/odd"

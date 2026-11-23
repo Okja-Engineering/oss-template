@@ -2,7 +2,7 @@
 # Point git at this repository's hooks in .githooks/. A second run changes nothing.
 set -u
 export LC_ALL=C
-here=$(cd "$(dirname "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 top=$(git -C "$here/.." rev-parse --show-toplevel 2>/dev/null) || {
   printf 'bin/setup: not inside a git repository\n' >&2
   exit 2

@@ -6,7 +6,7 @@
 # usage: . fixture.sh (after assert.sh); fixture_repo DIR; fixture_replace ...
 # Sourcing it isolates git from the caller's configuration and environment.
 
-FIXTURE_FOUNDATION=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+FIXTURE_FOUNDATION=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 # Git in a fixture reads no global or system configuration, inherits no
 # repository from its caller (a hook's GIT_DIR, say) and has an identity; and

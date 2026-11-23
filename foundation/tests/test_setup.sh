@@ -3,7 +3,7 @@
 # second run changes nothing.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/assert.sh
 . "$TEST_DIR/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/fixture.sh
@@ -37,5 +37,12 @@ mkdir -p "$SCRATCH/nogit/bin"
 cp -p "$R/bin/setup" "$SCRATCH/nogit/bin/setup"
 out=$("$SCRATCH/nogit/bin/setup" 2>&1)
 assert_status 2 "$?" "outside a git repository it exits 2"
+
+# A caller's CDPATH does not move a script off its own directory: run by a
+# relative path, `cd bin` must not resolve through CDPATH.
+git -C "$R" config --unset core.hooksPath
+out=$(cd "$R" && CDPATH=.:/nonexistent bin/setup 2>&1)
+assert_status 0 "$?" "bin/setup run by a relative path under CDPATH exits 0"
+assert_eq ".githooks" "$(git -C "$R" config --get core.hooksPath)" "  and sets core.hooksPath"
 
 assert_done

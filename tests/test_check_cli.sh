@@ -3,7 +3,7 @@
 # workspace's own bin/checks/ and takes each of C4's argument forms (AC5).
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=fixtures/workspace.sh
@@ -36,6 +36,8 @@ assert_not_contains "$OUT" "decoy" "and no product check"
 run pass env
 assert_status 0 "$ST" "named checks run alone"
 assert_eq "tree" "$(value CHECK_MODE)" "in tree mode"
+OUT=$(cd "$R" && CDPATH=.:/nonexistent bin/check pass 2>&1)
+assert_status 0 "$?" "bin/check run by a relative path under CDPATH runs"
 
 # --range BASE HEAD [CHECK...]
 run --range HEAD~1 HEAD env

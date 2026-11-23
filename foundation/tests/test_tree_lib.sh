@@ -4,7 +4,7 @@
 # Each source must see exactly its own state of the same repository.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/assert.sh
 . "$TEST_DIR/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/fixture.sh

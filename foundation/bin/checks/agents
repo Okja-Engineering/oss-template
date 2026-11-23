@@ -3,7 +3,7 @@
 # modes: tree staged range
 set -u
 export LC_ALL=C
-here=$(cd "$(dirname "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../lib/tree.sh
 . "$here/../lib/tree.sh"
 # shellcheck source-path=SCRIPTDIR source=../lib/agents.sh

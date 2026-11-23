@@ -3,7 +3,7 @@
 # LC_ALL=C, and that range mode judges the head commit, never the checkout.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/assert.sh
 . "$TEST_DIR/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/fixture.sh
@@ -154,6 +154,8 @@ run "$R" fail --report
 assert_status 2 "$ST" "naming a check outside the mode exits 2"
 OUT=$(cd "$R" && LC_ALL=en_US.UTF-8 bin/check env 2>&1)
 assert_eq "C" "$(value LC_ALL)" "checks run under LC_ALL=C"
+OUT=$(cd "$R" && CDPATH=.:/nonexistent bin/check pass 2>&1)
+assert_status 0 "$?" "bin/check run by a relative path under CDPATH runs"
 
 # --- tree mode bases -----------------------------------------------------------
 fixture_write "$R/ahead.txt" "ahead"

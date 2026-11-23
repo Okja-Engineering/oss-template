@@ -16,7 +16,7 @@
 #   file in a stage's references/ is one of its Inputs.
 set -u
 export LC_ALL=C
-here=$(cd "$(dirname "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
 . "$here/../../foundation/bin/lib/tree.sh"
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/agents.sh

@@ -5,7 +5,7 @@
 # through real git in a fixture workspace with a bare remote.
 set -u
 export LC_ALL=C
-TEST_DIR=$(cd "$(dirname "$0")" && pwd)
+TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=fixtures/workspace.sh

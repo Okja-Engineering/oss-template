@@ -3,6 +3,6 @@
 # the runner fail on it.
 set -u
 # shellcheck source-path=SCRIPTDIR source=../../../lib/assert.sh
-. "$(cd "$(dirname "$0")/../../.." && pwd)/lib/assert.sh"
+. "$(CDPATH='' cd -- "$(dirname "$0")/../../.." && pwd)/lib/assert.sh"
 assert_eq "expected" "actual" "this suite fails on purpose"
 assert_done
