@@ -7,12 +7,8 @@ export LC_ALL=C
 TEST_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/assert.sh
 . "$TEST_DIR/lib/assert.sh"
-
-# Fixture repositories must not depend on the caller's git configuration.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-export GIT_AUTHOR_NAME='A Person' GIT_AUTHOR_EMAIL='person@example.invalid'
-export GIT_COMMITTER_NAME='A Person' GIT_COMMITTER_EMAIL='person@example.invalid'
+# shellcheck source-path=SCRIPTDIR source=lib/fixture.sh
+. "$TEST_DIR/lib/fixture.sh"
 
 RUN_ALL="$TEST_DIR/run-all.sh"
 FIXTURES="$TEST_DIR/fixtures/runner"
