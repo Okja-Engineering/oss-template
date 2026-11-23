@@ -16,7 +16,7 @@ Write the failing test first and see it fail for the reason you expect. The work
 
 ## Checks
 
-`bin/check` runs the workspace's own checks, the files in `bin/checks/`. Each is a thin caller of the product's libraries in `foundation/bin/lib/`, given explicit parameters; the workspace never runs a product check on its own tree, since `bin/check` looks only in `bin/checks/`.
+`bin/check` runs the workspace's own checks, the files in `bin/checks/`. Each reads files through the product's tree reader in `foundation/bin/lib/` and calls the product's libraries there for the product's rules, given explicit parameters; `disclosure`, for one, takes the `AGENTS.md` budget from `foundation/bin/lib/agents.sh` and adds the stage-folder rules only the workspace has. The workspace never runs a product check on its own tree, since `bin/check` looks only in `bin/checks/`.
 
 ## Git hooks
 

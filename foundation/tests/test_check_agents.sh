@@ -57,9 +57,11 @@ fixture_append "$R/AGENTS.md" "line 81"
 check
 assert_status 1 "$ST" "an 81-line AGENTS.md is refused"
 assert_contains "$OUT" "81" "the refusal gives the count"
-printf 'last line without a newline' >>"$R/AGENTS.md"
+fresh
+lines 80 >"$R/AGENTS.md"
+printf 'line 81, without a newline' >>"$R/AGENTS.md"
 check
-assert_status 1 "$ST" "a final line without a newline still counts"
+assert_status 1 "$ST" "a final line without a newline counts: 80 lines and one more is refused"
 
 fresh
 fixture_remove "$R/AGENTS.md"

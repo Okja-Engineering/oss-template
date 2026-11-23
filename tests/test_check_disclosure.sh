@@ -105,6 +105,13 @@ refused "a missing CLAUDE.md" "CLAUDE.md"
 valid
 pad_to AGENTS.md 81
 refused "an 81-line AGENTS.md" "81 lines"
+valid
+pad_to AGENTS.md 80
+printf 'filler without a newline' >>"$R/AGENTS.md"
+refused "an AGENTS.md of 80 lines and a final one without a newline" "81 lines"
+valid
+fixture_write "$R/CLAUDE.md" "@README.md"
+refused "CLAUDE.md importing another file" "CLAUDE.md is not exactly"
 
 # --- AC2: CONTEXT.md and the routing table -----------------------------------
 valid
