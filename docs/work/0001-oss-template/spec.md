@@ -24,7 +24,7 @@ shared/                  answers.tsv (the field schema); manifest.txt (every tra
 foundation/              templates only (*.tmpl); placeholders in docs and config, never in scripts
 stages/NN-slug/          01-ask 02-render 03-verify 04-publish: CONTEXT.md, references/, output/ (tracked: only its .gitignore)
 bin/ tests/ .claude/ .githooks/ .github/ docs/   the workspace's own Okja foundation (the verbatim product files), plus the
-                         workspace-only bin/{ask,render,verify,publish}, bin/lib/answers.sh, bin/checks/{stages,foundation}, their suites, docs/work/, docs/adr/
+                         workspace-only bin/{ask,render,verify,publish}, bin/lib/answers.sh, bin/checks/{stages,foundation}, their suites, docs/work/, the ADRs in docs/adr/
 ```
 
 | Loaded | Files | Budget (call 64) |
