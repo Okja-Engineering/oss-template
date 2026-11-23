@@ -75,4 +75,20 @@ git -C "$R" add AGENTS.md
 check --staged
 assert_status 1 "$ST" "staged mode sees it once staged"
 
+# Staged mode judges what the commit will hold: an intent-to-add AGENTS.md
+# is not in it.
+fresh
+git -C "$R" rm -q --cached AGENTS.md
+git -C "$R" add -N AGENTS.md
+check --staged
+assert_status 1 "$ST" "staged mode: an intent-to-add AGENTS.md is missing from the commit"
+assert_contains "$OUT" "AGENTS.md is missing" "and is reported missing"
+
+# Tree mode judges what git add -A would stage: an ignored file is not in it.
+fresh
+git -C "$R" rm -q --cached CLAUDE.md
+fixture_write "$R/.git/info/exclude" "CLAUDE.md"
+check
+assert_status 1 "$ST" "tree mode: an ignored, untracked CLAUDE.md is missing"
+
 assert_done

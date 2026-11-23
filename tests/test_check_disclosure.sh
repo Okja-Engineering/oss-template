@@ -220,4 +220,18 @@ fixture_append "$R/CLAUDE.md" "More."
 run --range HEAD~1 HEAD
 assert_status 0 "$ST" "range mode ignores an uncommitted violation"
 
+# Every mode judges the same files: a stage folder whose name git would
+# quote, with no contract, is refused in each, not skipped in one.
+valid
+put 'stages/01-a"b/notes.md' 'notes'
+run
+assert_status 1 "$ST" "tree mode: a stage folder whose name git quotes is judged"
+assert_contains "$OUT" 'stages/01-a"b/: no CONTEXT.md' "  and the refusal names it"
+git -C "$R" add -A
+run --staged
+assert_status 1 "$ST" "staged mode: the same refusal"
+git -C "$R" commit -q --no-verify -m "test: a quoted stage name"
+run --range HEAD~1 HEAD
+assert_status 1 "$ST" "range mode: the same refusal"
+
 assert_done

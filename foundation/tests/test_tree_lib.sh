@@ -42,15 +42,24 @@ fixture_write "$R/untracked.txt" "untracked"
 fixture_write "$R/.git/info/exclude" "ignored.txt"
 fixture_write "$R/ignored.txt" "ignored"
 
-blob_of() { printf '%s\n' "$1" | git -C "$R" hash-object --stdin; }
+blob_of() { blob_of_in "$R" "$1"; }
+blob_of_in() { printf '%s\n' "$2" | git -C "$1" hash-object --stdin; }
 
-# entry SOURCE PATH: the "MODE BLOB" a listing gives PATH, or "none".
-entry() {
-  local line
-  line=$(cd "$R" && tree_list "$1" | awk -F '\t' -v p="$2" '$2 == p { print $1 }')
-  printf '%s' "${line:-none}"
+# entry_of DIR SOURCE PATH: the "MODE BLOB" DIR's listing gives PATH, or
+# "none"; PATH is compared as a literal string.
+entry_of() {
+  local line found=""
+  while IFS= read -r line; do
+    [ "${line#*	}" = "$3" ] && found=${line%%	*}
+  done <<EOF
+$(cd "$1" && tree_list "$2")
+EOF
+  printf '%s' "${found:-none}"
 }
-content() { (cd "$R" && tree_cat "$1" "$2" 2>/dev/null) || printf 'none'; }
+entry() { entry_of "$R" "$1" "$2"; }
+# content_of DIR SOURCE PATH: what tree_cat reads, or "none".
+content_of() { (cd "$1" && tree_cat "$2" "$3" 2>/dev/null) || printf 'none'; }
+content() { content_of "$R" "$1" "$2"; }
 
 C="commit:$HEAD_SHA"
 
@@ -110,5 +119,127 @@ git init -q -b main "$U"
 assert_status 2 "$?" "a commit source on an unborn branch exits 2"
 (cd "$U" && tree_list index >/dev/null 2>&1)
 assert_status 0 "$?" "the index of an unborn branch reads as empty"
+(cd "$R" && tree_list worktree '' >/dev/null 2>&1)
+assert_status 2 "$?" "an empty prefix exits 2 rather than excluding everything"
+
+# --- every source judges the same set of paths ---------------------------------
+# A committed, clean tree holding names git would quote or a shell would split
+# or expand: the three sources list it identically, and read each file.
+O="$SCRATCH/odd"
+fixture_repo "$O"
+TAB=$(printf '\t')
+odd_names="quo\"te.md
+back\\slash.md
+tab${TAB}name.md
+two  spaces.md
+star*.md
+glo[b].md
+-dash.md
+caf$(printf '\303\251').md
+dir with space/inner.md"
+while IFS= read -r name; do
+  fixture_write "$O/$name" "content of $name"
+done <<EOF
+$odd_names
+EOF
+ln -s CLAUDE.md "$O/-link"
+fixture_commit "$O" "test: odd names"
+list_wt=$(cd "$O" && tree_list worktree)
+assert_status 0 "$?" "worktree: a tree of odd names reads"
+list_ix=$(cd "$O" && tree_list index)
+assert_status 0 "$?" "index: a tree of odd names reads"
+list_cm=$(cd "$O" && tree_list commit:HEAD)
+assert_status 0 "$?" "commit: a tree of odd names reads"
+assert_eq "$list_cm" "$list_wt" "worktree lists exactly what the commit holds"
+assert_eq "$list_cm" "$list_ix" "index lists exactly what the commit holds"
+for src in worktree index commit:HEAD; do
+  while IFS= read -r name; do
+    assert_eq "content of $name" "$(content_of "$O" "$src" "$name")" "$src: reads '$name'"
+  done <<EOF
+$odd_names
+EOF
+done
+assert_contains "$list_wt" "120000 $(printf CLAUDE.md | git -C "$O" hash-object --stdin)${TAB}-link" \
+  "worktree: a symbolic link whose name starts with - has its target's blob"
+assert_eq "CLAUDE.md" "$(content_of "$O" worktree -link)" "worktree: reads a link as its target text"
+
+# A path no listing line can hold (a newline) fails every source alike.
+N="$SCRATCH/newline"
+fixture_repo "$N"
+fixture_write "$N/new
+line.md" "x"
+(cd "$N" && tree_list worktree >/dev/null 2>&1)
+assert_status 2 "$?" "worktree: a path holding a newline exits 2"
+fixture_commit "$N" "test: a newline in a name"
+for src in index commit:HEAD; do
+  (cd "$N" && tree_list "$src" >/dev/null 2>&1)
+  assert_status 2 "$?" "$src: a path holding a newline exits 2"
+done
+
+# --- the working tree is what git add -A would stage ----------------------------
+fixture_write "$O/ignored.md" "ignored"
+fixture_write "$O/.git/info/exclude" "ignored.md"
+fixture_write "$SCRATCH/outside.txt" "outside"
+assert_eq "none" "$(content_of "$O" worktree ignored.md)" "worktree: an ignored file cannot be read"
+assert_eq "none" "$(content_of "$O" worktree ../outside.txt)" "worktree: a path outside the repository cannot be read"
+assert_eq "none" "$(content_of "$O" commit:HEAD ../outside.txt)" "commit: nor through the commit source"
+assert_eq "none" "$(content_of "$O" worktree 'dir with space')" "worktree: a directory is not a file"
+
+# A submodule moved forward: the worktree lists its checked-out commit, the
+# index the recorded one. A nested repository not yet added is listed as
+# git add -A would add it.
+git init -q -b main "$O/sub"
+git -C "$O/sub" commit -q --allow-empty -m "test: sub one"
+(cd "$O" && git add sub 2>/dev/null && git commit -q -m "test: add a gitlink")
+git -C "$O/sub" commit -q --allow-empty -m "test: sub two"
+assert_eq "160000 $(git -C "$O/sub" rev-parse HEAD)" "$(entry_of "$O" worktree sub)" \
+  "worktree: a submodule's checked-out commit"
+assert_eq "160000 $(git -C "$O/sub" rev-parse HEAD~1)" "$(entry_of "$O" index sub)" "index: the recorded commit"
+git init -q -b main "$O/nested"
+git -C "$O/nested" commit -q --allow-empty -m "test: nested"
+assert_eq "160000 $(git -C "$O/nested" rev-parse HEAD)" "$(entry_of "$O" worktree nested)" \
+  "worktree: an untracked nested repository, named without a slash"
+git init -q -b main "$O/unborn-nested"
+(cd "$O" && tree_list worktree >/dev/null 2>&1)
+assert_status 2 "$?" "worktree: a nested repository with no commit, which git add cannot add, exits 2"
+rm -rf "$O/unborn-nested" "$O/nested"
+
+# --- staged mode judges the tree the commit would hold --------------------------
+fixture_write "$O/later.md" "later"
+git -C "$O" add -N later.md
+assert_eq "none" "$(entry_of "$O" index later.md)" "index: an intent-to-add entry is not listed"
+assert_eq "none" "$(content_of "$O" index later.md)" "index: nor read"
+assert_eq "100644 $(blob_of_in "$O" later)" "$(entry_of "$O" worktree later.md)" "worktree: lists it from disk"
+git -C "$O" rm -q --cached later.md
+
+# --- a git failure is an error, never an empty or partial tree ------------------
+F="$SCRATCH/failing"
+fixture_repo "$F"
+printf 'not an index' >"$F/.git/index"
+for src in worktree index; do
+  (cd "$F" && tree_list "$src" >/dev/null 2>&1)
+  assert_status 2 "$?" "$src: an unreadable index exits 2"
+done
+M="$SCRATCH/merge"
+fixture_repo "$M"
+git -C "$M" checkout -q -b other
+fixture_write "$M/AGENTS.md" "other"
+fixture_commit "$M" "test: other side"
+git -C "$M" checkout -q main
+fixture_write "$M/AGENTS.md" "main"
+fixture_commit "$M" "test: main side"
+git -C "$M" merge -q other >/dev/null 2>&1
+(cd "$M" && tree_list index >/dev/null 2>&1)
+assert_status 2 "$?" "index: unmerged paths exit 2"
+(cd "$M" && tree_list worktree >/dev/null 2>&1)
+assert_status 0 "$?" "worktree: a conflicted file reads as it stands on disk"
+assert_eq 1 "$(cd "$M" && tree_list worktree | grep -c "${TAB}AGENTS.md\$")" "worktree: listed once, not per stage"
+
+# --- the listing is sorted by path, and hashed without filters ----------------
+assert_eq "$(printf '%s\n' "$list_wt" | sort -t "$TAB" -k 2)" "$list_wt" "the listing is sorted by path"
+printf '* text=auto eol=crlf\n' >"$O/.gitattributes"
+printf 'a\r\nb\r\n' >"$O/crlf.txt"
+assert_eq "100644 $(printf 'a\r\nb\r\n' | git -C "$O" hash-object --no-filters --stdin)" \
+  "$(entry_of "$O" worktree crlf.txt)" "worktree: a file's bytes as they stand, unfiltered"
 
 assert_done
