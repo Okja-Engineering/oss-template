@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# CLAUDE.md is exactly @AGENTS.md, and AGENTS.md is at most 80 lines
+# modes: tree staged range
+set -u
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../lib/tree.sh
+. "$here/../lib/tree.sh"
+
+max_agents_lines=80
+src=$(tree_source)
+refused=0
+
+claude=$(tree_cat "$src" CLAUDE.md && printf x)
+case $? in
+  0)
+    claude=${claude%x}
+    if [ "$claude" != "@AGENTS.md" ] && [ "$claude" != "@AGENTS.md
+" ]; then
+      printf 'CLAUDE.md is not exactly the line @AGENTS.md\n'
+      refused=1
+    fi
+    ;;
+  1)
+    printf 'CLAUDE.md is missing\n'
+    refused=1
+    ;;
+  *) exit 2 ;;
+esac
+
+tree_cat "$src" AGENTS.md >/dev/null
+case $? in
+  0)
+    lines=$(tree_cat "$src" AGENTS.md | awk 'END { print NR }')
+    if [ "$lines" -gt "$max_agents_lines" ]; then
+      printf 'AGENTS.md has %s lines, over %s\n' "$lines" "$max_agents_lines"
+      refused=1
+    fi
+    ;;
+  1)
+    lines=0
+    printf 'AGENTS.md is missing\n'
+    refused=1
+    ;;
+  *) exit 2 ;;
+esac
+
+printf 'examined CLAUDE.md and AGENTS.md (%s lines) in %s\n' "$lines" "$src"
+exit "$refused"

@@ -25,12 +25,15 @@ fixture__isolate
 # a bare remote at DIR-origin.git that main tracks. It holds what the
 # contracts need: chain docs whose status lines name a decider in
 # GOVERNANCE.md § Deciders (C1) under C2's names; one rule, skill and
-# subagent with C3 frontmatter; and the product's bin/, when it has one (C4).
+# subagent with C3 frontmatter; the product's bin/, when it has one (C4);
+# and CLAUDE.md importing a short AGENTS.md, so the product's checks pass it.
 fixture_repo() {
   local dir=$1
   mkdir -p "$dir" || return 1
   git -C "$dir" init -q -b main || return 1
 
+  fixture__put "$dir/CLAUDE.md" '@AGENTS.md'
+  fixture__put "$dir/AGENTS.md" '# example' '' 'A fixture repository.'
   fixture__put "$dir/GOVERNANCE.md" '# Governance' '' '## Deciders' '' '- A Person'
   fixture__put "$dir/docs/work/0001-example/intent.md" '# 0001 example: intent' '' \
     '**Status:** draft. **Decider:** A Person.'

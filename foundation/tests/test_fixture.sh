@@ -47,6 +47,13 @@ else
     "with no product bin/ yet, the fixture has none"
 fi
 
+# --- the product's checks pass the fixture as built -------------------------
+assert_eq "@AGENTS.md" "$(cat "$R/CLAUDE.md")" "CLAUDE.md imports AGENTS.md"
+if [ -x "$R/bin/check" ]; then
+  (cd "$R" && bin/check >/dev/null 2>&1)
+  assert_status 0 "$?" "bin/check passes the fixture"
+fi
+
 # --- the caller's git configuration does not leak in -----------------------
 assert_eq "/dev/null" "${GIT_CONFIG_GLOBAL:-}" "global git configuration is ignored"
 assert_eq "" "${GIT_DIR:-}" "an inherited GIT_DIR is unset"
