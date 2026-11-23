@@ -8,7 +8,9 @@
 
 FIXTURE_FOUNDATION=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-# Git in a fixture reads no global or system configuration, inherits no
+# Git in a fixture reads no global or system configuration, no per-user
+# file (the ignore and attributes files under XDG_CONFIG_HOME or HOME) and no
+# template (whose hooks would run in every fixture repository), inherits no
 # repository from its caller (a hook's GIT_DIR, say) and has an identity; and
 # no check variable leaks in from the caller (CI sets CHECK_REF, say).
 fixture__isolate() {
@@ -18,7 +20,10 @@ fixture__isolate() {
   done
   unset CHECK_MODE CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE CHECK_MSG_FILE \
     PR_TITLE PR_BODY PR_NUMBER
-  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_ATTR_NOSYSTEM=1
+  # A path under /dev/null cannot exist, so git finds no file there.
+  export HOME=/dev/null/fixture-home XDG_CONFIG_HOME=/dev/null/fixture-home
+  export GIT_TEMPLATE_DIR=''
   export GIT_AUTHOR_NAME='A Person' GIT_AUTHOR_EMAIL='person@example.invalid'
   export GIT_COMMITTER_NAME='A Person' GIT_COMMITTER_EMAIL='person@example.invalid'
 }

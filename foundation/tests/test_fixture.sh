@@ -56,7 +56,27 @@ fi
 
 # --- the caller's git configuration does not leak in -----------------------
 assert_eq "/dev/null" "${GIT_CONFIG_GLOBAL:-}" "global git configuration is ignored"
-assert_eq "" "${GIT_DIR:-}" "an inherited GIT_DIR is unset"
+
+# A fixture built by a caller carrying a hook's GIT_DIR, a git ignore file
+# under XDG_CONFIG_HOME, a ~/.gitconfig and a template whose pre-commit hook
+# refuses everything is still its own clean repository.
+E="$SCRATCH/env"
+mkdir -p "$E/xdg/git" "$E/home" "$E/template/hooks"
+printf 'untracked.txt\n' >"$E/xdg/git/ignore"
+printf '[core]\n\texcludesFile = %s/xdg/git/ignore\n' "$E" >"$E/home/.gitconfig"
+printf '#!/bin/sh\nexit 1\n' >"$E/template/hooks/pre-commit"
+chmod +x "$E/template/hooks/pre-commit"
+out=$(GIT_DIR="$R/.git" XDG_CONFIG_HOME="$E/xdg" HOME="$E/home" GIT_TEMPLATE_DIR="$E/template" bash -c '
+  . "$1/lib/assert.sh"
+  . "$1/lib/fixture.sh"
+  fixture_repo "$2/iso" >/dev/null 2>&1 || echo "fixture_repo failed"
+  printf "git dir: %s\n" "$(cd "$(git -C "$2/iso" rev-parse --absolute-git-dir)" && pwd -P)"
+  printf x >"$2/iso/untracked.txt"
+  printf "untracked: %s\n" "$(git -C "$2/iso" ls-files -o --exclude-standard)"
+' _ "$TEST_DIR" "$E" 2>&1)
+assert_not_contains "$out" "fixture_repo failed" "a template's hooks are not installed in a fixture"
+assert_contains "$out" "git dir: $(cd "$E" && pwd -P)/iso/.git" "an inherited GIT_DIR does not redirect a fixture"
+assert_contains "$out" "untracked: untracked.txt" "the caller's git ignore files are not read"
 assert_eq "" "$(CHECK_REF=main bash -c '. "$1"; printf %s "${CHECK_REF:-}"' _ "$TEST_DIR/lib/fixture.sh")" \
   "an inherited CHECK_REF is unset"
 
@@ -75,11 +95,14 @@ assert_eq "gone" "$([ -e "$R/new.md" ] && echo here || echo gone)" "fixture_remo
 # --- a mutation that changes nothing is reported, and fails its suite -------
 # Each no-op runs, inside the fixture, in a suite of its own (one control
 # assertion that passes), which must exit 1 naming the file.
+# The suite takes its paths as arguments, never pasted into its source.
 noop() {
   local suite="$SCRATCH/noop_suite.sh"
-  printf '#!/usr/bin/env bash\nset -u\n. "%s/lib/assert.sh"\n. "%s/lib/fixture.sh"\ncd "%s" || exit 2\n"$@"\nassert_eq a a control\nassert_done\n' \
-    "$TEST_DIR" "$TEST_DIR" "$R" >"$suite"
-  bash "$suite" "$@" 2>&1
+  # shellcheck disable=SC2016 # expanded by the generated suite, not here
+  printf '%s\n' '#!/usr/bin/env bash' 'set -u' 'lib=$1 dir=$2' 'shift 2' \
+    '. "$lib/assert.sh"' '. "$lib/fixture.sh"' 'cd "$dir" || exit 2' '"$@"' \
+    'assert_eq a a control' 'assert_done' >"$suite"
+  bash "$suite" "$TEST_DIR/lib" "$R" "$@" 2>&1
 }
 out=$(noop fixture_replace GOVERNANCE.md "no such text" "x")
 assert_status 1 "$?" "replacing absent text fails the suite"

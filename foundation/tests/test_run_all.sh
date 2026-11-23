@@ -15,10 +15,13 @@ FIXTURES="$TEST_DIR/fixtures/runner"
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# write_suite FILE NAME: a suite with one passing assertion.
+# write_suite FILE NAME: a suite with one passing assertion. The runner
+# gives a suite no arguments, so it finds the assertion library through
+# ASSERT_LIB, never through a path pasted into its source.
+export ASSERT_LIB="$TEST_DIR/lib/assert.sh"
 write_suite() {
-  printf '#!/usr/bin/env bash\nset -u\n. "%s/lib/assert.sh"\nassert_eq a a "%s"\nassert_done\n' \
-    "$TEST_DIR" "$2" >"$1"
+  # shellcheck disable=SC2016 # expanded by the generated suite, not here
+  printf '%s\n' '#!/usr/bin/env bash' 'set -u' '. "$ASSERT_LIB"' "assert_eq a a '$2'" 'assert_done' >"$1"
 }
 
 # --- a failing suite fails the runner ---------------------------------------
@@ -50,8 +53,9 @@ assert_contains "$out" "not a directory" "runner says the directory does not exi
 
 # --- a suite with no assertions is a failure --------------------------------
 mkdir "$SCRATCH/silent"
-printf '#!/usr/bin/env bash\nset -u\n. "%s/lib/assert.sh"\nassert_done\n' \
-  "$TEST_DIR" >"$SCRATCH/silent/test_no_assertions.sh"
+# shellcheck disable=SC2016 # expanded by the generated suite, not here
+printf '%s\n' '#!/usr/bin/env bash' 'set -u' '. "$ASSERT_LIB"' 'assert_done' \
+  >"$SCRATCH/silent/test_no_assertions.sh"
 out=$(bash "$RUN_ALL" "$SCRATCH/silent" 2>&1)
 status=$?
 assert_status 1 "$status" "runner exits 1 when a suite ran no assertions"
