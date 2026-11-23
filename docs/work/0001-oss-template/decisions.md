@@ -39,6 +39,8 @@ What it changes:
 
 **Ruling 16, 20:17.** "and you stage everything out. Like, it should never be a big bulk, incremental disclosure, progressive disclosure, or whatever."
 
+**Ruling 17, 21:59.** "go ahead and start S1 after this", given after revision 5 of the ICM spec and plan: S1 is built once revision 5 is pushed. S1's pull request into `main` still needs the decider's ack at its head.
+
 **Ruling 18, 23:46 (a question card in chat).** "Rebase merge (Recommended)", choosing how S1 and every later slice land on `main`, whose ruleset requires linear history: by rebase merge.
 
 **Ruling 19, 23:46 (a question card in chat).** "Remove the links (Recommended)", choosing that the workspace, a public repository, names no private repository: the current text of `docs/work/` describes the upstream repository as "the upstream AI-native SDLC process", and no criterion requires a link to it. History is kept.
