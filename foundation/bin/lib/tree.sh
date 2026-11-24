@@ -180,10 +180,12 @@ tree__worktree_lines() {
     fi
   done
   [ -n "$files" ] || return 0
-  # One path per line; `./` keeps a name opening with a quote from being
-  # read as C-quoted.
-  blobs=$(printf '%s' "$files" | sed 's|^|./|' | git hash-object --no-filters --stdin-paths) ||
-    return 2
+  # Names go to git as arguments, never through --stdin-paths, whose line
+  # reader unquotes a name opening with a quote and strips a final CR.
+  blobs=$(
+    set -o pipefail
+    printf '%s' "$files" | tr '\n' '\0' | xargs -0 git hash-object --no-filters --
+  ) || return 2
   while IFS= read -r path <&3 && IFS= read -r blob <&4; do
     if [ -x "$path" ]; then mode=100755; else mode=100644; fi
     printf '%s %s\t%s\n' "$mode" "$blob" "$path"

@@ -124,11 +124,19 @@ assert_status 2 "$?" "an empty prefix exits 2 rather than excluding everything"
 
 # --- every source judges the same set of paths ---------------------------------
 # A committed, clean tree holding names git would quote or a shell would split
-# or expand: the three sources list it identically, and read each file.
+# or expand: the three sources list it identically, and read each file. A
+# name a line reader would rewrite (one opening with a quote, read as C-quoted;
+# one ending in a carriage return, stripped) sits beside the name it would
+# become, so a source that reads it that way reports the sibling's blob.
 O="$SCRATCH/odd"
 fixture_repo "$O"
 TAB=$(printf '\t')
+CR=$(printf '\r')
 odd_names="quo\"te.md
+\"q\"
+q
+cr$CR
+cr
 back\\slash.md
 tab${TAB}name.md
 two  spaces.md
