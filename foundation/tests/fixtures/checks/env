@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # A fixture check that prints what the dispatcher gave it
 # modes: tree staged range commit-msg pr report
+# LC_ALL as the dispatcher gave it, before this check sets its own.
+given_lc_all=${LC_ALL-}
 export LC_ALL=C
-for v in CHECK_MODE CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE CHECK_MSG_FILE LC_ALL PWD; do
+for v in CHECK_MODE CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE CHECK_MSG_FILE PWD; do
   printf '%s=%s\n' "$v" "$(printenv "$v")"
 done
+printf 'LC_ALL=%s\n' "$given_lc_all"
 exit 0

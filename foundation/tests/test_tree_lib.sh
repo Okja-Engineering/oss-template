@@ -236,7 +236,10 @@ assert_status 0 "$?" "worktree: a conflicted file reads as it stands on disk"
 assert_eq 1 "$(cd "$M" && tree_list worktree | grep -c "${TAB}AGENTS.md\$")" "worktree: listed once, not per stage"
 
 # --- the listing is sorted by path, and hashed without filters ----------------
-assert_eq "$(printf '%s\n' "$list_wt" | sort -t "$TAB" -k 2)" "$list_wt" "the listing is sorted by path"
+# git lists untracked files before tracked ones; the listing is by path.
+list_r=$(cd "$R" && tree_list worktree)
+assert_eq "$(printf '%s\n' "$list_r" | sort -t "$TAB" -k 2)" "$list_r" \
+  "the listing is sorted by path, untracked files among tracked ones"
 printf '* text=auto eol=crlf\n' >"$O/.gitattributes"
 printf 'a\r\nb\r\n' >"$O/crlf.txt"
 assert_eq "100644 $(printf 'a\r\nb\r\n' | git -C "$O" hash-object --no-filters --stdin)" \

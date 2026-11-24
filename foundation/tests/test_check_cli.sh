@@ -139,7 +139,9 @@ assert_contains "$OUT" "A fixture check that refuses" "--list gives each descrip
 # --- modes and filtering -------------------------------------------------------
 run "$R" pass fail env
 assert_eq "tree" "$(value CHECK_MODE)" "no option is tree mode"
-assert_eq "$(cd "$R" && pwd -P)" "$(cd "$(value PWD)" && pwd -P)" "checks run at the top of the work tree"
+OUT=$(cd "$R/docs" && ../bin/check env 2>&1)
+assert_eq "$(cd "$R" && pwd -P)" "$(cd "$(value PWD)" && pwd -P)" \
+  "run from a subdirectory, checks run at the top of the work tree"
 printf 'feat: x\n' >"$SCRATCH/msg"
 run "$R" commit-msg "$SCRATCH/msg"
 assert_status 0 "$ST" "commit-msg runs only checks with that mode"
@@ -160,11 +162,21 @@ assert_status 0 "$?" "bin/check run by a relative path under CDPATH runs"
 # --- tree mode bases -----------------------------------------------------------
 fixture_write "$R/ahead.txt" "ahead"
 fixture_commit "$R" "test: one commit ahead of origin"
+# Another clone moves origin/main on, so it is no longer the merge base.
+git clone -q "$R-origin.git" "$SCRATCH/codes-other"
+git -C "$SCRATCH/codes-other" commit -q --allow-empty -m "test: origin moves on"
+git -C "$SCRATCH/codes-other" push -q origin main
+git -C "$R" fetch -q origin
+MB=$(git -C "$R" merge-base origin/main HEAD)
+assert_eq "yes" "$([ "$MB" != "$(git -C "$R" rev-parse origin/main)" ] && echo yes)" \
+  "(the merge base differs from the upstream's tip)"
 run "$R" env
 assert_eq "$(git -C "$R" rev-parse origin/main)" "$(value CHECK_BASE)" "tree mode: base is the upstream"
 assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value CHECK_HEAD)" "tree mode: head is HEAD"
-assert_eq "$(git -C "$R" rev-parse origin/main)" "$(value DOCS_BASE)" \
-  "tree mode: docs base is the merge base with the upstream"
+assert_eq "$MB" "$(value DOCS_BASE)" "tree mode: docs base is the merge base with the upstream"
+run "$R" --staged env
+assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value CHECK_BASE)" "staged mode with a HEAD: base is HEAD"
+assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value DOCS_BASE)" "staged mode with a HEAD: docs base is HEAD"
 git -C "$R" branch -q --unset-upstream
 run "$R" env
 assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value DOCS_BASE)" "tree mode without an upstream: docs base is HEAD"
@@ -210,6 +222,7 @@ OUT=$(cd "$R" && CHECK_REF=main bin/check --range "$ZERO" HEAD env 2>&1)
 assert_eq "main" "$(value CHECK_REF)" "CHECK_REF is passed on"
 assert_eq "" "$(value DOCS_BASE)" "CHECK_REF=main: the root is checked, so no docs base"
 OUT=$(cd "$R" && CHECK_REF=refs/heads/main bin/check --range "" HEAD env 2>&1)
+assert_eq "main" "$(value CHECK_REF)" "CHECK_REF given as refs/heads/main is passed on as main"
 assert_eq "" "$(value DOCS_BASE)" "CHECK_REF as a full ref name works the same"
 
 # --- range mode: a BASE this clone does not have -------------------------------

@@ -196,6 +196,13 @@ Render.
 Render."
 refused "Outputs before Process" "$C2"
 valid
+fixture_replace "$R/$C1" "## Checkpoints
+
+The operator confirms.
+
+" ""
+passes "a contract with Audit and no Checkpoints"
+valid
 fixture_append "$R/$C2" "## Notes"
 refused "a section the contract shape does not allow" "$C2"
 
@@ -209,6 +216,8 @@ inputs_case() { # DESCRIPTION REPLACEMENT NEEDLE
 inputs_case "an input that is a directory" '`../../shared/`' "directory"
 inputs_case "an input that is a directory, without a slash" '`../../shared`' "directory"
 inputs_case "an input that is a glob" '`../../shared/*.tsv`' "glob"
+inputs_case "an input that is a ? glob" '`../../shared/answers.ts?`' "glob"
+inputs_case "an input that is a [ glob" '`../../shared/answers.[t]sv`' "glob"
 inputs_case "an input that does not resolve" '`../../shared/missing.tsv`' "does not resolve"
 inputs_case "an input above the workspace" '`../../../outside.txt`' "does not resolve"
 inputs_case "an input from a later stage's output" '`../02-render/output/<name>/render.md`' "later"
