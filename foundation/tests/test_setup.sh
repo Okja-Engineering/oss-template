@@ -53,4 +53,15 @@ out=$(GIT_CONFIG_GLOBAL="$SCRATCH/global.gitconfig" "$R/bin/setup" 2>&1)
 assert_eq ".githooks" "$(git -C "$R" config --local --get core.hooksPath)" \
   "a global core.hooksPath does not stand in for the clone's own"
 
+# Exit 0 means the hooks path in effect where setup runs is .githooks: a
+# worktree's own config overrides the clone's, so setup cannot succeed there.
+git -C "$R" config extensions.worktreeConfig true
+git -C "$R" config --worktree core.hooksPath /dev/null
+out=$("$R/bin/setup" 2>&1)
+assert_status 2 "$?" "a worktree's own core.hooksPath overriding the clone's exits 2"
+assert_contains "$out" "/dev/null" "  and names the value in effect"
+git -C "$R" config --worktree --unset core.hooksPath
+out=$("$R/bin/setup" 2>&1)
+assert_status 0 "$?" "  and with the override gone, setup exits 0"
+
 assert_done

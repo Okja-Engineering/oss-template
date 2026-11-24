@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Point git at this repository's hooks in .githooks/, in the clone's own
-# config. A second run changes nothing.
+# config. A second run changes nothing. Exit 0 means the hooks path in effect
+# here is .githooks; a worktree's own config or the command line can
+# override the clone's, and then setup exits 2 and names the value in effect.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -9,8 +11,16 @@ top=$(git -C "$here/.." rev-parse --show-toplevel 2>/dev/null) || {
   exit 2
 }
 if [ "$(git -C "$top" config --local --get core.hooksPath)" = .githooks ]; then
-  printf 'bin/setup: core.hooksPath is already .githooks\n'
-  exit 0
+  did='is already'
+else
+  git -C "$top" config --local core.hooksPath .githooks || exit 2
+  did='set to'
 fi
-git -C "$top" config --local core.hooksPath .githooks || exit 2
-printf 'bin/setup: core.hooksPath set to .githooks\n'
+effective=$(git -C "$top" config --get core.hooksPath)
+if [ "$effective" != .githooks ]; then
+  origin=$(git -C "$top" config --show-origin --get core.hooksPath)
+  printf 'bin/setup: core.hooksPath %s .githooks in the clone'"'"'s config, but here %s from %s overrides it\n' \
+    "$did" "$effective" "${origin%%	*}" >&2
+  exit 2
+fi
+printf 'bin/setup: core.hooksPath %s .githooks\n' "$did"
