@@ -62,12 +62,17 @@ body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
 input_rows() {
   awk '
     BEGIN { H = "| Source | File/Location | Section/Scope | Why |" }
-    # cells S: split the row S into c[1..n]; n, or 0 when S is not a row.
+    # cells S: split the row S into c[1..n] as GitHub does, an escaped pipe
+    # text and not a border; n, or 0 when S is not a row.
     function cells(s,   n, i) {
       sub(/[ \t]+$/, "", s)
       if (length(s) < 2 || s !~ /^\|.*\|$/) return 0
+      gsub(/\\\|/, "\001", s)
       n = split(substr(s, 2, length(s) - 2), c, "|")
-      for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", c[i])
+      for (i = 1; i <= n; i++) {
+        gsub(/^[ \t]+|[ \t]+$/, "", c[i])
+        gsub(/\001/, "|", c[i])
+      }
       return n
     }
     function bad(why) { print "BAD\t" why ": " $0 }
@@ -86,7 +91,7 @@ input_rows() {
     }
     at == "rows" {
       if (cells($0) != 4) bad("a row without four cells")
-      else if (c[2] !~ /^`[^`]+`$/) bad("a File/Location cell that is not one path in backticks")
+      else if (c[2] !~ /^`[^` ]([^`]*[^` ])?`$/) bad("a File/Location cell that is not one path in backticks")
       else if (index(c[1] c[3] c[4], "`")) bad("a code span outside File/Location")
       else print "ENTRY\t" substr(c[2], 2, length(c[2]) - 2)
       next

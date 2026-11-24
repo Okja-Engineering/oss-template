@@ -256,6 +256,16 @@ shape_case() { # DESCRIPTION REPLACEMENT NEEDLE
   fixture_replace "$R/$C1" "$TABLE" "$2"
   refused "$1" "$3"
 }
+# A cell is split as GitHub splits it: an escaped pipe is text, not a border.
+valid
+fixture_replace "$R/$C1" "$TABLE" "$HEADER
+$DELIM
+| shared | $A | all | the fields \\| the schema |"
+passes "a row whose Why holds an escaped pipe"
+shape_case "a File/Location span padded with spaces" "$HEADER
+$DELIM
+| shared | \` ../../shared/answers.tsv \` | all | x |" \
+  "a File/Location cell that is not one path in backticks: | shared |"
 shape_case "Inputs as a list, not the table" "- $A" "$OUTSIDE: - $A"
 shape_case "  and the refusal names the table it needs" "- $A" "no $HEADER table"
 shape_case "a list item naming a second file after a colon (B1)" "$TABLE
