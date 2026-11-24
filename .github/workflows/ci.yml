@@ -1,8 +1,9 @@
 name: ci
 
 # The workspace's CI. Git hooks are local and skippable (--no-verify, or no
-# bin/setup); this runs the same checks where they cannot be skipped, on
-# bash 5 (Ubuntu, with shellcheck) and the macOS /bin/bash 3.2 floor.
+# bin/setup); this runs the same checks on every pull request and push to
+# main, on bash 5 (Ubuntu, with shellcheck) and the macOS /bin/bash 3.2
+# floor, and main's ruleset requires both legs to pass.
 
 on:
   push:
@@ -27,7 +28,6 @@ jobs:
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       CHECK_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,13 +74,20 @@ jobs:
 
       - name: Each runner fails a failing suite
         # A runner that swallows a failure makes every suite vacuous while
-        # reporting green, so the job fails unless both runners fail this one.
+        # reporting green, so the job fails unless each runner exits 1
+        # because that one suite failed, not because it could not run.
         run: |
           [ "$RUNNER_OS" != macOS ] || export PATH=/usr/bin:/bin:/usr/sbin:/sbin
           for runner in foundation/tests/run-all.sh tests/run-all.sh; do
-            if "$runner" foundation/tests/fixtures/runner/failing >/dev/null 2>&1; then
-              echo "::error::$runner passed a deliberately failing suite"
-              exit 1
-            fi
+            st=0
+            out=$("$runner" foundation/tests/fixtures/runner/failing 2>&1) || st=$?
+            case "$st:$out" in
+              1:*"run-all: 1 of 1 suites failed"*) ;;
+              *)
+                printf '%s\n' "$out"
+                echo "::error::$runner did not fail the deliberately failing suite (exit $st)"
+                exit 1
+                ;;
+            esac
           done
           echo "both runners fail a failing suite"
