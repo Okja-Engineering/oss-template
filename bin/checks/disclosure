@@ -62,8 +62,8 @@ body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
 # PATH the code span its File/Location cell holds, and `BAD<TAB>WHY` for each
 # line that breaks the one shape Inputs takes: the table
 # `| Source | File/Location | Section/Scope | Why |`, its delimiter row, then
-# rows of four cells, File/Location one code span and no other cell holding
-# one (HTML code included) or a link or URL; the other cells are plain prose.
+# rows of four cells, File/Location one code span and the other cells plain
+# text: no backtick, <, [, ], @ or URL, each cell judged on its own.
 # Blank lines may come before and after the table; nothing else may.
 # shellcheck disable=SC2016 # a literal backtick, the Markdown code span
 input_rows() {
@@ -83,6 +83,17 @@ input_rows() {
       return n
     }
     function bad(why) { print "BAD\t" why ": " $0 }
+    # plain X NAME: why the cell NAME, holding X, is not plain text, or nothing.
+    function plain(x, name) {
+      if (index(x, "`")) return name " holds a backtick, which GitHub reads as code"
+      if (index(x, "<")) return name " holds <, which GitHub may read as HTML"
+      if (index(x, "[")) return name " holds [, which GitHub may read as a link"
+      if (index(x, "]")) return name " holds ], which GitHub may read as a link"
+      if (index(x, "@")) return name " holds @, which GitHub may read as an email link"
+      if (index(x, "://")) return name " holds ://, a URL"
+      if (x ~ /(^|[ \t*_~(])www\./) return name " holds www. at the start of a word, a URL"
+      return ""
+    }
     /^[ \t]*$/ {
       if (at == "delimiter") print "BAD\tits header without its delimiter row"
       if (at != "") at = "after"
@@ -99,8 +110,8 @@ input_rows() {
     at == "rows" {
       if (cells($0) != 4) bad("a row without four cells")
       else if (c[2] !~ /^`[^` ]([^`]*[^` ])?`$/) bad("a File/Location cell that is not one path in backticks")
-      else if (index(c[1] c[3] c[4], "`") || tolower(c[1] c[3] c[4]) ~ /<code/) bad("a code span outside File/Location")
-      else if ((c[1] "|" c[3] "|" c[4]) ~ /\]\(|\]\[|:\/\/|www\./) bad("a link or URL outside File/Location")
+      else if ((why = plain(c[1], "Source")) != "" || (why = plain(c[3], "Section/Scope")) != "" ||
+        (why = plain(c[4], "Why")) != "") bad(why)
       else print "ENTRY\t" substr(c[2], 2, length(c[2]) - 2)
       next
     }

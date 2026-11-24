@@ -338,44 +338,60 @@ shape_case "a code span after an HTML comment (B5)" "$TABLE
 shape_case "a code span after the end of an HTML comment (B6)" "<!-- x
 --> \`../../stages/*\`
 $TABLE" "$OUTSIDE: --> \`../../stages/*\`"
-shape_case "a code span in Why" "$HEADER
+# Source, Section/Scope and Why are plain text, each judged on its own: a
+# backtick, <, [, ], @ or a URL in one is refused, the refusal naming the cell
+# and what it holds, whatever GitHub would make of it.
+cell_row() { printf '| %s | %s | %s | %s |' "$1" "$A" "$2" "$3"; }
+cell_passes() { # DESCRIPTION SOURCE SCOPE WHY
+  valid
+  fixture_replace "$R/$C1" "$TABLE" "$HEADER
 $DELIM
-| shared | $A | all | see \`Process\` |" "a code span outside File/Location: | shared |"
-shape_case "a code span in Source" "$HEADER
+$(cell_row "$2" "$3" "$4")"
+  passes "$1"
+}
+cell_case() { # DESCRIPTION SOURCE SCOPE WHY NEEDLE
+  shape_case "$1" "$HEADER
 $DELIM
-| \`../../\` | $A | all | x |" "a code span outside File/Location: | \`../../\` |"
-shape_case "a code span in Section/Scope" "$HEADER
-$DELIM
-| shared | $A | \`../../stages/*\` | x |" "a code span outside File/Location: | shared |"
-# HTML code counts as a code span, and a link or URL names something too:
-# outside File/Location both are refused. Plain prose stays.
-valid
-fixture_replace "$R/$C1" "$TABLE" "$HEADER
-$DELIM
-| shared answers (stage 00) | $A | all: every field [sic] | the fields, as Process reads them |"
-passes "a row whose other cells hold plain prose"
-shape_case "HTML code in Why" "$HEADER
-$DELIM
-| shared | $A | all | also <code>../../stages/*</code> |" "a code span outside File/Location: | shared |"
-shape_case "HTML code in Source, in capitals" "$HEADER
-$DELIM
-| <CODE>../../</CODE> | $A | all | x |" "a code span outside File/Location: | <CODE>"
+$(cell_row "$2" "$3" "$4")" "Inputs: $5"
+}
+cell_passes "plain prose with an aside" "shared answers (stage 00)" "all (see Process)" "the fields (all)"
+cell_passes "e.g., i.e. and version numbers" "shared (v1.2.3)" "git 2.36.0+" "e.g. the fields, i.e. all"
+cell_passes "www. inside a word, and WWW. in capitals" shared "awww.yes" "WWW.example.com"
+cell_passes "a path written as prose" shared all "then ../02-render/CONTEXT.md"
+cell_case "a code span in Why" shared all 'see `Process`' "Why holds a backtick"
+cell_case "a code span in Source" '`../../`' all x "Source holds a backtick"
+cell_case "a code span in Section/Scope" shared '`../../stages/*`' x "Section/Scope holds a backtick"
+cell_case "HTML code in Why" shared all 'also <code>../../stages/*</code>' "Why holds <"
+cell_case "an HTML tag GitHub drops" shared all 'the <codec> field' "Why holds <"
+cell_case "an escaped <" shared all 'the \<code> tag' "Why holds <"
+cell_case "an HTML link" shared all '<a href="../02-render/CONTEXT.md">this</a>' "Why holds <"
+cell_case "an HTML image" shared all '<img src="../02-render/CONTEXT.md">' "Why holds <"
+cell_case "a mailto autolink" shared all '<mailto:ops@example.com>' "Why holds <"
+cell_case "monospace HTML" shared all '<tt>../../stages/*</tt>' "Why holds <"
+cell_case "sample HTML" shared all '<samp>../../stages/*</samp>' "Why holds <"
+cell_case "keyboard HTML" shared all '<kbd>../../stages/*</kbd>' "Why holds <"
+cell_case "preformatted HTML" shared all '<pre>../../stages/*</pre>' "Why holds <"
+cell_case "a < at the end of Source" 'x <' code y "Source holds <"
+cell_case "an inline link" shared all 'also [this](../02-render/CONTEXT.md)' "Why holds ["
+cell_case "a link split by an escaped pipe" shared all '[a\|b](../02-render/CONTEXT.md)' "Why holds ["
+cell_case "a shortcut reference" shared all 'see [later]' "Why holds ["
+cell_case "a collapsed reference" shared all 'see [later][]' "Why holds ["
+cell_case "a full reference in Source" '[the spec][1]' all x "Source holds ["
+cell_case "brackets with no definition" shared 'a[1][2]' x "Section/Scope holds ["
+cell_case "a bracketed [sic]" shared 'all: every field [sic]' x "Section/Scope holds ["
+cell_case "a lone ]" shared all 'a ] b' "Why holds ]"
+cell_case "an email address" shared all 'ask ops@example.com' "Why holds @"
+cell_case "a URL" shared 'https://example.com/x' x "Section/Scope holds ://"
+cell_case "a URL GitHub does not link" shared all 's3://bucket' "Why holds ://"
+cell_case "www. after a space" shared all 'see www.example.com' "Why holds www."
+cell_case "www. opening the cell" 'www.example.com' all x "Source holds www."
+cell_case "www. after a parenthesis" shared all '(www.example.com)' "Why holds www."
+cell_case "www. after an underscore" shared all '_www.example.com_' "Why holds www."
+cell_case "the word www. alone" shared all 'the www. prefix' "Why holds www."
 shape_case "HTML code in File/Location" "$HEADER
 $DELIM
 | shared | <code>../../shared/answers.tsv</code> | all | x |" \
   "a File/Location cell that is not one path in backticks: | shared | <code>"
-shape_case "a Markdown link in Why" "$HEADER
-$DELIM
-| shared | $A | all | also [this](../02-render/CONTEXT.md) |" "a link or URL outside File/Location: | shared |"
-shape_case "a reference link in Source" "$HEADER
-$DELIM
-| [the spec][1] | $A | all | x |" "a link or URL outside File/Location: | [the spec][1] |"
-shape_case "a bare URL in Section/Scope" "$HEADER
-$DELIM
-| shared | $A | https://example.com/x | x |" "a link or URL outside File/Location: | shared |"
-shape_case "a www. URL in Why" "$HEADER
-$DELIM
-| shared | $A | all | see www.example.com |" "a link or URL outside File/Location: | shared |"
 shape_case "an empty File/Location cell" "$HEADER
 $DELIM
 | shared |  | all | x |" "a File/Location cell that is not one path in backticks: | shared |  |"
