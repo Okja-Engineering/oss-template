@@ -57,8 +57,18 @@ EOF
   printf '%s' "${found:-none}"
 }
 entry() { entry_of "$R" "$1" "$2"; }
-# content_of DIR SOURCE PATH: what tree_cat reads, or "none".
-content_of() { (cd "$1" && tree_cat "$2" "$3" 2>/dev/null) || printf 'none'; }
+# content_of DIR SOURCE PATH: what tree_cat reads; "none" when PATH names no
+# file there (exit 1), and "unreadable" when the source cannot be read (exit 2).
+content_of() {
+  local out st
+  out=$(cd "$1" && tree_cat "$2" "$3" 2>/dev/null)
+  st=$?
+  case "$st" in
+    0) printf '%s' "$out" ;;
+    1) printf 'none' ;;
+    *) printf 'unreadable' ;;
+  esac
+}
 content() { content_of "$R" "$1" "$2"; }
 
 C="commit:$HEAD_SHA"
