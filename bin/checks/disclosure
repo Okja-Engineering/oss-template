@@ -35,6 +35,12 @@ has_path() { printf '%s\n' "$paths" | grep -Fxq -- "$1"; }
 # under DIR: the paths under DIR/, matched literally.
 under() { printf '%s\n' "$paths" | P="$1/" awk 'index($0, ENVIRON["P"]) == 1'; }
 has_dir() { [ -n "$(under "$1")" ]; }
+# mode_of PATH: the mode the listing gives PATH, matched literally, or nothing.
+mode_of() {
+  printf '%s\n' "$listing" | P="$1" awk '
+    { i = index($0, "\t") }
+    !found && substr($0, i + 1) == ENVIRON["P"] { print substr($0, 1, index($0, " ") - 1); found = 1 }'
+}
 lines_of() { tree_cat "$src" "$1" | awk 'END { print NR }'; }
 
 # section FILE NAME: the lines of FILE's `## NAME` section, outside fences.
@@ -215,6 +221,10 @@ while IFS= read -r s <&3; do
       continue
     fi
     case "$path" in
+      /*)
+        refuse "$contract: Inputs \`$path\` is absolute, where it is read from its stage folder"
+        continue
+        ;;
       *'*'* | *'?'* | *'['*)
         refuse "$contract: Inputs \`$path\` is a glob"
         continue
@@ -241,7 +251,14 @@ while IFS= read -r s <&3; do
     fi
     inputs="$inputs$target
 "
-    if has_path "$target"; then
+    # Opened as written, it must reach a tracked regular file: a link is
+    # not followed, since its target may lie anywhere.
+    mode=$(mode_of "$target")
+    if [ "$mode" = 120000 ]; then
+      refuse "$contract: Inputs \`$path\` is a symbolic link, not a file"
+    elif [ "$mode" = 160000 ]; then
+      refuse "$contract: Inputs \`$path\` is a submodule, not a file"
+    elif [ -n "$mode" ]; then
       case "$target" in
         stages/*/*)
           other=${target#stages/}

@@ -230,6 +230,50 @@ DOTDOT="a .. after a name"
 inputs_case "an input going up through a file" '`../02-render/CONTEXT.md/../../../AGENTS.md`' "$DOTDOT"
 inputs_case "an input going up through a directory that does not exist" '`../../no-such-dir/../AGENTS.md`' "$DOTDOT"
 inputs_case "an input whose name holds a space before a .." '`../02-render/CONTEXT.md ../../../../AGENTS.md`' "$DOTDOT"
+
+# A path is accepted only when, opened as written from its stage folder, it
+# reaches a tracked regular file. Each case is committed and judged in every
+# mode, since pre-push and CI judge the commit, not the disk.
+every_mode() { # DESCRIPTION NEEDLE
+  fixture_commit "$R" "test: $1"
+  run
+  assert_status 1 "$ST" "tree mode refuses $1"
+  assert_contains "$OUT" "$2" "  and the refusal says: $2"
+  run --staged
+  assert_status 1 "$ST" "staged mode refuses $1"
+  assert_contains "$OUT" "$2" "  and the refusal says: $2"
+  run --range HEAD~1 HEAD
+  assert_status 1 "$ST" "range mode refuses $1"
+  assert_contains "$OUT" "$2" "  and the refusal says: $2"
+}
+path_case() { # DESCRIPTION PATH NEEDLE
+  valid
+  fixture_replace "$R/$C1" "$A" "\`$2\`"
+  every_mode "$1" "$3"
+}
+link_case() { # DESCRIPTION LINK TARGET NEEDLE
+  valid
+  ln -s "$3" "$R/shared/$2"
+  fixture_replace "$R/$C1" "$A" "\`../../shared/$2\`"
+  every_mode "$1" "$4"
+}
+path_case "an absolute input" /CONTEXT.md "Inputs \`/CONTEXT.md\` is absolute"
+path_case "an absolute input with a doubled slash" //CONTEXT.md "Inputs \`//CONTEXT.md\` is absolute"
+path_case "an absolute input naming the stage's own file" /output/.gitignore \
+  "Inputs \`/output/.gitignore\` is absolute"
+link_case "a link to a later stage's file" later.md ../stages/02-render/CONTEXT.md \
+  "Inputs \`../../shared/later.md\` is a symbolic link"
+link_case "a link to a directory" stages ../stages "Inputs \`../../shared/stages\` is a symbolic link"
+link_case "a link outside the workspace" hosts /etc/hosts "Inputs \`../../shared/hosts\` is a symbolic link"
+valid
+ln -s . "$R/shared/here"
+fixture_replace "$R/$C1" "$A" '`../../shared/here/answers.tsv`'
+every_mode "a path through a link to a directory" "Inputs \`../../shared/here/answers.tsv\` does not resolve"
+valid
+git init -q -b main "$R/shared/nested"
+git -C "$R/shared/nested" commit -q --allow-empty -m "test: nested"
+fixture_replace "$R/$C1" "$A" '`../../shared/nested`'
+every_mode "a submodule" "Inputs \`../../shared/nested\` is a submodule"
 inputs_case "an input from a later stage's output" '`../02-render/output/<name>/render.md`' "later"
 inputs_case "an input from a later stage's folder" '`../02-render/references/notes.md`' "later"
 inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' \
