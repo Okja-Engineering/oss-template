@@ -312,6 +312,10 @@ fixture_replace "$R/$C1" "$TABLE" "$HEADER
 $DELIM
 | shared | $A | all | the fields \\| the schema |"
 passes "a row whose Why holds an escaped pipe"
+valid
+put 'shared/a|b.tsv' 'fields'
+fixture_replace "$R/$C1" "$A" '`../../shared/a\|b.tsv`'
+passes "a File/Location span holding an escaped pipe, read as the path GitHub shows"
 shape_case "a File/Location span padded with spaces" "$HEADER
 $DELIM
 | shared | \` ../../shared/answers.tsv \` | all | x |" \
