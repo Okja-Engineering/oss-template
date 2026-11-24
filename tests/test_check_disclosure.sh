@@ -516,6 +516,13 @@ every_mode "two files that differ only in case" "shared/Answers.tsv and shared/a
 valid
 put 'shared/a:b.md' 'x'
 every_mode "a path holding a colon" "shared/a:b.md: $NONPORT"
+# One name from each class outside the charset; a mutant allowing any one
+# of them fails here.
+for c in '~' '[' ']' '|' '"' ':' "$TAB" "$(printf '\303\251')" '*'; do
+  valid
+  put "shared/a${c}b.md" 'x'
+  refused "a path holding $c" "shared/a${c}b.md: $NONPORT"
+done
 # Each set of twins is named once, where its spellings first differ, so one
 # run names every twin: here both A/ and a/, and a/x and a/X under a/.
 valid
