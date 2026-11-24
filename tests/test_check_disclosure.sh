@@ -328,9 +328,9 @@ $DELIM
 | shared | $A | all | the fields \\| the schema |"
 passes "a row whose Why holds an escaped pipe"
 valid
-put 'shared/a|b.tsv' 'fields'
 fixture_replace "$R/$C1" "$A" '`../../shared/a\|b.tsv`'
-passes "a File/Location span holding an escaped pipe, read as the path GitHub shows"
+refused "a File/Location span holding an escaped pipe, read as the path GitHub shows" \
+  "Inputs \`../../shared/a|b.tsv\` does not resolve"
 shape_case "a File/Location span padded with spaces" "$HEADER
 $DELIM
 | shared | \` ../../shared/answers.tsv \` | all | x |" \
@@ -472,6 +472,46 @@ refused "an earlier stage's output its Outputs do not list" "Outputs"
 valid
 put stages/02-render/references/extra.md 'extra'
 refused "a file in references/ its Inputs do not name" "stages/02-render/references/extra.md"
+
+# --- AC2: the tree is portable ------------------------------------------------
+# A path is judged by its literal spelling, which a disk that folds case or
+# Unicode would open as another: so every tracked path is ASCII letters,
+# digits, ., _, -, / and space, and no two spellings of a path or of its
+# directories differ only in case. Such a disk writes a file into the folder
+# it folds to, and git there folds a plain add to that folder's spelling, so
+# each entry is made by name; a case-sensitive disk holds both.
+variant() { # PATH: track PATH as spelled
+  put "$1" 'notes'
+  git -C "$R" update-index --add --cacheinfo "100644,$(git -C "$R" hash-object -w -- "$1"),$1"
+}
+TWIN="tracked paths that differ only in case"
+NONPORT="not a portable path: only ASCII letters, digits, ., _, -, / and space"
+LS=$(printf '\305\277') # U+017F, a long s, which such a disk folds to s
+valid
+variant Stages/02-render/notes.md
+fixture_replace "$R/$C1" "$A" '`../../Stages/02-render/notes.md`'
+every_mode "a later stage's file through a case twin of stages/ (q13)" "Stages/ and stages/: $TWIN"
+assert_not_contains "$OUT" "Stages/02-render/ and" "  and names the twins once, at their shortest prefix"
+valid
+variant Stages/01-ask/output/x.md
+fixture_replace "$R/$C2" '`references/notes.md` | all | notes |' \
+  '`references/notes.md` | all | notes |
+| 01-ask | `../../Stages/01-ask/output/x.md` | all | x |'
+every_mode "an earlier stage's output/ through a case twin (H8)" "Stages/ and stages/: $TWIN"
+valid
+variant "${LS}tages/02-render/notes.md"
+fixture_replace "$R/$C1" "$A" "\`../../${LS}tages/02-render/notes.md\`"
+every_mode "a later stage's file through a non-ASCII twin (H9)" "${LS}tages/02-render/notes.md: $NONPORT"
+valid
+variant "${LS}tages/01-ask/references/r.md"
+every_mode "an unnamed reference through a non-ASCII twin (H10)" \
+  "${LS}tages/01-ask/references/r.md: $NONPORT"
+valid
+variant shared/Answers.tsv
+every_mode "two files that differ only in case" "shared/Answers.tsv and shared/answers.tsv: $TWIN"
+valid
+put 'shared/a:b.md' 'x'
+every_mode "a path holding a colon" "shared/a:b.md: $NONPORT"
 
 # --- paths are judged literally, never split or expanded -------------------------
 valid

@@ -15,6 +15,9 @@
 #   that reaches a tracked regular file not in a later stage, or an earlier
 #   stage's ../NN-slug/output/<name>/FILE that stage's Outputs lists; every
 #   file in a stage's references/ is one of its Inputs.
+# AC2: every tracked path is portable: ASCII letters, digits, ., _, -, /
+#   and space, and no two spellings of a path or of its directories that
+#   differ only in case.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -151,6 +154,45 @@ case $? in
   1) refused=1 ;;
   *) exit 2 ;;
 esac
+
+# --- AC2: the tree is portable -------------------------------------------------
+# Every rule below judges a path by its literal spelling, which is sound only
+# where the disk opens no other path for it; a disk that folds case or
+# Unicode would. So each path holds only ASCII letters, digits, ., _, -, /
+# and space, and no two spellings of a path, or of any of its directories,
+# differ only in case. A pair of twins is named once, at its shortest prefix.
+while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  refuse "$p: not a portable path: only ASCII letters, digits, ., _, -, / and space"
+done <<EOF
+$(printf '%s\n' "$paths" | grep -v '^[A-Za-z0-9._ /-]*$')
+EOF
+while IFS= read -r t; do
+  [ -n "$t" ] || continue
+  refuse "$t: tracked paths that differ only in case"
+done <<EOF
+$(printf '%s\n' "$paths" | awk -F/ '
+  NF {
+    p = ""
+    for (i = 1; i <= NF; i++) {
+      p = p (i > 1 ? "/" : "") $i
+      shown = p (i < NF ? "/" : "")
+      k = tolower(p)
+      if ((k, shown) in seen) continue
+      seen[k, shown] = 1
+      n[k]++
+      list[k] = list[k] (n[k] > 1 ? " and " : "") shown
+    }
+  }
+  END {
+    for (k in n) {
+      if (n[k] < 2) continue
+      parent = k
+      if (sub(/\/[^\/]*$/, "", parent) && (parent in n) && n[parent] > 1) continue
+      print list[k]
+    }
+  }' | sort)
+EOF
 
 # --- AC2: stage folders ------------------------------------------------------
 stages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "stages" && NF >= 3 { print $2 }' | sort -u)
