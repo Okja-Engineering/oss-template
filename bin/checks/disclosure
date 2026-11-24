@@ -160,7 +160,8 @@ esac
 # where the disk opens no other path for it; a disk that folds case or
 # Unicode would. So each path holds only ASCII letters, digits, ., _, -, /
 # and space, and no two spellings of a path, or of any of its directories,
-# differ only in case. A pair of twins is named once, at its shortest prefix.
+# differ only in case. Two spellings first differ in one segment under one
+# parent, so each set of twins is named once, under that parent.
 while IFS= read -r p; do
   [ -n "$p" ] || continue
   refuse "$p: not a portable path: only ASCII letters, digits, ., _, -, / and space"
@@ -173,25 +174,19 @@ while IFS= read -r t; do
 done <<EOF
 $(printf '%s\n' "$paths" | awk -F/ '
   NF {
-    p = ""
+    parent = ""
     for (i = 1; i <= NF; i++) {
-      p = p (i > 1 ? "/" : "") $i
-      shown = p (i < NF ? "/" : "")
-      k = tolower(p)
-      if ((k, shown) in seen) continue
-      seen[k, shown] = 1
-      n[k]++
-      list[k] = list[k] (n[k] > 1 ? " and " : "") shown
+      shown = parent $i (i < NF ? "/" : "")
+      k = parent tolower($i)
+      if (!(shown in seen)) {
+        seen[shown] = 1
+        n[k]++
+        list[k] = list[k] (n[k] > 1 ? " and " : "") shown
+      }
+      parent = parent $i "/"
     }
   }
-  END {
-    for (k in n) {
-      if (n[k] < 2) continue
-      parent = k
-      if (sub(/\/[^\/]*$/, "", parent) && (parent in n) && n[parent] > 1) continue
-      print list[k]
-    }
-  }' | sort)
+  END { for (k in n) if (n[k] > 1) print list[k] }' | sort)
 EOF
 
 # --- AC2: stage folders ------------------------------------------------------

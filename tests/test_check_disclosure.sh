@@ -240,6 +240,9 @@ inputs_case "an input that is only ../.." '`../..`' "Inputs \`../..\` is a direc
 # mode, since pre-push and CI judge the commit, not the disk.
 every_mode() { # DESCRIPTION NEEDLE
   fixture_commit "$R" "test: $1"
+  modes_refuse "$1" "$2"
+}
+modes_refuse() { # DESCRIPTION NEEDLE: the committed workspace, in every mode
   run
   assert_status 1 "$ST" "tree mode refuses $1"
   assert_contains "$OUT" "$2" "  and the refusal says: $2"
@@ -513,6 +516,18 @@ every_mode "two files that differ only in case" "shared/Answers.tsv and shared/a
 valid
 put 'shared/a:b.md' 'x'
 every_mode "a path holding a colon" "shared/a:b.md: $NONPORT"
+# Each set of twins is named once, where its spellings first differ, so one
+# run names every twin: here both A/ and a/, and a/x and a/X under a/.
+valid
+variant A/x
+variant a/x
+variant a/X
+# A case-insensitive disk holds one file for all three, so git add -A there
+# refuses the aliases; the index is committed as it stands.
+git -C "$R" commit -q --no-verify -m "test: twins under one folder"
+modes_refuse "twins under one folder, beside that folder's twin" "a/X and a/x: $TWIN"
+assert_contains "$OUT" "A/ and a/: $TWIN" "  and names the folders' twins too"
+assert_not_contains "$OUT" "A/x and" "  and names no set twice"
 
 # --- paths are judged literally, never split or expanded -------------------------
 valid
