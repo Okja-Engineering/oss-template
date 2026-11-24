@@ -1,6 +1,6 @@
 # Workflow
 
-The human source for every workflow rule in this workspace: the stages and their checkpoints, approval, publishing, the target, and redoing a run. The agent files link here for each rule they state; the design is in [the spec](work/0001-oss-template/spec.md).
+The human account of the workflow as planned: the stages, their checkpoints and the target. The rules for approval, publishing and redoing a run are added here with the slices that build them. The agent files link here for each workflow rule they state; the design is in [the spec](work/0001-oss-template/spec.md).
 
 ## Status
 
@@ -12,10 +12,10 @@ A run creates one repository. It goes through four stages in order, each a folde
 
 | Stage | What happens | Checkpoint | Lands in |
 |---|---|---|---|
-| 01-ask | the agent drafts the answers; `bin/ask` writes them | the operator confirms the answers | S2 |
+| 01-ask | the agent drafts the answers; `bin/ask` writes them | the operator confirms the answers, and approves removing the target before a redo | S2 |
 | 02-render | `bin/render` writes the produced files into the target | only before replacing a render | S2 |
-| 03-verify | `bin/verify` runs the produced repository's checks, then makes its first commit | only when a target must be removed | S3 |
-| 04-publish | `bin/publish` creates the repository on GitHub and pushes it | a listed decider approves the plan line | S4 |
+| 03-verify | `bin/verify` runs the produced repository's checks, then makes its first commit | only before a target is removed | S3 |
+| 04-publish | `bin/publish` creates the repository on GitHub and pushes it | a listed decider approves the plan line; the operator decides whether to abandon an attempted run | S4 |
 
 Scripts do every write. The agent drafts, presents each checkpoint and explains failures; the operator and the deciders make the calls. None of the stages exists yet, so these checkpoints are not enforced.
 

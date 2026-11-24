@@ -1,6 +1,6 @@
 # oss-template
 
-A workspace an agent runs to create a new Okja repository. You answer a short questionnaire, the agent works through four stages, and you decide at each checkpoint. Every repository it produces, private or public, starts from the same self-checking foundation.
+A workspace an agent will run to create a new Okja repository: you will answer a short questionnaire, the agent will work through four stages, and you will decide at each checkpoint. Every repository it produces, private or public, is to start from the same self-checking foundation.
 
 ## Status
 
@@ -8,7 +8,7 @@ Pre-launch. The workspace is being built in ten slices, and until the last one m
 
 ## How it works
 
-A run goes through four stages, each a folder under `stages/` with a short contract an agent follows: ask (the answers), render (the files), verify (the checks, then the first commit) and publish (the repository on GitHub). Scripts do every write; the agent drafts answers, presents each checkpoint and explains failures; you make the calls. [docs/workflow.md](docs/workflow.md) describes each stage and checkpoint.
+A run will go through four stages, each a folder under `stages/` with a short contract an agent follows: ask (the answers), render (the files), verify (the checks, then the first commit) and publish (the repository on GitHub). Scripts do every write; the agent drafts answers, presents each checkpoint and explains failures; you make the calls. [docs/workflow.md](docs/workflow.md) describes each stage and checkpoint.
 
 ## Getting started
 
@@ -20,7 +20,7 @@ tests/run-all.sh              # run the workspace's suites
 foundation/tests/run-all.sh   # run the product's suites
 ```
 
-You need bash 3.2 or later, git and the usual POSIX tools. `shellcheck` is optional on your machine.
+You need bash 3.2 or later, git 2.36 or later and the usual POSIX tools. `shellcheck` is optional on your machine.
 
 ## Layout
 

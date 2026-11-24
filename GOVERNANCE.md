@@ -1,6 +1,6 @@
 # Governance
 
-Who decides what in this workspace. A produced repository has its own `GOVERNANCE.md`, from the foundation; this one governs only the workspace.
+Who decides what in this workspace. A produced repository will have its own `GOVERNANCE.md`, from the foundation; this one governs only the workspace.
 
 ## Roles
 
@@ -21,7 +21,7 @@ These are not enforced yet: the checks that hold the listed names land in later 
 
 ## Approval
 
-A decider approves a pull request by commenting `Ack at <head SHA>` on its current head. A new push needs a new ack. Whoever merges quotes that comment in the merge commit body. With one decider listed there is no required-review ruleset, since GitHub refuses self-approval; with two or more, a ruleset requires a decider's review. That the comment came from the decider is not enforced.
+A decider approves a pull request by commenting `Ack at <head SHA>` on its current head. A new push needs a new ack. Before merging, whoever merges quotes that comment on the pull request, which then lands by rebase, since `main` keeps a linear history. With one decider listed there is no required-review ruleset, since GitHub refuses self-approval; with two or more, a ruleset requires a decider's review. That the comment came from the decider is not enforced.
 
 ## Deciders
 
