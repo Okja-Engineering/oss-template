@@ -17,7 +17,7 @@ A run creates one repository. It goes through four stages in order, each a folde
 | 03-verify | `bin/verify` runs the produced repository's checks, then makes its first commit | only before a target is removed | S3 |
 | 04-publish | `bin/publish` creates the repository on GitHub and pushes it | a listed decider approves the plan line; the operator decides whether to abandon an attempted run | S4 |
 
-Scripts do every write. The agent drafts, presents each checkpoint and explains failures; the operator and the deciders make the calls. None of the stages exists yet, so these checkpoints are not enforced.
+In a stage, an agent loads its `CONTEXT.md` and only the files its `## Inputs` table names. Scripts do every write. The agent drafts, presents each checkpoint and explains failures; the operator and the deciders make the calls. None of the stages exists yet, so these checkpoints are not enforced.
 
 ## The target
 
