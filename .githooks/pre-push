@@ -5,7 +5,8 @@
 # pushed ref's commits and tree through the tree reader. An updated ref is
 # judged from the remote's old SHA, a new ref from an empty base with
 # CHECK_REF set to it (bin/check judges a remote SHA this clone never fetched
-# the same way); refs sharing a commit are judged once. A ref that changes
+# the same way). Each ref is judged by its own range, though refs share a
+# commit: its verdict is the one it gets when pushed alone. A ref that changes
 # the checks themselves is judged here by today's checks, and in CI by its
 # own. A deleted ref and a notes ref are skipped; a ref on anything but a
 # commit cannot be judged.
@@ -27,7 +28,7 @@ GIT_INDEX_FILE="$scratch/index" git read-tree HEAD &&
   exit 2
 }
 
-worst=0 judged=""
+worst=0
 # A last line without its newline (by hand, not from git) is still judged.
 while read -r _local_ref local_sha remote_ref remote_sha || [ -n "${local_sha:-}" ]; do
   st=0
@@ -52,16 +53,8 @@ while read -r _local_ref local_sha remote_ref remote_sha || [ -n "${local_sha:-}
     printf 'pre-push: %s is not a commit, so bin/check cannot judge it\n' "$remote_ref" >&2
     st=2
   else
-    case " $judged " in
-      *" $commit "*)
-        printf 'pre-push: %s is at %s, already judged in this push\n' "$remote_ref" "$commit"
-        ;;
-      *)
-        judged="$judged $commit"
-        CHECK_REF=${remote_ref#refs/heads/} "$scratch/head/bin/check" --range "$base" "$commit" </dev/null
-        st=$?
-        ;;
-    esac
+    CHECK_REF=${remote_ref#refs/heads/} "$scratch/head/bin/check" --range "$base" "$commit" </dev/null
+    st=$?
   fi
   [ "$st" -gt "$worst" ] && worst=$st
 done

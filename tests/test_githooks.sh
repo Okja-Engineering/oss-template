@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The workspace's git hooks call its bin/check with their arguments:
 # commit-msg with the message file, pre-commit in staged mode, and pre-push
-# in range mode per pushed commit (new, updated) with HEAD's committed checks,
-# skipping a deleted ref. Driven
-# through real git in a fixture workspace with a bare remote.
+# in range mode per pushed ref (new, updated) with HEAD's committed checks,
+# skipping a deleted ref. Driven through real git in a fixture workspace with
+# a bare remote.
 set -u
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -158,7 +158,7 @@ assert_status 0 "$ST" "a ref with no bin/check of its own and a good tree passes
 pp "refs/heads/bare $(sha bare) refs/heads/bare $ZERO"
 assert_status 1 "$ST" "  and with a bad tree is refused"
 
-# Refs sharing a commit, a branch and its tag: judged once, clean or not.
+# Refs sharing a commit, a branch and its tag: clean or not, both get one verdict.
 git -C "$R" branch twin main
 git -C "$R" tag -a -m "a tag" v1 main
 g push origin twin v1
@@ -175,6 +175,31 @@ assert_eq "0" "$(git -C "$R-origin.git" for-each-ref refs/heads/twin-bad refs/ta
   "  and the remote gets neither"
 pp "refs/tags/blobtag $(sha blobtag) refs/tags/blobtag $ZERO"
 assert_status 2 "$ST" "a ref on a non-commit is 'cannot judge', exit 2"
+
+# --- pre-push judges each ref by its own range ---------------------------------
+# Two refs at one commit, whose ranges differ: a ref's verdict is the one it
+# gets when pushed alone. The remote's rel already holds a commit whose subject
+# holds BAD; its main does not.
+cp "$TEST_DIR/fixtures/checks/subjects" "$R/bin/checks/subjects"
+plant "test: a check on the subjects a push adds"
+g push --no-verify origin main
+git -C "$R" checkout -q -b rel
+git -C "$R" commit -q --allow-empty --no-verify -m "feat: BAD subject"
+g push --no-verify origin rel
+git -C "$R" checkout -q main
+git -C "$R" merge -q --ff-only rel
+git -C "$R" commit -q --allow-empty --no-verify -m "feat: after it"
+git -C "$R" branch -q -f rel main
+rel_old=$(git -C "$R-origin.git" rev-parse rel)
+main_old=$(git -C "$R-origin.git" rev-parse main)
+pp "refs/heads/rel $(sha main) refs/heads/rel $rel_old"
+assert_status 0 "$ST" "rel alone adds no BAD subject and passes"
+pp "refs/heads/main $(sha main) refs/heads/main $main_old"
+assert_status 1 "$ST" "main alone adds the BAD subject and is refused"
+pp "refs/heads/rel $(sha main) refs/heads/rel $rel_old" "refs/heads/main $(sha main) refs/heads/main $main_old"
+assert_status 1 "$ST" "pushed together at one commit, main is still refused"
+g push origin rel main
+assert_eq "$main_old" "$(git -C "$R-origin.git" rev-parse main)" "  and the remote's main does not move"
 
 # --- hooks run by hand --------------------------------------------------------
 OUT=$(cd "$R" && .githooks/commit-msg 2>&1)
