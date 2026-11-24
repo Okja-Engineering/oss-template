@@ -298,6 +298,35 @@ $DELIM
 shape_case "a code span in Section/Scope" "$HEADER
 $DELIM
 | shared | $A | \`../../stages/*\` | x |" "a code span outside File/Location: | shared |"
+# HTML code counts as a code span, and a link or URL names something too:
+# outside File/Location both are refused. Plain prose stays.
+valid
+fixture_replace "$R/$C1" "$TABLE" "$HEADER
+$DELIM
+| shared answers (stage 00) | $A | all: every field [sic] | the fields, as Process reads them |"
+passes "a row whose other cells hold plain prose"
+shape_case "HTML code in Why" "$HEADER
+$DELIM
+| shared | $A | all | also <code>../../stages/*</code> |" "a code span outside File/Location: | shared |"
+shape_case "HTML code in Source, in capitals" "$HEADER
+$DELIM
+| <CODE>../../</CODE> | $A | all | x |" "a code span outside File/Location: | <CODE>"
+shape_case "HTML code in File/Location" "$HEADER
+$DELIM
+| shared | <code>../../shared/answers.tsv</code> | all | x |" \
+  "a File/Location cell that is not one path in backticks: | shared | <code>"
+shape_case "a Markdown link in Why" "$HEADER
+$DELIM
+| shared | $A | all | also [this](../02-render/CONTEXT.md) |" "a link or URL outside File/Location: | shared |"
+shape_case "a reference link in Source" "$HEADER
+$DELIM
+| [the spec][1] | $A | all | x |" "a link or URL outside File/Location: | [the spec][1] |"
+shape_case "a bare URL in Section/Scope" "$HEADER
+$DELIM
+| shared | $A | https://example.com/x | x |" "a link or URL outside File/Location: | shared |"
+shape_case "a www. URL in Why" "$HEADER
+$DELIM
+| shared | $A | all | see www.example.com |" "a link or URL outside File/Location: | shared |"
 shape_case "an empty File/Location cell" "$HEADER
 $DELIM
 | shared |  | all | x |" "a File/Location cell that is not one path in backticks: | shared |  |"

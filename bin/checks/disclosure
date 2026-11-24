@@ -57,7 +57,8 @@ body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
 # line that breaks the one shape Inputs takes: the table
 # `| Source | File/Location | Section/Scope | Why |`, its delimiter row, then
 # rows of four cells, File/Location one code span and no other cell holding
-# one. Blank lines may come before and after the table; nothing else may.
+# one (HTML code included) or a link or URL; the other cells are plain prose.
+# Blank lines may come before and after the table; nothing else may.
 # shellcheck disable=SC2016 # a literal backtick, the Markdown code span
 input_rows() {
   awk '
@@ -92,7 +93,8 @@ input_rows() {
     at == "rows" {
       if (cells($0) != 4) bad("a row without four cells")
       else if (c[2] !~ /^`[^` ]([^`]*[^` ])?`$/) bad("a File/Location cell that is not one path in backticks")
-      else if (index(c[1] c[3] c[4], "`")) bad("a code span outside File/Location")
+      else if (index(c[1] c[3] c[4], "`") || tolower(c[1] c[3] c[4]) ~ /<code/) bad("a code span outside File/Location")
+      else if ((c[1] "|" c[3] "|" c[4]) ~ /\]\(|\]\[|:\/\/|www\./) bad("a link or URL outside File/Location")
       else print "ENTRY\t" substr(c[2], 2, length(c[2]) - 2)
       next
     }
