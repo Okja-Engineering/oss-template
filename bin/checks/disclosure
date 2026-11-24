@@ -9,12 +9,11 @@
 #   `*` and `!.gitignore`, and nothing else under output/; each contract is
 #   at most 80 lines with the sections Inputs, Process, [Checkpoints],
 #   [Audit], Outputs, in that order and no others.
-# AC3: each Inputs entry (a table row, a list item or a line opening with
-#   a code span; a line that is neither an entry nor prose is refused) names
-#   one file in backticks, relative to its stage folder, that is a tracked
-#   file not in a later stage, or an earlier stage's
-#   ../NN-slug/output/<name>/FILE that stage's Outputs lists; every file in a
-#   stage's references/ is one of its Inputs.
+# AC3: Inputs is one table, | Source | File/Location | Section/Scope | Why |,
+#   and nothing else; each row's File/Location names one file in backticks,
+#   relative to its stage folder, that is a tracked file not in a later
+#   stage, or an earlier stage's ../NN-slug/output/<name>/FILE that stage's
+#   Outputs lists; every file in a stage's references/ is one of its Inputs.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -53,84 +52,49 @@ h2s() {
 }
 # body_rows: a Markdown table's rows after its header and separator.
 body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
-# input_entries: for each line of an Inputs section that names a file,
-# `ENTRY<TAB>X`: X the first cell of a table's body row, or what a list item
-# (`-`, `*`, `+`, `1.` or `1)`) or a line opening with a code span names, cut
-# to that span when what follows it is a description (nothing, text with no
-# backtick, or text after a colon or a dash). `BAD<TAB>LINE` for a line it
-# cannot read: a backtick outside an entry, a pipe outside a table, a table
-# header holding a code span, a fence, a code block. Prose, an HTML comment
-# and an item's indented continuation name nothing. A table is a header row
-# and a delimiter row, then rows up to a blank line; it may be indented up to
-# three spaces, and its outer pipes are optional.
+# input_rows: an Inputs section in; per row of its table `ENTRY<TAB>PATH`,
+# PATH the code span its File/Location cell holds, and `BAD<TAB>WHY` for each
+# line that breaks the one shape Inputs takes: the table
+# `| Source | File/Location | Section/Scope | Why |`, its delimiter row, then
+# rows of four cells, File/Location one code span and no other cell holding
+# one. Blank lines may come before and after the table; nothing else may.
 # shellcheck disable=SC2016 # a literal backtick, the Markdown code span
-input_entries() {
+input_rows() {
   awk '
-    # indent S: the columns of the whitespace S opens with, a tab to the next stop of 4.
-    function indent(s,   i, c, n) {
-      n = 0
-      for (i = 1; i <= length(s); i++) {
-        c = substr(s, i, 1)
-        if (c == " ") n++
-        else if (c == "\t") n += 4 - n % 4
-        else break
-      }
+    BEGIN { H = "| Source | File/Location | Section/Scope | Why |" }
+    # cells S: split the row S into c[1..n]; n, or 0 when S is not a row.
+    function cells(s,   n, i) {
+      sub(/[ \t]+$/, "", s)
+      if (length(s) < 2 || s !~ /^\|.*\|$/) return 0
+      n = split(substr(s, 2, length(s) - 2), c, "|")
+      for (i = 1; i <= n; i++) gsub(/^[ \t]+|[ \t]+$/, "", c[i])
       return n
     }
-    function delimiter(s) {
-      return index(s, "|") > 0 && index(s, "-") > 0 &&
-        s ~ /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/
+    function bad(why) { print "BAD\t" why ": " $0 }
+    /^[ \t]*$/ {
+      if (at == "delimiter") print "BAD\tits header without its delimiter row"
+      if (at != "") at = "after"
+      next
     }
-    function entry(c,   rest) {
-      if (match(c, /^`[^`]+`/)) {
-        rest = substr(c, RLENGTH + 1)
-        if (index(rest, "`") == 0 || rest ~ /^[ \t]*(:|-[ \t]|\342\200\224|\342\200\223)/)
-          c = substr(c, 1, RLENGTH)
-      }
-      print "ENTRY\t" c
+    at == "" && cells($0) == 4 && c[1] == "Source" && c[2] == "File/Location" &&
+      c[3] == "Section/Scope" && c[4] == "Why" { at = "delimiter"; next }
+    at == "delimiter" {
+      at = "rows"
+      if (cells($0) != 4 || c[1] !~ /^:?-+:?$/ || c[2] !~ /^:?-+:?$/ ||
+        c[3] !~ /^:?-+:?$/ || c[4] !~ /^:?-+:?$/) bad("the line after its header is not its delimiter row")
+      next
     }
-    { line[++n] = $0 }
+    at == "rows" {
+      if (cells($0) != 4) bad("a row without four cells")
+      else if (c[2] !~ /^`[^`]+`$/) bad("a File/Location cell that is not one path in backticks")
+      else if (index(c[1] c[3] c[4], "`")) bad("a code span outside File/Location")
+      else print "ENTRY\t" substr(c[2], 2, length(c[2]) - 2)
+      next
+    }
+    { bad("a line outside its " H " table") }
     END {
-      for (i = 1; i <= n; i++) {
-        s = line[i]
-        if (comment) {
-          if (index(s, "-->")) comment = 0
-          continue
-        }
-        if (s ~ /^[ \t]*$/) { table = 0; item = 0; para = 0; continue }
-        k = indent(s)
-        r = s
-        sub(/^[ \t]+/, "", r)
-        if (table) {
-          if (index(s, "|") == 0) { print "BAD\t" s; continue }
-          c = r; sub(/^\|/, "", c); sub(/\|.*/, "", c); gsub(/^[ \t]+|[ \t]+$/, "", c)
-          print "ENTRY\t" c
-          continue
-        }
-        if (k >= 4 && !item && !para) { print "BAD\t" s; continue }
-        if (r ~ /^(```|~~~)/) { print "BAD\t" s; continue }
-        if (substr(r, 1, 4) == "<!--") {
-          if (index(substr(r, 5), "-->") == 0) comment = 1
-          continue
-        }
-        if (match(r, /^([-*+]|[0-9]+[.)])([ \t]|$)/)) {
-          c = substr(r, RLENGTH + 1)
-          sub(/^[ \t]+/, "", c)
-          entry(c)
-          item = 1; para = 1
-          continue
-        }
-        if (item && k >= 1) continue
-        item = 0
-        if (index(s, "|")) {
-          if (!para && i < n && delimiter(line[i + 1]) && index(s, "`") == 0) { table = 1; i++; continue }
-          print "BAD\t" s
-          continue
-        }
-        para = 1
-        if (substr(r, 1, 1) == "`") entry(r)
-        else if (index(s, "`")) print "BAD\t" s
-      }
+      if (at == "") print "BAD\tno " H " table"
+      if (at == "delimiter") print "BAD\tits header without its delimiter row"
     }'
 }
 # normalize PATH: resolve . and .. segments; empty when it leaves the root.
@@ -235,25 +199,15 @@ while IFS= read -r s <&3; do
   esac
 
   inputs=""
-  rows=$(section "$contract" Inputs | input_entries)
+  rows=$(section "$contract" Inputs | input_rows)
   while IFS= read -r row; do
     [ -n "$row" ] || continue
-    cell=${row#*	}
+    path=${row#*	}
     if [ "${row%%	*}" = BAD ]; then
-      refuse "$contract: an Inputs line is neither an entry nor prose: $cell"
+      refuse "$contract: Inputs: $path"
       continue
     fi
-    path=${cell#\`}
-    path=${path%\`}
-    case "$cell" in
-      '`'*'`') ;;
-      *) path="" ;;
-    esac
     case "$path" in
-      '' | *'`'*)
-        refuse "$contract: an Inputs entry does not name one file in backticks: $cell"
-        continue
-        ;;
       *'*'* | *'?'* | *'['*)
         refuse "$contract: Inputs \`$path\` is a glob"
         continue

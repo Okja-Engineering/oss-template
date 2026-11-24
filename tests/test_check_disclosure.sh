@@ -43,6 +43,9 @@ ROW1='| `stages/01-ask/` | [contract](stages/01-ask/CONTEXT.md) |'
 ROW2='| `stages/02-render/` | [contract](stages/02-render/CONTEXT.md) |'
 C1=stages/01-ask/CONTEXT.md
 C2=stages/02-render/CONTEXT.md
+# The one shape an Inputs section takes.
+HEADER='| Source | File/Location | Section/Scope | Why |'
+DELIM='|---|---|---|---|'
 
 # empty: a fixture workspace with the agent files and no stage.
 empty() {
@@ -63,14 +66,14 @@ valid() {
   empty
   put shared/answers.tsv 'field'
   printf '%s\n%s\n' "$ROW1" "$ROW2" >>"$R/CONTEXT.md"
-  put "$C1" '# 01-ask' '' '## Inputs' '' '| File | Why |' '|---|---|' \
-    '| `../../shared/answers.tsv` | the fields |' '' '## Process' '' 'Draft the answers.' '' \
+  put "$C1" '# 01-ask' '' '## Inputs' '' "$HEADER" "$DELIM" \
+    '| shared | `../../shared/answers.tsv` | all | the fields |' '' '## Process' '' 'Draft the answers.' '' \
     '## Checkpoints' '' 'The operator confirms.' '' '## Audit' '' 'Read the description.' '' \
     '## Outputs' '' '`answers.env`, `confirmed.md`'
   put stages/01-ask/output/.gitignore '*' '!.gitignore'
-  put "$C2" '# 02-render' '' '## Inputs' '' '| File | Why |' '|---|---|' \
-    '| `../01-ask/output/<name>/confirmed.md` | the confirmed answers |' \
-    '| `references/notes.md` | notes |' '' '## Process' '' 'Render.' '' '## Outputs' '' '`render.md`'
+  put "$C2" '# 02-render' '' '## Inputs' '' "$HEADER" "$DELIM" \
+    '| 01-ask | `../01-ask/output/<name>/confirmed.md` | all | the confirmed answers |' \
+    '| this stage | `references/notes.md` | all | notes |' '' '## Process' '' 'Render.' '' '## Outputs' '' '`render.md`'
   put stages/02-render/output/.gitignore '*' '!.gitignore'
   put stages/02-render/references/notes.md 'notes'
   fixture_commit "$R" "test: a valid workspace"
@@ -78,7 +81,8 @@ valid() {
 
 # add_stage NAME: a further minimal stage, routed, otherwise valid.
 add_stage() {
-  put "stages/$1/CONTEXT.md" "# $1" '' '## Inputs' '' '## Process' '' 'Do it.' '' '## Outputs' '' '`out.md`'
+  put "stages/$1/CONTEXT.md" "# $1" '' '## Inputs' '' "$HEADER" "$DELIM" '' '## Process' '' 'Do it.' '' \
+    '## Outputs' '' '`out.md`'
   put "stages/$1/output/.gitignore" '*' '!.gitignore'
   printf '| `stages/%s/` | [contract](stages/%s/CONTEXT.md) |\n' "$1" "$1" >>"$R/CONTEXT.md"
 }
@@ -222,67 +226,91 @@ inputs_case "an input that does not resolve" '`../../shared/missing.tsv`' "does 
 inputs_case "an input above the workspace" '`../../../outside.txt`' "does not resolve"
 inputs_case "an input from a later stage's output" '`../02-render/output/<name>/render.md`' "later"
 inputs_case "an input from a later stage's folder" '`../02-render/references/notes.md`' "later"
-inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' "one file in backticks"
+inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' \
+  "a File/Location cell that is not one path in backticks"
+inputs_case "an Inputs row naming two files" "$A \`../../shared/other.tsv\`" \
+  "a File/Location cell that is not one path in backticks"
 
-# Every line of Inputs is an entry naming one file, judged by the same rules
-# whatever its Markdown form, or prose that names nothing, or a refusal:
-# nothing that could name a file is skipped unread.
-TABLE='| File | Why |
-|---|---|
-| `../../shared/answers.tsv` | the fields |'
-list_case() { # DESCRIPTION REPLACEMENT NEEDLE
+# Inputs takes one closed shape: the table, its delimiter row, then rows of
+# four cells whose File/Location is one code span and whose other cells hold
+# none. Any other line is refused, each refusal naming its cause and line.
+ROW="| shared | $A | all | the fields |"
+TABLE="$HEADER
+$DELIM
+$ROW"
+OUTSIDE="a line outside its $HEADER table"
+valid
+fixture_replace "$R/$C1" "$TABLE" "$HEADER
+|:---|:---:|---:|---|
+$ROW
+"
+passes "the table, its delimiter row aligned, a blank line after it"
+shape_case() { # DESCRIPTION REPLACEMENT NEEDLE
   valid
   fixture_replace "$R/$C1" "$TABLE" "$2"
   refused "$1" "$3"
 }
-form_passes() { # DESCRIPTION REPLACEMENT
-  valid
-  fixture_replace "$R/$C1" "$TABLE" "$2"
-  passes "$1"
-}
-form_passes "Inputs as a list item naming one file" "- $A: the fields"
-form_passes "a lead-in sentence, then the table" "Load only this file.
+shape_case "Inputs as a list, not the table" "- $A" "$OUTSIDE: - $A"
+shape_case "  and the refusal names the table it needs" "- $A" "no $HEADER table"
+shape_case "a list item naming a second file after a colon (B1)" "$TABLE
 
-$TABLE"
-form_passes "a line that is one code span" "$A"
-form_passes "a numbered list item" "1. $A"
-form_passes "a list item with a + marker" "+ $A"
-form_passes "a list item with two spaces after its marker" "-  $A"
-form_passes "a list item wrapped onto an indented line" "- $A: the field schema, which
-  the questionnaire is generated from"
-form_passes "a table indented by a space" "$(printf '%s\n' "$TABLE" | sed 's/^/ /')"
-form_passes "a table without outer pipes" "File | Why
----|---
-$A | the fields"
-form_passes "an HTML comment, then a list item" "<!-- one file only -->
-- $A"
-form_passes "a list item whose description holds a code span" "- $A: see \`Process\`"
-form_passes "a list item whose description, after a dash, holds a code span" "- $A — see \`Process\`"
-list_case "a list item naming a glob" '- `../../stages/*`' "glob"
-list_case "a list item naming a directory" '- `../../`' "directory"
-list_case "a list item naming a stage that does not exist" '- `../09-later/output/<name>/x.md`' "does not resolve"
-list_case "a list item naming two files" '- `../../shared/answers.tsv` and `../../CONTEXT.md`' "one file in backticks"
-list_case "a list item naming no file" '- the whole repository' "one file in backticks"
-list_case "a list item naming two files, after a comma" "- $A, \`../../CONTEXT.md\`" "one file in backticks"
-list_case "a code block, indented four spaces" "$(printf '%s\n' "$TABLE" | sed 's/^/    /')" "    | File | Why |"
-list_case "a table without its separator row" '| File | Why |
-| `../../shared/answers.tsv` | the fields |' "answers.tsv"
-list_case "a lone pipe line naming a glob" '| `../../stages/*` | the whole repository |' "../../stages/*"
-list_case "a lone pipe line naming a directory" '| `../../` everything |' "../../"
-list_case "a table header naming a path" '| `../../stages/` | x |
+- $A: and \`../../stages/*\`" "$OUTSIDE: - $A: and"
+shape_case "a list item naming a later stage's file after a dash (B2)" "$TABLE
+
+- $A — then \`../02-render/CONTEXT.md\`" "$OUTSIDE: - $A — then"
+shape_case "a row of two cells naming a directory (B3)" "$HEADER
+$DELIM
+| $A | and \`../../\` |" "a row without four cells: | $A |"
+shape_case "a code span on the line after a row (B4)" "$TABLE
+  \`../../stages/*\`" "a row without four cells:   \`../../stages/*\`"
+shape_case "a code span on its own line after the table" "$TABLE
+
+  \`../../stages/*\`" "$OUTSIDE:   \`../../stages/*\`"
+shape_case "a code span after an HTML comment (B5)" "$TABLE
+
+<!-- x --> \`../../stages/*\`" "$OUTSIDE: <!-- x --> \`../../stages/*\`"
+shape_case "a code span after the end of an HTML comment (B6)" "<!-- x
+--> \`../../stages/*\`
+$TABLE" "$OUTSIDE: --> \`../../stages/*\`"
+shape_case "a code span in Why" "$HEADER
+$DELIM
+| shared | $A | all | see \`Process\` |" "a code span outside File/Location: | shared |"
+shape_case "a code span in Source" "$HEADER
+$DELIM
+| \`../../\` | $A | all | x |" "a code span outside File/Location: | \`../../\` |"
+shape_case "a code span in Section/Scope" "$HEADER
+$DELIM
+| shared | $A | \`../../stages/*\` | x |" "a code span outside File/Location: | shared |"
+shape_case "an empty File/Location cell" "$HEADER
+$DELIM
+| shared |  | all | x |" "a File/Location cell that is not one path in backticks: | shared |  |"
+shape_case "a row of five cells" "$HEADER
+$DELIM
+$ROW x |" "a row without four cells: $ROW x |"
+shape_case "a table of another header" '| File | Why |
 |---|---|
-| `../../shared/answers.tsv` | the fields |' "../../stages/"
-list_case "a fenced block" '```
+| `../../shared/answers.tsv` | the fields |' "$OUTSIDE: | File | Why |"
+shape_case "a header without its delimiter row" "$HEADER
+$ROW" "the line after its header is not its delimiter row: $ROW"
+shape_case "a header, then a blank line" "$HEADER
+
+$DELIM
+$ROW" "its header without its delimiter row"
+shape_case "a second table" "$TABLE
+
+$TABLE" "$OUTSIDE: $HEADER"
+shape_case "a sentence before the table" "Load only this file.
+
+$TABLE" "$OUTSIDE: Load only this file."
+shape_case "an indented table" "$(printf '%s\n' "$TABLE" | sed 's/^/ /')" "$OUTSIDE:  $HEADER"
+shape_case "a fenced block" '```
 - `../../shared/answers.tsv`
-```' '```'
-list_case "a prose line holding a code span" 'Load `../../stages/` too.' 'Load `../../stages/` too.'
-list_case "a line after a table that is not a row" "$TABLE
-and the rest" "and the rest"
-inputs_case "an Inputs row naming two files" "$A \`../../shared/other.tsv\`" "one file in backticks"
+```' "$OUTSIDE: \`\`\`"
+shape_case "an empty Inputs section" "" "no $HEADER table"
 valid
-fixture_replace "$R/$C2" "| \`references/notes.md\` | notes |" \
-  "| \`references/notes.md\` | notes |
-| \`output/<name>/render.md\` | its own output |"
+fixture_replace "$R/$C2" "| \`references/notes.md\` | all | notes |" \
+  "| \`references/notes.md\` | all | notes |
+| this stage | \`output/<name>/render.md\` | all | its own output |"
 refused "an input from the same stage's output" "same"
 valid
 fixture_replace "$R/$C2" "confirmed.md\` |" "missing.md\` |"
