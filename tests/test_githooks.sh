@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The workspace's git hooks call its bin/check with their arguments:
 # commit-msg with the message file, pre-commit in staged mode, and pre-push
-# in range mode per pushed ref (new, updated), skipping a deleted one. Driven
+# in range mode per pushed commit (new, updated) with HEAD's committed checks,
+# skipping a deleted ref. Driven
 # through real git in a fixture workspace with a bare remote.
 set -u
 export LC_ALL=C
@@ -76,8 +77,8 @@ g push origin worse
 assert_eq "1" "$([ "$ST" -ne 0 ] && echo 1 || echo 0)" "a pushed ref's bad tree is refused"
 assert_eq "" "$(git -C "$R-origin.git" for-each-ref refs/heads/worse)" "and the remote does not get it"
 
-# The pushed ref's own checks judge it: editing the checks in the working
-# tree does not change its verdict.
+# The checks committed at HEAD judge it: editing them in the working tree
+# does not change its verdict.
 printf '#!/usr/bin/env bash\n# A check edited to pass\n# modes: tree staged range\nexit 0\n' \
   >"$R/bin/checks/content"
 g push origin worse
@@ -112,6 +113,68 @@ g push origin blobtag
 assert_eq "1" "$([ "$ST" -ne 0 ] && echo 1 || echo 0)" "a ref on something other than a commit is refused"
 assert_eq "" "$(git -C "$R-origin.git" for-each-ref refs/tags/blobtag)" "  and the remote does not get it"
 assert_contains "$OUT" "not a commit" "  and says so"
+
+# --- pre-push runs no code from a pushed ref -----------------------------------
+# HEAD's committed checks judge every pushed ref's tree. pp LINE...: run the
+# hook as git would, on these ref lines; sets OUT and ST to its own exit.
+ZERO=0000000000000000000000000000000000000000
+pp() {
+  OUT=$(printf '%s\n' "$@" | (cd "$R" && .githooks/pre-push origin "$R-origin.git") 2>&1)
+  ST=$?
+}
+T="$SCRATCH/theirs"
+git clone -q "$R-origin.git" "$T"
+printf '#!/bin/sh\necho ran >"%s/MARKER"\nexit 0\n' "$SCRATCH" >"$T/bin/check"
+printf '#!/bin/sh\n# A check that passes everything\n# modes: tree staged range\nexit 0\n' \
+  >"$T/bin/checks/content"
+git -C "$T" add -A
+git -C "$T" commit -q -m "feat: checks of their own"
+git -C "$T" push -q origin HEAD:refs/heads/theirs-good
+fixture_write "$T/judged.txt" "BAD"
+git -C "$T" commit -q -am "feat: a bad tree under checks of their own"
+git -C "$T" push -q origin HEAD:refs/heads/theirs-bad
+git -C "$R" fetch -q origin
+pp "refs/remotes/origin/theirs-bad $(sha origin/theirs-bad) refs/heads/review $ZERO"
+assert_status 1 "$ST" "a fetched ref's bad tree is refused by HEAD's checks, not passed by its own"
+pp "refs/remotes/origin/theirs-good $(sha origin/theirs-good) refs/heads/review $ZERO"
+assert_status 0 "$ST" "a fetched ref with a good tree passes"
+g push origin origin/theirs-good:refs/heads/review
+assert_status 0 "$ST" "  and git pushes it"
+assert_eq "absent" "$([ -e "$SCRATCH/MARKER" ] && echo present || echo absent)" \
+  "pushing a fetched ref never runs its bin/check"
+
+# A ref holding no bin/check of its own is judged like any other.
+git -C "$R" checkout -q --orphan bare
+git -C "$R" rm -q -rf --cached .
+fixture_write "$R/judged.txt" "good"
+git -C "$R" add judged.txt
+git -C "$R" commit -q --no-verify -m "feat: a tree with no harness"
+fixture_write "$R/judged.txt" "BAD"
+git -C "$R" commit -q --no-verify -am "feat: a bad tree with no harness"
+git -C "$R" checkout -q -f main
+git -C "$R" clean -q -fd
+pp "refs/heads/bare $(sha bare~1) refs/heads/bare $ZERO"
+assert_status 0 "$ST" "a ref with no bin/check of its own and a good tree passes"
+pp "refs/heads/bare $(sha bare) refs/heads/bare $ZERO"
+assert_status 1 "$ST" "  and with a bad tree is refused"
+
+# Refs sharing a commit, a branch and its tag: judged once, clean or not.
+git -C "$R" branch twin main
+git -C "$R" tag -a -m "a tag" v1 main
+g push origin twin v1
+assert_status 0 "$ST" "a branch and a tag on one clean commit are both pushed"
+assert_eq "2" "$(git -C "$R-origin.git" for-each-ref refs/heads/twin refs/tags/v1 | grep -c .)" \
+  "  and the remote gets both"
+git -C "$R" branch twin-bad worse
+git -C "$R" tag -a -m "a tag" v2 worse
+pp "refs/heads/twin-bad $(sha worse) refs/heads/twin-bad $ZERO" \
+  "refs/tags/v2 $(sha v2) refs/tags/v2 $ZERO"
+assert_status 1 "$ST" "a branch and a tag on one bad commit are refused, not 'cannot run'"
+g push origin twin-bad v2
+assert_eq "0" "$(git -C "$R-origin.git" for-each-ref refs/heads/twin-bad refs/tags/v2 | grep -c .)" \
+  "  and the remote gets neither"
+pp "refs/tags/blobtag $(sha blobtag) refs/tags/blobtag $ZERO"
+assert_status 2 "$ST" "a ref on a non-commit is 'cannot judge', exit 2"
 
 # --- hooks run by hand --------------------------------------------------------
 OUT=$(cd "$R" && .githooks/commit-msg 2>&1)

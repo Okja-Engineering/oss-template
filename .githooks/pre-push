@@ -1,28 +1,33 @@
 #!/usr/bin/env bash
-# Check each pushed ref with bin/check --range, run from that ref's own
-# commit, so its own checks judge its own commits and tree whatever the
-# working tree holds: an updated ref from the remote's old SHA, a new ref
-# from an empty base with CHECK_REF set to it (bin/check judges a remote SHA
-# this clone never fetched the same way). A deleted ref and a notes ref are
-# skipped; a ref on anything but a commit cannot be judged.
+# Judge each pushed ref with bin/check --range, run from the checks committed
+# at HEAD, never from the ref being pushed: no code from a pushed ref runs,
+# and uncommitted edits to the checks do not count. The checks read the
+# pushed ref's commits and tree through the tree reader. An updated ref is
+# judged from the remote's old SHA, a new ref from an empty base with
+# CHECK_REF set to it (bin/check judges a remote SHA this clone never fetched
+# the same way); refs sharing a commit are judged once. A ref that changes
+# the checks themselves is judged here by today's checks, and in CI by its
+# own. A deleted ref and a notes ref are skipped; a ref on anything but a
+# commit cannot be judged.
 set -u
 set -o pipefail
 export LC_ALL=C
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root" || exit 2
-scratch=$(mktemp -d) || exit 2
+# Inside .git rather than TMPDIR, which may be mounted noexec.
+scratch=$(mktemp -d "$(git rev-parse --absolute-git-dir)/pre-push.XXXXXX") || exit 2
 trap 'rm -rf "$scratch"' EXIT
-worst=0
 
-# own_check COMMIT DIR: COMMIT's bin/ and foundation/bin/ in DIR, through a
-# private index; exit nonzero when COMMIT has no bin/check.
-own_check() {
-  GIT_INDEX_FILE="$2.index" git read-tree "$1" &&
-    GIT_INDEX_FILE="$2.index" git ls-files -z -- bin foundation/bin |
-    GIT_INDEX_FILE="$2.index" git checkout-index -z --stdin --prefix="$2/" &&
-    [ -x "$2/bin/check" ]
+# HEAD's committed bin/ and foundation/bin/, through a private index.
+GIT_INDEX_FILE="$scratch/index" git read-tree HEAD &&
+  GIT_INDEX_FILE="$scratch/index" git ls-files -z -- bin foundation/bin |
+  GIT_INDEX_FILE="$scratch/index" git checkout-index -z --stdin --prefix="$scratch/head/" &&
+  [ -x "$scratch/head/bin/check" ] || {
+  printf 'pre-push: HEAD has no committed bin/check to judge the push with\n' >&2
+  exit 2
 }
 
+worst=0 judged=""
 # A last line without its newline (by hand, not from git) is still judged.
 while read -r _local_ref local_sha remote_ref remote_sha || [ -n "${local_sha:-}" ]; do
   st=0
@@ -46,14 +51,18 @@ while read -r _local_ref local_sha remote_ref remote_sha || [ -n "${local_sha:-}
   if ! commit=$(git rev-parse -q --verify "$local_sha^{commit}"); then
     printf 'pre-push: %s is not a commit, so bin/check cannot judge it\n' "$remote_ref" >&2
     st=2
-  elif ! own_check "$commit" "$scratch/$commit"; then
-    printf 'pre-push: %s has no bin/check of its own to judge it with\n' "$remote_ref" >&2
-    st=2
   else
-    CHECK_REF=${remote_ref#refs/heads/} "$scratch/$commit/bin/check" --range "$base" "$commit" </dev/null
-    st=$?
+    case " $judged " in
+      *" $commit "*)
+        printf 'pre-push: %s is at %s, already judged in this push\n' "$remote_ref" "$commit"
+        ;;
+      *)
+        judged="$judged $commit"
+        CHECK_REF=${remote_ref#refs/heads/} "$scratch/head/bin/check" --range "$base" "$commit" </dev/null
+        st=$?
+        ;;
+    esac
   fi
   [ "$st" -gt "$worst" ] && worst=$st
-  local_sha=""
 done
 exit "$worst"
