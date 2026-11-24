@@ -14,7 +14,7 @@ Only a listed decider makes these:
 
 - accepting a chain document (a work folder's intent, spec or plan, an RFC or an ADR), or changing its status line or `**Decider:**` field;
 - approving a pull request into `main`;
-- approving a publish plan, naming himself or herself as the approver;
+- approving a publish plan, naming themselves as the approver;
 - changing [§ Deciders](#deciders).
 
 These are not enforced yet: the checks that hold the listed names land in later slices, and who actually made a decision is not enforced at all.
