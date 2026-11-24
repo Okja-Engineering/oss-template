@@ -252,7 +252,7 @@ while IFS= read -r s <&3; do
         continue
         ;;
       */)
-        refuse "$contract: Inputs \`$path\` is a directory"
+        refuse "$contract: Inputs \`$path\` ends in /, where Inputs name files"
         continue
         ;;
     esac

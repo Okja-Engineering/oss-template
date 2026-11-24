@@ -217,7 +217,6 @@ inputs_case() { # DESCRIPTION REPLACEMENT NEEDLE
   fixture_replace "$R/$C1" "$A" "$2"
   refused "$1" "$3"
 }
-inputs_case "an input that is a directory" '`../../shared/`' "directory"
 inputs_case "an input that is a directory, without a slash" '`../../shared`' "directory"
 inputs_case "an input that is a glob" '`../../shared/*.tsv`' "glob"
 inputs_case "an input that is a ? glob" '`../../shared/answers.ts?`' "glob"
@@ -279,6 +278,14 @@ git init -q -b main "$R/shared/nested"
 git -C "$R/shared/nested" commit -q --allow-empty -m "test: nested"
 fixture_replace "$R/$C1" "$A" '`../../shared/nested`'
 every_mode "a submodule" "Inputs \`../../shared/nested\` is a submodule"
+# Inputs name files: a path ending in / is refused as such, whatever it names.
+path_case "a directory with a trailing /" ../../shared/ "Inputs \`../../shared/\` ends in /"
+path_case "a file with a trailing /" ../../shared/answers.tsv/ "Inputs \`../../shared/answers.tsv/\` ends in /"
+path_case "nothing, with a trailing /" ../../nothere/ "Inputs \`../../nothere/\` ends in /"
+valid
+ln -s ../stages/02-render/CONTEXT.md "$R/shared/later.md"
+fixture_replace "$R/$C1" "$A" '`../../shared/later.md/`'
+every_mode "a link with a trailing /" "Inputs \`../../shared/later.md/\` ends in /"
 # A case-insensitive disk (macOS's) opens a path spelled in another case as
 # the file it folds to, so the stage order and references/ are judged without
 # regard to case. Such a disk writes a file into the folder of the same name
