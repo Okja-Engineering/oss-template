@@ -279,6 +279,36 @@ git init -q -b main "$R/shared/nested"
 git -C "$R/shared/nested" commit -q --allow-empty -m "test: nested"
 fixture_replace "$R/$C1" "$A" '`../../shared/nested`'
 every_mode "a submodule" "Inputs \`../../shared/nested\` is a submodule"
+# A case-insensitive disk (macOS's) opens a path spelled in another case as
+# the file it folds to, so the stage order and references/ are judged without
+# regard to case. Such a disk writes a file into the folder of the same name
+# in any case, and git there folds a plain add to that folder's spelling, so
+# each entry is made by name; a case-sensitive disk holds both folders.
+variant() { # PATH: track PATH as spelled
+  put "$1" 'notes'
+  git -C "$R" update-index --add --cacheinfo "100644,$(git -C "$R" hash-object -w -- "$1"),$1"
+}
+valid
+variant Stages/02-render/notes.md
+fixture_replace "$R/$C1" "$A" '`../../Stages/02-render/notes.md`'
+every_mode "a later stage's file spelled in another case" \
+  "Inputs \`../../Stages/02-render/notes.md\` is in a later stage"
+valid
+variant Stages/01-ask/notes.md
+fixture_replace "$R/$C1" "$A" '`../../Stages/01-ask/notes.md`'
+every_mode "the stage's own file spelled in another case" \
+  "Inputs \`../../Stages/01-ask/notes.md\` is in this stage, spelled in another case"
+valid
+variant Stages/01-ask/notes.md
+fixture_replace "$R/$C2" '`references/notes.md` | all | notes |' \
+  '`references/notes.md` | all | notes |
+| 01-ask | `../../Stages/01-ask/notes.md` | all | notes |'
+fixture_commit "$R" "test: an earlier stage's file spelled in another case"
+passes "an earlier stage's file spelled in another case"
+valid
+variant stages/02-render/References/extra.md
+every_mode "a file in References/ its Inputs do not name" \
+  "stages/02-render/References/extra.md: in references/ but not in the stage's Inputs"
 inputs_case "an input from a later stage's output" '`../02-render/output/<name>/render.md`' "later"
 inputs_case "an input from a later stage's folder" '`../02-render/references/notes.md`' "later"
 inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' \
