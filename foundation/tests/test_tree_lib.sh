@@ -192,6 +192,14 @@ assert_eq "none" "$(content_of "$O" worktree ignored.md)" "worktree: an ignored 
 assert_eq "none" "$(content_of "$O" worktree ../outside.txt)" "worktree: a path outside the repository cannot be read"
 assert_eq "none" "$(content_of "$O" commit:HEAD ../outside.txt)" "commit: nor through the commit source"
 assert_eq "none" "$(content_of "$O" worktree 'dir with space')" "worktree: a directory is not a file"
+# A path written other than as a listing writes it names no file, in any
+# source, though git would resolve some of them in a tree.
+for src in worktree index commit:HEAD; do
+  for p in ./AGENTS.md /AGENTS.md AGENTS.md/ 'dir with space//inner.md' \
+    'dir with space/./inner.md' 'dir with space/../AGENTS.md'; do
+    assert_eq "none" "$(content_of "$O" "$src" "$p")" "$src: '$p' is not a path a listing writes"
+  done
+done
 
 # A submodule moved forward: the worktree lists its checked-out commit, the
 # index the recorded one. A nested repository not yet added is listed as
