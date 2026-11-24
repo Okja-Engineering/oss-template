@@ -64,7 +64,8 @@ body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
 # line that breaks the one shape Inputs takes: the table
 # `| Source | File/Location | Section/Scope | Why |`, its delimiter row, then
 # rows of four cells, File/Location one code span and the other cells plain
-# text: no backtick, <, [, ], @ or URL, each cell judged on its own.
+# text: no backtick, <, [, ], @, &, carriage return, :// or www. in any
+# case, each cell judged on its own.
 # Blank lines may come before and after the table; nothing else may.
 # shellcheck disable=SC2016 # a literal backtick, the Markdown code span
 input_rows() {
@@ -91,8 +92,10 @@ input_rows() {
       if (index(x, "[")) return name " holds [, which GitHub may read as a link"
       if (index(x, "]")) return name " holds ], which GitHub may read as a link"
       if (index(x, "@")) return name " holds @, which GitHub may read as an email link"
+      if (index(x, "&")) return name " holds &, which GitHub may read as a character reference"
+      if (index(x, "\r")) return name " holds a carriage return, which GitHub reads as a line break"
       if (index(x, "://")) return name " holds ://, a URL"
-      if (x ~ /(^|[ \t*_~(])www\./) return name " holds www. at the start of a word, a URL"
+      if (index(tolower(x), "www.")) return name " holds www., in any case, which GitHub may read as a link"
       return ""
     }
     /^[ \t]*$/ {

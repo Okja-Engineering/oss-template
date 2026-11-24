@@ -343,8 +343,9 @@ shape_case "a code span after the end of an HTML comment (B6)" "<!-- x
 --> \`../../stages/*\`
 $TABLE" "$OUTSIDE: --> \`../../stages/*\`"
 # Source, Section/Scope and Why are plain text, each judged on its own: a
-# backtick, <, [, ], @ or a URL in one is refused, the refusal naming the cell
-# and what it holds, whatever GitHub would make of it.
+# backtick, <, [, ], @, &, a carriage return, :// or www. in any case in one
+# is refused, the refusal naming the cell and what it holds, whatever GitHub
+# would make of it.
 cell_row() { printf '| %s | %s | %s | %s |' "$1" "$A" "$2" "$3"; }
 cell_passes() { # DESCRIPTION SOURCE SCOPE WHY
   valid
@@ -360,7 +361,6 @@ $(cell_row "$2" "$3" "$4")" "Inputs: $5"
 }
 cell_passes "plain prose with an aside" "shared answers (stage 00)" "all (see Process)" "the fields (all)"
 cell_passes "e.g., i.e. and version numbers" "shared (v1.2.3)" "git 2.36.0+" "e.g. the fields, i.e. all"
-cell_passes "www. inside a word, and WWW. in capitals" shared "awww.yes" "WWW.example.com"
 cell_passes "a path written as prose" shared all "then ../02-render/CONTEXT.md"
 cell_case "a code span in Why" shared all 'see `Process`' "Why holds a backtick"
 cell_case "a code span in Source" '`../../`' all x "Source holds a backtick"
@@ -389,9 +389,24 @@ cell_case "a URL" shared 'https://example.com/x' x "Section/Scope holds ://"
 cell_case "a URL GitHub does not link" shared all 's3://bucket' "Why holds ://"
 cell_case "www. after a space" shared all 'see www.example.com' "Why holds www."
 cell_case "www. opening the cell" 'www.example.com' all x "Source holds www."
-cell_case "www. after a parenthesis" shared all '(www.example.com)' "Why holds www."
-cell_case "www. after an underscore" shared all '_www.example.com_' "Why holds www."
 cell_case "the word www. alone" shared all 'the www. prefix' "Why holds www."
+cell_case "www. inside a word" shared 'awww.yes' x "Section/Scope holds www."
+# GitHub's file view links www. in any case after any character but a letter
+# or digit, and decodes a character reference before it links; a carriage
+# return ends the row for it.
+for w in 'WWW.example.com' 'Www.example.com' 'x.www.example.com' '-www.example.com' \
+  '/www.example.com' ':www.example.com' "'www.example.com'" '“www.example.com”'; do
+  cell_case "www. as $w" shared all "$w" "Why holds www."
+done
+for w in 'ops&#64;example.com' 'ops&commat;example.com' 'https&#58;//example.com' \
+  'https&colon;//example.com' '&#x77;ww.example.com' '&#119;&#119;&#119;.example.com' \
+  'see www&period;example.com' 'see mailto&#58;ops&#64;example.com' 'R&D'; do
+  cell_case "a character reference: $w" shared all "$w" "Why holds &"
+done
+cell_case "an & in Source" 'R&D' all x "Source holds &"
+cell_case "a carriage return" shared all "see$(printf '\r')www.example.com" "Why holds a carriage return"
+cell_case "a carriage return in Section/Scope" shared "all$(printf '\r')" x \
+  "Section/Scope holds a carriage return"
 shape_case "HTML code in File/Location" "$HEADER
 $DELIM
 | shared | <code>../../shared/answers.tsv</code> | all | x |" \
