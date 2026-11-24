@@ -11,9 +11,10 @@
 #   [Audit], Outputs, in that order and no others.
 # AC3: Inputs is one table, | Source | File/Location | Section/Scope | Why |,
 #   and nothing else; each row's File/Location names one file in backticks,
-#   relative to its stage folder and climbing only by leading ../ segments,
-#   that is a tracked file not in a later stage, or an earlier stage's ../NN-slug/output/<name>/FILE that stage's
-#   Outputs lists; every file in a stage's references/ is one of its Inputs.
+#   relative to its stage folder and climbing only by a leading run of ../,
+#   that reaches a tracked regular file not in a later stage, or an earlier
+#   stage's ../NN-slug/output/<name>/FILE that stage's Outputs lists; every
+#   file in a stage's references/ is one of its Inputs.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
