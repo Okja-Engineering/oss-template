@@ -530,13 +530,17 @@ assert_contains "$OUT" "A/ and a/: $TWIN" "  and names the folders' twins too"
 assert_not_contains "$OUT" "A/x and" "  and names no set twice"
 
 # --- paths are judged literally, never split or expanded -------------------------
+# A portable name can still hold a space or a . that a split or a pattern
+# would misread.
 valid
-put 'stages/01-ask/output/.gitignor[e]' 'TOKEN=x'
-git -C "$R" add -f 'stages/01-ask/output/.gitignor[e]'
-refused "a tracked file under output/ whose name globs to .gitignore" 'stages/01-ask/output/.gitignor[e]'
+put 'stages/01-ask/output/run/a b.env' 'TOKEN=x'
+git -C "$R" add -f 'stages/01-ask/output/run/a b.env'
+refused "a tracked file under output/ whose name holds a space" \
+  'stages/01-ask/output/run/a b.env: a tracked file under output/'
 valid
-put 'stages/02-render/references/note[s].md' 'unnamed'
-refused "an unnamed reference whose name globs to a named one" 'stages/02-render/references/note[s].md'
+put stages/02-render/references/n.tes.md 'unnamed'
+refused "an unnamed reference whose name, read as a pattern, matches a named one" \
+  "stages/02-render/references/n.tes.md: in references/ but not in the stage's Inputs"
 valid
 git -C "$R" mv stages/02-render/references/notes.md 'stages/02-render/references/my notes.md'
 fixture_replace "$R/$C2" '`references/notes.md`' '`references/my notes.md`'
