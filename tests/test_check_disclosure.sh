@@ -224,12 +224,17 @@ inputs_case "an input that is a ? glob" '`../../shared/answers.ts?`' "glob"
 inputs_case "an input that is a [ glob" '`../../shared/answers.[t]sv`' "glob"
 inputs_case "an input that does not resolve" '`../../shared/missing.tsv`' "does not resolve"
 inputs_case "an input above the workspace" '`../../../outside.txt`' "does not resolve"
-# A path leaves its stage folder only by its leading ../ segments; a .. after
-# a name is refused, so no path is judged by a name it never reaches.
-DOTDOT="a .. after a name"
+# A path leaves its stage folder only by its leading run of ../; any other
+# . or .. is refused, so no path is judged by a name it never reaches.
+DOTDOT="has a . or .. outside its leading ../ run"
 inputs_case "an input going up through a file" '`../02-render/CONTEXT.md/../../../AGENTS.md`' "$DOTDOT"
 inputs_case "an input going up through a directory that does not exist" '`../../no-such-dir/../AGENTS.md`' "$DOTDOT"
 inputs_case "an input whose name holds a space before a .." '`../02-render/CONTEXT.md ../../../../AGENTS.md`' "$DOTDOT"
+inputs_case "an input opening with ./" '`./../../shared/answers.tsv`' "$DOTDOT"
+inputs_case "an input with a .. after a directory it holds" '`../../shared/sub/../answers.tsv`' "$DOTDOT"
+inputs_case "an input with a . segment" '`../../shared/./answers.tsv`' "$DOTDOT"
+inputs_case "an input that is only .." '`..`' "Inputs \`..\` is a directory"
+inputs_case "an input that is only ../.." '`../..`' "Inputs \`../..\` is a directory"
 
 # A path is accepted only when, opened as written from its stage folder, it
 # reaches a tracked regular file. Each case is committed and judged in every

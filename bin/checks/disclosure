@@ -234,13 +234,18 @@ while IFS= read -r s <&3; do
         continue
         ;;
     esac
-    # Only the leading ../ segments climb; a .. after a name would judge the
-    # path by a name it may never reach (a file, or a missing directory).
+    # Only a leading run of ../ climbs; any other . or .. would judge the path
+    # by a name it may never reach (a file, or a missing directory). A path
+    # of .. alone climbs to a directory.
     rest=$path
     while [ "${rest#../}" != "$rest" ]; do rest=${rest#../}; done
+    if [ "$rest" = .. ]; then
+      refuse "$contract: Inputs \`$path\` is a directory"
+      continue
+    fi
     case "/$rest/" in
-      */../*)
-        refuse "$contract: Inputs \`$path\` has a .. after a name, where only its leading ../ may climb"
+      */./* | */../*)
+        refuse "$contract: Inputs \`$path\` has a . or .. outside its leading ../ run"
         continue
         ;;
     esac
