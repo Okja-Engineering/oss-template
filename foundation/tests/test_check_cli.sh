@@ -111,14 +111,19 @@ run "$H"
 assert_status 1 "$ST" "known modes, however spaced, run the check"
 rm "$H/bin/checks/planted"
 cp -p "$H/bin/checks/pass" "$H/bin/checks/.hidden"
+# Each exit 2 here has more than one cause, so each asserts its own message.
 run "$H" .hidden
 assert_status 2 "$ST" "a name with a leading dot is an unknown check"
+assert_contains "$OUT" "unknown check: .hidden" "  and says so"
 run "$H" ../checks/pass
 assert_status 2 "$ST" "a name holding a slash is an unknown check"
+assert_contains "$OUT" "unknown check: ../checks/pass" "  and says so"
 run "$H" --staged pass --report
 assert_status 2 "$ST" "--report with another mode exits 2"
+assert_contains "$OUT" "--report does not combine with staged mode" "  and says so"
 run "$H" --list pass
 assert_status 2 "$ST" "--list with anything else exits 2"
+assert_contains "$OUT" "--list takes nothing else" "  and says so"
 rm -rf "$H/bin/checks"
 run "$H"
 assert_status 2 "$ST" "a missing checks directory exits 2"
