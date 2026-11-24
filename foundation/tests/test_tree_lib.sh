@@ -211,6 +211,12 @@ git -C "$O/sub" commit -q --allow-empty -m "test: sub two"
 assert_eq "160000 $(git -C "$O/sub" rev-parse HEAD)" "$(entry_of "$O" worktree sub)" \
   "worktree: a submodule's checked-out commit"
 assert_eq "160000 $(git -C "$O/sub" rev-parse HEAD~1)" "$(entry_of "$O" index sub)" "index: the recorded commit"
+mv "$O/sub" "$SCRATCH/sub.away"
+mkdir "$O/sub"
+assert_eq "160000 $(git -C "$SCRATCH/sub.away" rev-parse HEAD~1)" "$(entry_of "$O" worktree sub)" \
+  "worktree: a submodule not checked out keeps its recorded commit"
+rmdir "$O/sub"
+mv "$SCRATCH/sub.away" "$O/sub"
 git init -q -b main "$O/nested"
 git -C "$O/nested" commit -q --allow-empty -m "test: nested"
 assert_eq "160000 $(git -C "$O/nested" rev-parse HEAD)" "$(entry_of "$O" worktree nested)" \
@@ -219,6 +225,17 @@ git init -q -b main "$O/unborn-nested"
 (cd "$O" && tree_list worktree >/dev/null 2>&1)
 assert_status 2 "$?" "worktree: a nested repository with no commit, which git add cannot add, exits 2"
 rm -rf "$O/unborn-nested" "$O/nested"
+# A tracked file replaced on disk by a directory is gone, as git add -A would
+# remove it, and the files the directory holds are listed in their own right.
+fixture_write "$O/became.md" "a file"
+fixture_commit "$O" "test: a file that becomes a directory"
+fixture_remove "$O/became.md"
+fixture_write "$O/became.md/inner.md" "inner"
+assert_eq "none" "$(entry_of "$O" worktree became.md)" "worktree: a file replaced by a directory is not listed"
+assert_eq "100644 $(blob_of_in "$O" inner)" "$(entry_of "$O" worktree became.md/inner.md)" \
+  "worktree: the directory's files are"
+rm -rf "$O/became.md"
+git -C "$O" checkout -q -- became.md
 
 # --- staged mode judges the tree the commit would hold --------------------------
 fixture_write "$O/later.md" "later"

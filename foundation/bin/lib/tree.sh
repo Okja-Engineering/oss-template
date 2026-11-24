@@ -170,8 +170,11 @@ tree__worktree_lines() {
           return 2
         }
       else
-        # A submodule that is not checked out keeps its recorded commit.
-        id=$(git rev-parse -q --verify ":0:$path") || return 2
+        # A submodule that is not checked out keeps its recorded commit. Any
+        # other directory git lists is a tracked file replaced by one, which
+        # git add -A removes; the files it holds are listed in their own right.
+        id=$(tree__gitlink "$path") || return 2
+        [ -n "$id" ] || continue
       fi
       printf '160000 %s\t%s\n' "$id" "$path"
     elif [ -f "$path" ]; then
@@ -195,6 +198,18 @@ EOF
 $blobs
 EOF2
 }
+
+# tree__gitlink PATH: the commit the index records at PATH when it holds a
+# gitlink there, else nothing.
+tree__gitlink() (
+  set -o pipefail
+  git ls-files -s -z -- ":(literal)$1" | tr '\0' '\n' | P=$1 awk '
+    {
+      i = index($0, "\t")
+      split(substr($0, 1, i - 1), f, " ")
+      if (!done && f[1] == "160000" && substr($0, i + 1) == ENVIRON["P"]) { print f[2]; done = 1 }
+    }'
+)
 
 # tree__exclude PREFIX...: drop listing lines whose path starts with a PREFIX.
 tree__exclude() {
