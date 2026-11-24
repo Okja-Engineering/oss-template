@@ -146,6 +146,12 @@ valid
 fixture_write "$R/stages/01-ask/output/.gitignore" '*'
 refused "an output/.gitignore other than * and !.gitignore" "output/.gitignore"
 valid
+printf '*\n!.gitignore\n\n' >"$R/stages/01-ask/output/.gitignore"
+refused "an output/.gitignore with a trailing blank line" "output/.gitignore"
+valid
+printf '*\n!.gitignore' >"$R/stages/01-ask/output/.gitignore"
+passes "an output/.gitignore of the two lines without a final newline"
+valid
 put stages/01-ask/output/run/answers.env 'NAME=x'
 git -C "$R" add -f stages/01-ask/output/run/answers.env
 refused "another tracked file under output/" "stages/01-ask/output/run/answers.env"

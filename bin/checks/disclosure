@@ -116,9 +116,13 @@ while IFS= read -r s <&3; do
     refuse "stages/$s/: the name is not NN-slug (NN-[a-z]+(-[a-z]+)*)"
   has_path "stages/$s/CONTEXT.md" || refuse "stages/$s/: no CONTEXT.md"
   if has_path "stages/$s/output/.gitignore"; then
-    ignore=$(tree_cat "$src" "stages/$s/output/.gitignore")
+    # Every byte counts: a trailing blank line is not the two lines.
+    ignore=$(tree_cat "$src" "stages/$s/output/.gitignore" && printf x)
+    ignore=${ignore%x}
     [ "$ignore" = '*
-!.gitignore' ] || refuse "stages/$s/output/.gitignore: not exactly the lines * and !.gitignore"
+!.gitignore' ] || [ "$ignore" = '*
+!.gitignore
+' ] || refuse "stages/$s/output/.gitignore: not exactly the lines * and !.gitignore"
   else
     refuse "stages/$s/output/.gitignore: missing"
   fi
