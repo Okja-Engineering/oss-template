@@ -241,6 +241,7 @@ inputs_case "an Inputs row naming two files" "$A \`../../shared/other.tsv\`" \
 # four cells whose File/Location is one code span and whose other cells hold
 # none. Any other line is refused, each refusal naming its cause and line.
 ROW="| shared | $A | all | the fields |"
+TAB=$(printf '\t')
 TABLE="$HEADER
 $DELIM
 $ROW"
@@ -248,9 +249,9 @@ OUTSIDE="a line outside its $HEADER table"
 valid
 fixture_replace "$R/$C1" "$TABLE" "$HEADER
 |:---|:---:|---:|---|
-$ROW
+$ROW${TAB}
 "
-passes "the table, its delimiter row aligned, a blank line after it"
+passes "the table, its delimiter row aligned, a row with trailing space, a blank line after it"
 shape_case() { # DESCRIPTION REPLACEMENT NEEDLE
   valid
   fixture_replace "$R/$C1" "$TABLE" "$2"
@@ -306,6 +307,15 @@ $ROW x |" "a row without four cells: $ROW x |"
 shape_case "a table of another header" '| File | Why |
 |---|---|
 | `../../shared/answers.tsv` | the fields |' "$OUTSIDE: | File | Why |"
+shape_case "a header whose last cell is not Why" "| Source | File/Location | Section/Scope | Anything |
+$DELIM
+$ROW" "$OUTSIDE: | Source | File/Location | Section/Scope | Anything |"
+valid
+fixture_replace "$R/$C1" "$TABLE
+
+## Process" "$HEADER
+## Process"
+refused "a header that ends the section" "its header without its delimiter row"
 shape_case "a header without its delimiter row" "$HEADER
 $ROW" "the line after its header is not its delimiter row: $ROW"
 shape_case "a header, then a blank line" "$HEADER

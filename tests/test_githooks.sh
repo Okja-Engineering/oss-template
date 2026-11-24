@@ -143,6 +143,10 @@ assert_status 0 "$ST" "  and git pushes it"
 assert_eq "absent" "$([ -e "$SCRATCH/MARKER" ] && echo present || echo absent)" \
   "pushing a fetched ref never runs its bin/check"
 
+# The remote's name for a ref, not the local one, is CHECK_REF.
+pp "refs/heads/main $(sha main) refs/heads/renamed $ZERO"
+assert_eq "renamed" "$(value CHECK_REF)" "a ref pushed under another name is judged as that name"
+
 # A ref holding no bin/check of its own is judged like any other.
 git -C "$R" checkout -q --orphan bare
 git -C "$R" rm -q -rf --cached .
@@ -157,6 +161,18 @@ pp "refs/heads/bare $(sha bare~1) refs/heads/bare $ZERO"
 assert_status 0 "$ST" "a ref with no bin/check of its own and a good tree passes"
 pp "refs/heads/bare $(sha bare) refs/heads/bare $ZERO"
 assert_status 1 "$ST" "  and with a bad tree is refused"
+# With HEAD on such a commit, there are no checks to judge with. Its tree has
+# no .githooks/ either, so the hook runs from a copy, as an installed one would.
+cp -p "$R/.githooks/pre-push" "$SCRATCH/pre-push"
+git -C "$R" checkout -q bare
+OUT=$(printf 'refs/heads/main %s refs/heads/main %s
+' "$(sha main)" "$(git -C "$R-origin.git" rev-parse main)" |
+  (cd "$R" && "$SCRATCH/pre-push" origin "$R-origin.git") 2>&1)
+ST=$?
+assert_status 2 "$ST" "pre-push with no bin/check at HEAD cannot judge, exit 2"
+assert_contains "$OUT" "HEAD has no committed bin/check" "  and says so"
+git -C "$R" checkout -q -f main
+git -C "$R" clean -q -fd
 
 # Refs sharing a commit, a branch and its tag: clean or not, both get one verdict.
 git -C "$R" branch twin main
