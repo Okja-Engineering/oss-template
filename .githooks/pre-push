@@ -12,7 +12,8 @@
 # commit cannot be judged.
 set -u
 set -o pipefail
-# The sweep below matches kill's English "No such process", so it needs the C locale.
+# The sweep below matches kill's English "No such process", so it needs
+# the C locale.
 export LC_ALL=C
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root" || exit 2

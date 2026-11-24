@@ -2,7 +2,7 @@
 
 The decider's rulings during intake, in the decider's words, and every call made on the decider's behalf under ruling 12. The spec and plan cite this file. The rulings come from the chief of staff's intake notes, recorded at the time in chat. Only words about this template are quoted; `[…]` marks an omission.
 
-## The decider's rulings (2026-11-22, in chat)
+## The decider's rulings (2026-11-22 and 2026-11-23, in chat)
 
 **Rulings 1–4, 18:28.** "Accept all four", accepting the chief of staff's recommendations on four open points in the intent:
 1. Measure 1's "first commit" is the commit exactly as GitHub generates it; the template must pass before `bin/init`.
@@ -329,7 +329,7 @@ Made at the gate on the first workspace spec and plan. Each gives the option tak
 
 169. **Slices land on `main` by rebase merge** (ruling 18), because `main`'s ruleset requires linear history. The ack record is the decider's `Ack at <SHA>` pull request comment, which the chief of staff quotes on the pull request before merging; no merge commit carries it. The `commits` baseline is S1's last rebased commit on `main`, recorded when 6.1 lands, so the docs commits that predate the check stay unjudged and unrewritten. Decisions 10 and 11 still hold for produced repositories, whose merges stay squash or merge commits with rebase merging off (AC16). Amends decision 92. *Amended by decision 183.*
 170. **The workspace names no private repository** (ruling 19). The current text of `docs/work/` calls the upstream repository "the upstream AI-native SDLC process"; TAC40's two upstream links (§ Commits' upstream link, and § Issues and pull requests' link to the writing bar) are dropped, and contract 01's audit states the writing bar in words. Earlier commits are not rewritten. *Amended by decision 183.*
-171. **The workspace's CI is required** (rulings 20 and 22): the decider adds its checks as required status checks on `main`'s ruleset, so a red run cannot merge, and the spec's not-enforced list no longer counts the workspace's CI among its items. *Amended by decision 183.*
+171. **The workspace's CI is required** (rulings 20 and 22): its checks are added as required status checks on `main`'s ruleset at the decider's direction, so a red run cannot merge, and the spec's not-enforced list no longer counts the workspace's CI among its items. *Amended by decision 183.*
 172. **The workspace's own commits use the committer's GitHub noreply address** (ruling 21). No check reads commit metadata for it, so the spec lists it as not enforced.
 173. **`claims` judges sentences, not Markdown headings.** A heading line is not a rule-stating sentence (decision 30, TAC13), so a required heading such as `CONTRIBUTING.md`'s `## What is enforced` passes; 2.1's test carries the case. Amends decision 30. *Amended by decision 179.*
 174. **Thin callers where the product has the logic.** AC5's rule applies where a product library exists: a workspace-only check, such as `disclosure`, keeps its stage logic in its own file, and logic shared with the product, AC1's `CLAUDE.md` and `AGENTS.md` rules, lives in `foundation/bin/lib/agents.sh`, which the product's `agents` and the workspace's `disclosure` both call. S1 carries `agents.sh` as an approved departure from its write set, found at S1's ship gate. Amends decision 95.
