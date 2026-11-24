@@ -208,6 +208,30 @@ OUT=$(printf 'refs/heads/worse %s refs/heads/worse %s' "$(sha worse)" "$(sha mai
   (cd "$R" && .githooks/pre-push origin "$R-origin.git") 2>&1)
 assert_status 1 "$?" "pre-push judges a last line that lacks its newline"
 
+# --- pre-push's scratch --------------------------------------------------------
+# It lives in the git dir, not TMPDIR (which may be noexec), is removed when
+# the hook ends, and a later run sweeps one a killed run left: a directory
+# named for a process no longer running, and nothing else.
+GD="$R/.git"
+(exit 0) &
+dead=$!
+wait "$dead"
+mkdir -p "$GD/pre-push.$dead.killed/head"
+mkdir "$GD/pre-push.$$.running"
+mkdir "$SCRATCH/kept"
+ln -s "$SCRATCH/kept" "$GD/pre-push.$dead.link"
+: >"$GD/pre-push.$dead.file"
+OUT=$(printf 'refs/heads/twin %s refs/heads/twin %s\n' "$(sha twin)" "$(git -C "$R-origin.git" rev-parse twin)" |
+  (cd "$R" && .githooks/pre-push origin "$R-origin.git") 2>&1)
+assert_status 0 "$?" "pre-push passes a clean ref"
+assert_eq "1" "$(value CHECK_SELF | grep -c '/\.git/pre-push\.[0-9]*\.[^/]*/head/bin/checks/env$')" \
+  "  running HEAD's checks from its scratch in the git dir"
+assert_eq "$(printf 'pre-push.%s\n' "$$.running" "$dead.file" "$dead.link" | sort)" \
+  "$(for f in "$GD"/pre-push.*; do [ -e "$f" ] || [ -L "$f" ] && printf '%s\n' "${f##*/}"; done | sort)" \
+  "  leaving no scratch of its own, and sweeping only a dead run's directory"
+assert_eq "yes" "$([ -d "$SCRATCH/kept" ] && echo yes)" "  and not following a link"
+rm -rf "$GD/pre-push.$$.running" "$GD/pre-push.$dead.link" "$GD/pre-push.$dead.file"
+
 # --- pre-push on an unborn HEAD -----------------------------------------------
 # The checks come from HEAD's commit, so with none checked out there are none.
 git -C "$R" checkout -q --orphan fresh

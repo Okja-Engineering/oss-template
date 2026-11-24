@@ -15,8 +15,18 @@ set -o pipefail
 export LC_ALL=C
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root" || exit 2
-# Inside .git rather than TMPDIR, which may be mounted noexec.
-scratch=$(mktemp -d "$(git rev-parse --absolute-git-dir)/pre-push.XXXXXX") || exit 2
+# Inside the git dir rather than TMPDIR, which may be mounted noexec, and
+# named for this process, so a later run removes what a killed one left: a
+# directory, not a link, named for a process no longer running.
+gitdir=$(git rev-parse --absolute-git-dir) || exit 2
+for old in "$gitdir"/pre-push.*; do
+  [ -d "$old" ] && [ ! -L "$old" ] || continue
+  pid=${old##*/pre-push.}
+  pid=${pid%%.*}
+  case "$pid" in '' | *[!0-9]*) continue ;; esac
+  kill -0 "$pid" 2>/dev/null || rm -rf "$old"
+done
+scratch=$(mktemp -d "$gitdir/pre-push.$$.XXXXXX") || exit 2
 trap 'rm -rf "$scratch"' EXIT
 
 # HEAD's committed bin/ and foundation/bin/, through a private index.
