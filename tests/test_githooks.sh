@@ -208,4 +208,12 @@ OUT=$(printf 'refs/heads/worse %s refs/heads/worse %s' "$(sha worse)" "$(sha mai
   (cd "$R" && .githooks/pre-push origin "$R-origin.git") 2>&1)
 assert_status 1 "$?" "pre-push judges a last line that lacks its newline"
 
+# --- pre-push on an unborn HEAD -----------------------------------------------
+# The checks come from HEAD's commit, so with none checked out there are none.
+git -C "$R" checkout -q --orphan fresh
+pp "refs/heads/main $(sha main) refs/heads/main $(git -C "$R-origin.git" rev-parse main)"
+assert_status 2 "$ST" "pre-push on an unborn HEAD cannot judge, exit 2"
+assert_contains "$OUT" "pre-push needs a checked-out commit to take its checks from" "  and says so"
+git -C "$R" checkout -q -f main
+
 assert_done

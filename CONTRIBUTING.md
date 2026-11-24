@@ -20,7 +20,7 @@ Write the failing test first and see it fail for the reason you expect. The work
 
 ## Git hooks
 
-Run `bin/setup` once per clone: it points git at `.githooks/`, whose `commit-msg`, `pre-commit` and `pre-push` hooks call `bin/check`. `pre-push` judges each pushed ref's commits and tree with the checks committed at your `HEAD`: never with uncommitted edits to them, and never by running code from the ref being pushed. A ref that changes the checks themselves is judged here by today's checks, and in CI by its own. `git commit --no-verify` and `git push --no-verify` skip the hooks; `.github/workflows/ci.yml` runs the same checks on every pull request and push to `main`, and `main`'s ruleset requires both of its legs to pass before a pull request merges.
+Run `bin/setup` once per clone: it points git at `.githooks/`, whose `commit-msg`, `pre-commit` and `pre-push` hooks call `bin/check`. `pre-push` judges each pushed ref's commits and tree with the checks committed at your `HEAD`: never with uncommitted edits to them, and never by running code from the ref being pushed. A ref that changes the checks themselves is judged here by today's checks, and in CI by its own. With no commit checked out (an orphan branch before its first commit), `pre-push` has no checks to take and refuses the push. `git commit --no-verify` and `git push --no-verify` skip the hooks; `.github/workflows/ci.yml` runs the same checks on every pull request and push to `main`, and `main`'s ruleset requires both of its legs to pass before a pull request merges.
 
 ## Agent guards
 

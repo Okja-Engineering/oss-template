@@ -20,6 +20,10 @@ scratch=$(mktemp -d "$(git rev-parse --absolute-git-dir)/pre-push.XXXXXX") || ex
 trap 'rm -rf "$scratch"' EXIT
 
 # HEAD's committed bin/ and foundation/bin/, through a private index.
+git rev-parse -q --verify 'HEAD^{commit}' >/dev/null || {
+  printf 'pre-push needs a checked-out commit to take its checks from\n' >&2
+  exit 2
+}
 GIT_INDEX_FILE="$scratch/index" git read-tree HEAD &&
   GIT_INDEX_FILE="$scratch/index" git ls-files -z -- bin foundation/bin |
   GIT_INDEX_FILE="$scratch/index" git checkout-index -z --stdin --prefix="$scratch/head/" &&
