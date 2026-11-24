@@ -14,8 +14,7 @@
 #   relative to its stage folder and climbing only by a leading run of ../,
 #   that reaches a tracked regular file not in a later stage, or an earlier
 #   stage's ../NN-slug/output/<name>/FILE that stage's Outputs lists; every
-#   file in a stage's references/ is one of its Inputs. The stage order and
-#   references/ are judged without regard to case.
+#   file in a stage's references/ is one of its Inputs.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -37,12 +36,6 @@ has_path() { printf '%s\n' "$paths" | grep -Fxq -- "$1"; }
 # under DIR: the paths under DIR/, matched literally.
 under() { printf '%s\n' "$paths" | P="$1/" awk 'index($0, ENVIRON["P"]) == 1'; }
 has_dir() { [ -n "$(under "$1")" ]; }
-# under_any_case DIR: the paths under DIR/ in any case, as a case-insensitive
-# disk opens them.
-under_any_case() {
-  printf '%s\n' "$paths" | P="$1/" awk 'tolower(substr($0, 1, length(ENVIRON["P"]))) == tolower(ENVIRON["P"])'
-}
-lower() { printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'; }
 # mode_of PATH: the mode the listing gives PATH, matched literally, or nothing.
 mode_of() {
   printf '%s\n' "$listing" | P="$1" awk '
@@ -286,20 +279,13 @@ while IFS= read -r s <&3; do
     elif [ "$mode" = 160000 ]; then
       refuse "$contract: Inputs \`$path\` is a submodule, not a file"
     elif [ -n "$mode" ]; then
-      # A case-insensitive disk opens a path spelled in another case as the
-      # file it folds to, so the stage order is judged on the folded path.
-      folded=$(lower "$target")
-      case "$folded" in
+      case "$target" in
         stages/*/*)
-          other=${folded#stages/}
+          other=${target#stages/}
           other=${other%%/*}
           onum=$(stage_num "$other")
-          if [ -z "$num" ] || [ -z "$onum" ]; then
-            :
-          elif [ "$onum" -gt "$num" ]; then
+          if [ -n "$num" ] && [ -n "$onum" ] && [ "$onum" -gt "$num" ]; then
             refuse "$contract: Inputs \`$path\` is in a later stage"
-          elif [ "$onum" -eq "$num" ] && [ "${target#"stages/$s/"}" = "$target" ]; then
-            refuse "$contract: Inputs \`$path\` is in this stage, spelled in another case"
           fi
           ;;
       esac
@@ -328,7 +314,7 @@ EOF
     [ -n "$p" ] || continue
     printf '%s' "$inputs" | grep -Fxq -- "$p" || refuse "$p: in references/ but not in the stage's Inputs"
   done <<EOF
-$(under_any_case "stages/$s/references")
+$(under "stages/$s/references")
 EOF
 done 3<<EOF
 $stages
