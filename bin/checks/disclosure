@@ -9,11 +9,12 @@
 #   `*` and `!.gitignore`, and nothing else under output/; each contract is
 #   at most 80 lines with the sections Inputs, Process, [Checkpoints],
 #   [Audit], Outputs, in that order and no others.
-# AC3: each Inputs entry (a table row or a list item; any other line is
-#   refused) names one file in backticks, relative to its stage
-#   folder, that is a tracked file not in a later stage, or an earlier
-#   stage's ../NN-slug/output/<name>/FILE that stage's Outputs lists; every
-#   file in a stage's references/ is one of its Inputs.
+# AC3: each Inputs entry (a table row, a list item or a line opening with
+#   a code span; a line that is neither an entry nor prose is refused) names
+#   one file in backticks, relative to its stage folder, that is a tracked
+#   file not in a later stage, or an earlier stage's
+#   ../NN-slug/output/<name>/FILE that stage's Outputs lists; every file in a
+#   stage's references/ is one of its Inputs.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -52,32 +53,85 @@ h2s() {
 }
 # body_rows: a Markdown table's rows after its header and separator.
 body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
-# input_entries: for each non-blank line of an Inputs section, `ENTRY<TAB>X`,
-# X the first cell of a table body row or what a list item (`- ` or `* `)
-# names, its leading code span when nothing after it holds a backtick; or
-# `BAD<TAB>LINE` for any other line, so nothing in Inputs goes unread. A
-# table is a header row, a separator row, then body rows, unindented.
+# input_entries: for each line of an Inputs section that names a file,
+# `ENTRY<TAB>X`: X the first cell of a table's body row, or what a list item
+# (`-`, `*`, `+`, `1.` or `1)`) or a line opening with a code span names, cut
+# to that span when what follows it is a description (nothing, text with no
+# backtick, or text after a colon or a dash). `BAD<TAB>LINE` for a line it
+# cannot read: a backtick outside an entry, a pipe outside a table, a table
+# header holding a code span, a fence, a code block. Prose, an HTML comment
+# and an item's indented continuation name nothing. A table is a header row
+# and a delimiter row, then rows up to a blank line; it may be indented up to
+# three spaces, and its outer pipes are optional.
 # shellcheck disable=SC2016 # a literal backtick, the Markdown code span
 input_entries() {
   awk '
-    /^[ \t]*$/ { t = 0; next }
-    /^\|/ {
-      t++
-      if (t == 1) next
-      if (t == 2) {
-        if ($0 ~ /^\|([ \t]*:?-+:?[ \t]*\|)+[ \t]*$/) next
-        print "BAD\t" $0; next
+    # indent S: the columns of the whitespace S opens with, a tab to the next stop of 4.
+    function indent(s,   i, c, n) {
+      n = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == " ") n++
+        else if (c == "\t") n += 4 - n % 4
+        else break
       }
-      c = $0; sub(/^\|/, "", c); sub(/\|.*/, "", c); gsub(/^[ \t]+|[ \t]+$/, "", c)
-      print "ENTRY\t" c; next
+      return n
     }
-    { t = 0 }
-    /^[-*] / {
-      c = substr($0, 3)
-      if (match(c, /^`[^`]*`/) && index(substr(c, RLENGTH + 1), "`") == 0) c = substr(c, 1, RLENGTH)
-      print "ENTRY\t" c; next
+    function delimiter(s) {
+      return index(s, "|") > 0 && index(s, "-") > 0 &&
+        s ~ /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/
     }
-    { print "BAD\t" $0 }'
+    function entry(c,   rest) {
+      if (match(c, /^`[^`]+`/)) {
+        rest = substr(c, RLENGTH + 1)
+        if (index(rest, "`") == 0 || rest ~ /^[ \t]*(:|-[ \t]|\342\200\224|\342\200\223)/)
+          c = substr(c, 1, RLENGTH)
+      }
+      print "ENTRY\t" c
+    }
+    { line[++n] = $0 }
+    END {
+      for (i = 1; i <= n; i++) {
+        s = line[i]
+        if (comment) {
+          if (index(s, "-->")) comment = 0
+          continue
+        }
+        if (s ~ /^[ \t]*$/) { table = 0; item = 0; para = 0; continue }
+        k = indent(s)
+        r = s
+        sub(/^[ \t]+/, "", r)
+        if (table) {
+          if (index(s, "|") == 0) { print "BAD\t" s; continue }
+          c = r; sub(/^\|/, "", c); sub(/\|.*/, "", c); gsub(/^[ \t]+|[ \t]+$/, "", c)
+          print "ENTRY\t" c
+          continue
+        }
+        if (k >= 4 && !item && !para) { print "BAD\t" s; continue }
+        if (r ~ /^(```|~~~)/) { print "BAD\t" s; continue }
+        if (substr(r, 1, 4) == "<!--") {
+          if (index(substr(r, 5), "-->") == 0) comment = 1
+          continue
+        }
+        if (match(r, /^([-*+]|[0-9]+[.)])([ \t]|$)/)) {
+          c = substr(r, RLENGTH + 1)
+          sub(/^[ \t]+/, "", c)
+          entry(c)
+          item = 1; para = 1
+          continue
+        }
+        if (item && k >= 1) continue
+        item = 0
+        if (index(s, "|")) {
+          if (!para && i < n && delimiter(line[i + 1]) && index(s, "`") == 0) { table = 1; i++; continue }
+          print "BAD\t" s
+          continue
+        }
+        para = 1
+        if (substr(r, 1, 1) == "`") entry(r)
+        else if (index(s, "`")) print "BAD\t" s
+      }
+    }'
 }
 # normalize PATH: resolve . and .. segments; empty when it leaves the root.
 normalize() {
@@ -186,7 +240,7 @@ while IFS= read -r s <&3; do
     [ -n "$row" ] || continue
     cell=${row#*	}
     if [ "${row%%	*}" = BAD ]; then
-      refuse "$contract: an Inputs line is neither a table row nor a list item: $cell"
+      refuse "$contract: an Inputs line is neither an entry nor prose: $cell"
       continue
     fi
     path=${cell#\`}

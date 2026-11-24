@@ -224,8 +224,9 @@ inputs_case "an input from a later stage's output" '`../02-render/output/<name>/
 inputs_case "an input from a later stage's folder" '`../02-render/references/notes.md`' "later"
 inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' "one file in backticks"
 
-# Every non-blank line of Inputs is a table row or a list item naming one
-# file, judged by the same rules, or a refusal: nothing is skipped unread.
+# Every line of Inputs is an entry naming one file, judged by the same rules
+# whatever its Markdown form, or prose that names nothing, or a refusal:
+# nothing that could name a file is skipped unread.
 TABLE='| File | Why |
 |---|---|
 | `../../shared/answers.tsv` | the fields |'
@@ -234,17 +235,49 @@ list_case() { # DESCRIPTION REPLACEMENT NEEDLE
   fixture_replace "$R/$C1" "$TABLE" "$2"
   refused "$1" "$3"
 }
-valid
-fixture_replace "$R/$C1" "$TABLE" '- `../../shared/answers.tsv`: the fields'
-passes "Inputs as a list item naming one file"
+form_passes() { # DESCRIPTION REPLACEMENT
+  valid
+  fixture_replace "$R/$C1" "$TABLE" "$2"
+  passes "$1"
+}
+form_passes "Inputs as a list item naming one file" "- $A: the fields"
+form_passes "a lead-in sentence, then the table" "Load only this file.
+
+$TABLE"
+form_passes "a line that is one code span" "$A"
+form_passes "a numbered list item" "1. $A"
+form_passes "a list item with a + marker" "+ $A"
+form_passes "a list item with two spaces after its marker" "-  $A"
+form_passes "a list item wrapped onto an indented line" "- $A: the field schema, which
+  the questionnaire is generated from"
+form_passes "a table indented by a space" "$(printf '%s\n' "$TABLE" | sed 's/^/ /')"
+form_passes "a table without outer pipes" "File | Why
+---|---
+$A | the fields"
+form_passes "an HTML comment, then a list item" "<!-- one file only -->
+- $A"
+form_passes "a list item whose description holds a code span" "- $A: see \`Process\`"
+form_passes "a list item whose description, after a dash, holds a code span" "- $A — see \`Process\`"
 list_case "a list item naming a glob" '- `../../stages/*`' "glob"
 list_case "a list item naming a directory" '- `../../`' "directory"
 list_case "a list item naming a stage that does not exist" '- `../09-later/output/<name>/x.md`' "does not resolve"
 list_case "a list item naming two files" '- `../../shared/answers.tsv` and `../../CONTEXT.md`' "one file in backticks"
-list_case "a prose line in Inputs" 'the whole repository' "the whole repository"
-list_case "an indented table row" "$(printf '%s\n' "$TABLE" | sed 's/^/  /')" "  | File | Why |"
+list_case "a list item naming no file" '- the whole repository' "one file in backticks"
+list_case "a list item naming two files, after a comma" "- $A, \`../../CONTEXT.md\`" "one file in backticks"
+list_case "a code block, indented four spaces" "$(printf '%s\n' "$TABLE" | sed 's/^/    /')" "    | File | Why |"
 list_case "a table without its separator row" '| File | Why |
 | `../../shared/answers.tsv` | the fields |' "answers.tsv"
+list_case "a lone pipe line naming a glob" '| `../../stages/*` | the whole repository |' "../../stages/*"
+list_case "a lone pipe line naming a directory" '| `../../` everything |' "../../"
+list_case "a table header naming a path" '| `../../stages/` | x |
+|---|---|
+| `../../shared/answers.tsv` | the fields |' "../../stages/"
+list_case "a fenced block" '```
+- `../../shared/answers.tsv`
+```' '```'
+list_case "a prose line holding a code span" 'Load `../../stages/` too.' 'Load `../../stages/` too.'
+list_case "a line after a table that is not a row" "$TABLE
+and the rest" "and the rest"
 inputs_case "an Inputs row naming two files" "$A \`../../shared/other.tsv\`" "one file in backticks"
 valid
 fixture_replace "$R/$C2" "| \`references/notes.md\` | notes |" \
