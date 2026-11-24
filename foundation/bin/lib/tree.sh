@@ -15,7 +15,9 @@
 # list the same paths for the same state, whatever their names hold. The one
 # name a listing line cannot carry, one holding a newline, fails the read in
 # every source. The index source is the tree `git commit` would write from
-# it, so an intent-to-add entry is not in it. The working tree is what
+# it, so an intent-to-add entry is not in it; git writes that tree as
+# `git commit` does, so reading the index takes its lock and writes tree
+# objects, and fails when it cannot. The working tree is what
 # `git add -A` would stage, each file hashed as its bytes stand, unfiltered.
 
 tree_source() {

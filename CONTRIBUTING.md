@@ -12,7 +12,7 @@ Subjects take the form `type(scope): subject`, types `feat`, `fix`, `docs`, `ref
 
 ## Tests
 
-Write the failing test first and see it fail for the reason you expect. The workspace's suites live in `tests/` and the product's in `foundation/tests/`; each runs with its `run-all.sh`. Every suite builds its own fixtures in a temporary directory. Beyond the code under test, a suite reads from the workspace only git's list of the suites beside it, to check that none is missing.
+Write the failing test first and see it fail for the reason you expect. The workspace's suites live in `tests/` and the product's in `foundation/tests/`; each runs with its `run-all.sh`. Every suite builds its own fixtures in a temporary directory. Beyond the code under test, a suite reads from the workspace only the committed test libraries and fixtures in `tests/` and `foundation/tests/`, and git's list of the suites beside it, to check that none is missing.
 
 ## Checks
 
@@ -36,13 +36,14 @@ Claude Code applies the list; the workspace has no command guard of its own.
 | Enforcer | What it stops | When |
 |---|---|---|
 | `.githooks/commit-msg`, `.githooks/pre-commit`, `.githooks/pre-push` | whatever `bin/check` refuses | at commit and at push, after `bin/setup` |
-| `bin/check disclosure` | `CLAUDE.md` other than `@AGENTS.md`; `AGENTS.md` over 80 lines or `CONTEXT.md` over 60; a stage folder, routing table or contract out of shape; an Inputs line that is neither prose nor an entry (a table row, a list item or a line opening with a code span) naming one file, or an entry that names a directory, a glob, a path that does not resolve, a file in the same or a later stage, or an earlier stage's output its Outputs do not list; a file in `references/` its Inputs do not name | in `bin/check`, so in the hooks |
+| `bin/check disclosure` | `CLAUDE.md` other than `@AGENTS.md`; `AGENTS.md` over 80 lines or `CONTEXT.md` over 60; a stage folder, routing table or contract out of shape; an Inputs line that is neither prose nor an entry (a table row, a list item or a line opening with a code span) naming one file, or an entry that names a directory, a glob, a path that does not resolve, a file in a later stage, an output of the same or a later stage, or an earlier stage's output its Outputs do not list; a file in `references/` its Inputs do not name | in `bin/check`, so in the hooks |
 | `.claude/settings.json` (Claude Code) | Claude Code reading a `.env` or `.env.*` file at or under its working directory by name | in Claude Code |
 | `.github/workflows/ci.yml`, required by `main`'s ruleset | merging a pull request that fails `bin/check --range`, either suite or the runners' self-test | on every pull request and push to `main`, on Ubuntu (bash 5) and macOS (bash 3.2) |
 
 ## What is not enforced
 
 - The git hooks, under `--no-verify` or before `bin/setup` runs; CI still runs their checks.
+- CI, for an organization admin: `main`'s ruleset lets one bypass it and merge a pull request whose checks have not passed.
 - Commit subjects and tool credit, until the `commits` and `pr` checks land.
 - `git` and `gh` commands an agent types in the workspace: there is a deny list, not a command guard.
 - The `.env` deny list, against a read that does not name the file (`grep -r`, `git show`, `git diff`, a script), a file outside the working directory, and `.envrc`.
