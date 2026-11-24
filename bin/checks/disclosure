@@ -11,8 +11,8 @@
 #   [Audit], Outputs, in that order and no others.
 # AC3: Inputs is one table, | Source | File/Location | Section/Scope | Why |,
 #   and nothing else; each row's File/Location names one file in backticks,
-#   relative to its stage folder, that is a tracked file not in a later
-#   stage, or an earlier stage's ../NN-slug/output/<name>/FILE that stage's
+#   relative to its stage folder and climbing only by leading ../ segments,
+#   that is a tracked file not in a later stage, or an earlier stage's ../NN-slug/output/<name>/FILE that stage's
 #   Outputs lists; every file in a stage's references/ is one of its Inputs.
 set -u
 export LC_ALL=C
@@ -214,6 +214,16 @@ while IFS= read -r s <&3; do
         ;;
       */)
         refuse "$contract: Inputs \`$path\` is a directory"
+        continue
+        ;;
+    esac
+    # Only the leading ../ segments climb; a .. after a name would judge the
+    # path by a name it may never reach (a file, or a missing directory).
+    rest=$path
+    while [ "${rest#../}" != "$rest" ]; do rest=${rest#../}; done
+    case "/$rest/" in
+      */../*)
+        refuse "$contract: Inputs \`$path\` has a .. after a name, where only its leading ../ may climb"
         continue
         ;;
     esac

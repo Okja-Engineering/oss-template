@@ -224,6 +224,12 @@ inputs_case "an input that is a ? glob" '`../../shared/answers.ts?`' "glob"
 inputs_case "an input that is a [ glob" '`../../shared/answers.[t]sv`' "glob"
 inputs_case "an input that does not resolve" '`../../shared/missing.tsv`' "does not resolve"
 inputs_case "an input above the workspace" '`../../../outside.txt`' "does not resolve"
+# A path leaves its stage folder only by its leading ../ segments; a .. after
+# a name is refused, so no path is judged by a name it never reaches.
+DOTDOT="a .. after a name"
+inputs_case "an input going up through a file" '`../02-render/CONTEXT.md/../../../AGENTS.md`' "$DOTDOT"
+inputs_case "an input going up through a directory that does not exist" '`../../no-such-dir/../AGENTS.md`' "$DOTDOT"
+inputs_case "an input whose name holds a space before a .." '`../02-render/CONTEXT.md ../../../../AGENTS.md`' "$DOTDOT"
 inputs_case "an input from a later stage's output" '`../02-render/output/<name>/render.md`' "later"
 inputs_case "an input from a later stage's folder" '`../02-render/references/notes.md`' "later"
 inputs_case "an Inputs row without a path in backticks" 'shared/answers.tsv' \
