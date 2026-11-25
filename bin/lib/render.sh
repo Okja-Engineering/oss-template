@@ -16,8 +16,12 @@
 #       field; a {{[A-Z_]+}} left after substitution; an executable
 #       template, or one that is a symbolic link; a variant whose field
 #       selects nothing (no value of the field is VALUE); a selecting field
-#       with no variant for its value; two sources for one path; a
-#       submodule. One line out per refusal; exit 0, 1 on a refusal, 2 when
+#       with no variant for its value; a selected PATH from anything but
+#       its variants, as a plain PATH or PATH.tmpl; two sources for one
+#       path; a submodule; and, before anything is written, two paths or
+#       directories that differ only in ASCII case, which a disk that folds
+#       case holds as one. One line out per refusal; exit 0, 1 on a
+#       refusal, 2 when
 #       COMMIT cannot be read or OUT written. Sets RENDER_LIST to the
 #       produced paths, sorted, one a line.
 #   render_walk TARGET LIST
@@ -47,7 +51,7 @@
 
 render_tree() {
   local commit=$1 schema=$2 answers=$3 out=$4 entries line refused=0
-  local mode rel name tmpl sel field path values value v src produced="" tmp
+  local mode rel name tmpl sel field path values value v src produced="" tmp twins
   entries=$(tree_list "commit:$commit") || return 2
   # The selecting fields: "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE".
   sel=$(awk -F '\t' 'NR > 1 && $5 != "-" && $5 != "" { print $1 "\t" $5 "\t" $6 }' "$schema" |
@@ -55,6 +59,19 @@ render_tree() {
       value=$(answers_get "$answers" "$field") || value=""
       printf '%s\t%s\t%s\t%s\n' "$field" "$path" "$values" "$value"
     done)
+  # Paths, or directories, that differ only in case, refused before anything
+  # is written: on a disk that folds case, one would be written through the
+  # other. Each foundation path, without .tmpl, and each selected path.
+  twins=$({
+    printf '%s\n' "$entries" |
+      awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ { p = substr(p, 12); print p; if (sub(/\.tmpl$/, "", p)) print p }'
+    printf '%s\n' "$sel" | cut -f 2
+  } | awk -F / 'NF { p = $1; print p; for (i = 2; i <= NF; i++) { p = p "/" $i; print p } }' | sort -u |
+    awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }')
+  if [ -n "$twins" ]; then
+    printf '%s\n' "$twins"
+    return 1
+  fi
   tmp=$(mktemp -d) || return 2
   render__fields "$schema" "$answers" >"$tmp/fields"
   while IFS= read -r line <&3; do
@@ -102,6 +119,12 @@ render_tree() {
 $sel
 EOF
     [ "$src" != skip ] || continue
+    if [ "$src" = verbatim ] && N=$name awk -F '\t' '$2 == ENVIRON["N"] { f = 1 } END { exit !f }' <<<"$sel"; then
+      printf 'foundation/%s: %s is a selected path, so it comes only from its variants, %s.VALUE or %s.VALUE.tmpl\n' \
+        "$rel" "$name" "$name" "$name"
+      refused=1
+      continue
+    fi
     case "$mode" in
       160000)
         printf 'foundation/%s: a submodule, which render cannot copy\n' "$rel"
@@ -317,13 +340,22 @@ render_fingerprint() {
 }
 
 render_root_ok() {
-  local root=$1 ws=$2 dir rec path flag
+  local root=$1 ws=$2 dir rec path flag list
   local -a tops=()
   path=$(git -C "$ws" rev-parse --show-toplevel) || {
     printf 'cannot find the workspace'"'"'s working tree\n'
     return 1
   }
   tops+=("$path")
+  list=$(mktemp) || {
+    printf 'cannot make a temporary file\n'
+    return 1
+  }
+  if ! git -C "$ws" worktree list --porcelain -z >"$list"; then
+    rm -f "$list"
+    printf 'cannot list the workspace'"'"'s worktrees\n'
+    return 1
+  fi
   path="" flag=""
   while IFS= read -r -d '' rec; do
     case "$rec" in
@@ -334,7 +366,8 @@ render_root_ok() {
         path="" flag=""
         ;;
     esac
-  done < <(git -C "$ws" worktree list --porcelain -z)
+  done <"$list"
+  rm -f "$list"
   [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
   dir=$root
   while [ ! -d "$dir" ]; do

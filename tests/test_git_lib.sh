@@ -78,4 +78,11 @@ false
 false" "$(printf '%s\n' "$ENV" | tail -n 6)" \
   "every git it starts reads core.attributesFile, core.excludesFile, core.fileMode, commit.gpgsign, core.hooksPath and core.fsmonitor from GIT_CONFIG_COUNT"
 
+# The pathspec and trace variables, and every other GIT_* outside the recipe.
+OUT=$(export GIT_ICASE_PATHSPECS=1 GIT_GLOB_PATHSPECS=1 GIT_TRACE=/dev/stdout GIT_PLANTED=x &&
+  git_hermetic && printf '%s %s %s %s\n' "${GIT_ICASE_PATHSPECS-unset}" "${GIT_GLOB_PATHSPECS-unset}" \
+  "${GIT_TRACE-unset}" "${GIT_PLANTED-unset}" && git --version)
+assert_eq "unset unset unset unset
+$(git --version)" "$OUT" "GIT_ICASE_PATHSPECS, GIT_GLOB_PATHSPECS, GIT_TRACE and any other GIT_* are unset"
+
 assert_done

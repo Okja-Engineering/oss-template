@@ -7,10 +7,11 @@
 #                    comparing major and minor numerically; else print why
 #                    and exit 1
 #   git_hermetic     build the environment, for every git the caller starts
-#                    after it: unset each variable `git rev-parse
-#                    --local-env-vars` names, GIT_ATTR_SOURCE,
-#                    GIT_DEFAULT_HASH and every GIT_AUTHOR_* and
-#                    GIT_COMMITTER_*; then set GIT_CONFIG_GLOBAL=/dev/null,
+#                    after it: unset every variable of the GIT_* namespace,
+#                    each `git rev-parse --local-env-vars` names, the
+#                    pathspec ones, GIT_TRACE*, GIT_ATTR_SOURCE,
+#                    GIT_DEFAULT_HASH, GIT_AUTHOR_* and GIT_COMMITTER_*
+#                    among them; then set GIT_CONFIG_GLOBAL=/dev/null,
 #                    GIT_CONFIG_NOSYSTEM=1, GIT_ATTR_NOSYSTEM=1,
 #                    GIT_NO_REPLACE_OBJECTS=1 and GIT_DEFAULT_REF_FORMAT=files,
 #                    and, through GIT_CONFIG_COUNT, GIT_CONFIG_KEY_<n> and
@@ -18,7 +19,10 @@
 #                    them while it keeps the environment,
 #                    core.attributesFile=/dev/null, core.excludesFile=/dev/null,
 #                    core.fileMode=true, commit.gpgsign=false,
-#                    core.hooksPath=/dev/null and core.fsmonitor=false
+#                    core.hooksPath=/dev/null and core.fsmonitor=false.
+#                    It runs no git, so the caller runs it before any git,
+#                    the version gate's included, and no planted variable
+#                    reaches one.
 #
 # A repository the caller makes is made with `git init --template=
 # --object-format=sha1`. The caller exports LC_ALL=C.
@@ -56,15 +60,10 @@ git_version_ok() {
 
 # shellcheck disable=SC2163 # unset and export take the names held in v
 git_hermetic() {
-  local v names
-  names=$(git rev-parse --local-env-vars) || return 1
-  for v in $names; do
-    unset "$v"
-  done
-  unset GIT_ATTR_SOURCE GIT_DEFAULT_HASH
+  local v
   for v in $(compgen -e); do
     case "$v" in
-      GIT_AUTHOR_* | GIT_COMMITTER_*) unset "$v" ;;
+      GIT_*) unset "$v" ;;
     esac
   done
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_ATTR_NOSYSTEM=1

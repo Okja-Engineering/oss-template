@@ -188,7 +188,7 @@ fresh
 put foundation/LICENSE 'A plain licence.'
 fixture_commit "$R" "test: a plain file beside its variants"
 confirmed widget
-refused "a path with two sources" "a second source for LICENSE" widget
+refused "a plain file beside the variants of the path it selects" "LICENSE is a selected path" widget
 fresh
 ln -s README.md.tmpl "$R/foundation/link.md.tmpl"
 fixture_commit "$R" "test: a template that is a symbolic link"
@@ -480,6 +480,58 @@ assert_status 1 "$ST" "refused: a failure under a TARGET_ROOT render made"
 assert_eq "yes" "$([ -d "$SCRATCH/anc$n/a/b" ] && echo yes)" "  which stays, with its ancestors"
 assert_eq "" "$(entries "$SCRATCH/anc$n/a/b")" "  empty"
 
+# --- what the foundation may hold (R3, F5) ----------------------------------------------------
+# A selected path comes only from its variants.
+fresh
+git -C "$R" rm -q foundation/LICENSE.apache-2.0 foundation/LICENSE.none.tmpl
+put foundation/LICENSE 'A plain licence.'
+fixture_commit "$R" "test: a plain file at a selected path, with no variant"
+confirmed widget
+refused "a plain file at a selected path, with no variant" "LICENSE is a selected path" widget
+fresh
+git -C "$R" rm -q foundation/LICENSE.apache-2.0 foundation/LICENSE.none.tmpl
+put foundation/LICENSE.tmpl 'A plain licence, {{HOLDER}}.'
+fixture_commit "$R" "test: a template at a selected path, with no variant"
+confirmed widget
+refused "a template at a selected path, with no variant" "LICENSE is a selected path" widget
+# Case-only twins, refused before anything is written: planted in the
+# index, since a disk that folds case cannot hold both.
+twin() { # PATH MODE [TEXT]: add PATH, a file or a link to TEXT, to HEAD
+  local blob
+  blob=$(printf '%s' "${3:-twin}" | git -C "$R" hash-object -w --stdin) &&
+    git -C "$R" update-index --add --cacheinfo "$2,$blob,$1" &&
+    git -C "$R" commit -q -m "test: $1"
+}
+fresh
+twin foundation/readme.md 100644
+confirmed widget
+refused "a file whose path differs from another's only in case" \
+  "foundation renders README.md and readme.md, which differ only in case" widget
+assert_eq "" "$(left)" "  with nothing written"
+fresh
+twin foundation/license 100644
+confirmed widget
+refused "a file whose path differs only in case from a selected path" \
+  "foundation renders LICENSE and license, which differ only in case" widget
+fresh
+mkdir -p "$SCRATCH/outside$n"
+printf 'kept\n' >"$SCRATCH/outside$n/x"
+twin foundation/Lnk 120000 "$SCRATCH/outside$n"
+twin foundation/lnk/x 100644
+confirmed widget
+refused "a link and a directory that differ only in case" "differ only in case" widget
+assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  and nothing is written through the link"
+# The worktree list's exit status is read.
+fresh
+confirmed widget
+mkdir -p "$SCRATCH/gstub$n"
+printf '#!/bin/sh\ncase "$*" in *"worktree list"*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v git)" >"$SCRATCH/gstub$n/git"
+chmod +x "$SCRATCH/gstub$n/git"
+stubbed widget
+assert_status 1 "$ST" "refused: a worktree list that fails"
+assert_contains "$OUT" "cannot list the workspace's worktrees" "  and the refusal says so"
+assert_eq "" "$(left)" "  with nothing written"
+
 # --- TARGET_ROOT outside every working tree of the workspace ----------------------------------
 # outside_refused DESCRIPTION NEEDLE ROOT [DIR]: a run whose TARGET_ROOT is
 # ROOT, asked and rendered from the workspace DIR (R by default), is
@@ -647,6 +699,10 @@ planted "a global config excluding .claude/ and bin/, core.fileMode=false and co
   "GIT_CONFIG_GLOBAL=$SCRATCH/global.gitconfig"
 printf '.claude/\nbin/\n' >"$SCRATCH/xdg/git/ignore"
 planted "\$XDG_CONFIG_HOME/git/ignore" "XDG_CONFIG_HOME=$SCRATCH/xdg"
+# The whole GIT_* namespace outside the recipe is neutralised (R4).
+planted "GIT_ICASE_PATHSPECS=1" "GIT_ICASE_PATHSPECS=1"
+planted "GIT_GLOB_PATHSPECS=1" "GIT_GLOB_PATHSPECS=1"
+planted "GIT_TRACE=/dev/stdout" "GIT_TRACE=/dev/stdout"
 rm "$SCRATCH/xdg/git/ignore"
 printf '* text\n' >"$SCRATCH/xdg/git/attributes"
 planted "\$XDG_CONFIG_HOME/git/attributes holding * text over a CRLF file" "XDG_CONFIG_HOME=$SCRATCH/xdg"

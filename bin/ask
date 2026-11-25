@@ -327,7 +327,7 @@ cmd_confirm() {
   name=$1 who=$3
   schema_ok
   fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
-  git_hermetic || refuse "cannot build git's environment"
+  git_hermetic
   outd=$ws/stages/01-ask/output/$name
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
   fault=$(answers_target_check "$outd/answers.env" "$name") ||

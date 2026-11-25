@@ -98,8 +98,8 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+git_hermetic
 fault=$(git_version_ok) || refuse "$fault"
-git_hermetic || refuse "cannot build git's environment"
 cd "$ws" || refuse "cannot enter the workspace $ws"
 work=$(mktemp -d) || refuse "cannot make a temporary directory"
 
