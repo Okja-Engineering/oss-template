@@ -245,4 +245,45 @@ printf 'OWNER=Okja-Engineering' >>"$SETUP"
 answers_validate "$S" "$SETUP" setup >/dev/null
 assert_status 0 "$?" "a last line without a newline is read"
 
+# A run's answers file: every field, and TARGET.
+RUN="$SCRATCH/run.env"
+good_run() {
+  cat "$SETUP" >"$RUN"
+  printf '%s\n' 'NAME=widget' 'TITLE=A title' 'CODE=ABC' 'DESCRIPTION=One line' 'VISIBILITY=public' \
+    'LICENSE=none' 'TARGET=/srv/targets/widget' >>"$RUN"
+}
+rrefused() { # DESCRIPTION NEEDLE
+  local out st
+  out=$(answers_validate "$S" "$RUN" run 2>&1)
+  st=$?
+  assert_status 1 "$st" "run file refused: $1"
+  assert_contains "$out" "$2" "  and the refusal says: $2"
+}
+good_setup
+good_run
+answers_validate "$S" "$RUN" run >/dev/null
+assert_status 0 "$?" "a valid run file, with TARGET, passes"
+good_run
+grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
+rrefused "a run file without TARGET" "TARGET is missing"
+good_run
+grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
+printf 'TARGET=targets/widget\n' >>"$RUN"
+rrefused "a relative TARGET" "TARGET"
+good_run
+grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
+printf 'TARGET=/srv/../widget\n' >>"$RUN"
+rrefused "a TARGET holding .." "TARGET"
+answers_validate "$S" "$SETUP" setup >/dev/null
+printf 'TARGET=/srv/targets/widget\n' >>"$SETUP"
+answers_validate "$S" "$SETUP" setup >/dev/null 2>&1
+assert_status 1 "$?" "TARGET belongs to a run file, not a setup file"
+
+# Run records: KEY: value lines.
+printf '%s\n' '# Confirmed: widget' '' 'by: A Person: the operator' 'answers: abc123' >"$SCRATCH/record.md"
+assert_eq "A Person: the operator" "$(answers_record "$SCRATCH/record.md" by)" "a record's value, read after its key"
+assert_eq "abc123" "$(answers_record "$SCRATCH/record.md" answers)" "another"
+answers_record "$SCRATCH/record.md" at >/dev/null
+assert_status 1 "$?" "a key the record lacks reads as absent"
+
 assert_done

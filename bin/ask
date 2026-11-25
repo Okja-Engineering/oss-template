@@ -1,20 +1,44 @@
 #!/usr/bin/env bash
 # Stage 01's script (AC7): it writes the answers, from the field schema
-# shared/answers.tsv, through bin/lib/answers.sh. A refusal writes nothing.
+# shared/answers.tsv, through bin/lib/answers.sh. A refusal writes nothing
+# and removes nothing.
 #
-# usage: bin/ask setup [FIELD=value...]   rewrite setup/answers.env
-#        bin/ask questionnaire            write setup/questionnaire.md
+# usage:
+#   bin/ask setup [FIELD=value...]
+#   bin/ask questionnaire
+#   bin/ask run NAME [FIELD=value...] [--setup-override FIELD=value...]
+#               [--redo [--remove PATH]]
+#   bin/ask confirm NAME --by WHO
 #
-# `setup` takes setup fields only. Each field keeps the value given, else
-# the one setup/answers.env holds, else its default; the whole file is then
-# validated and written sorted, with LF endings. Exit 0 when written, 1 on a
-# refusal, 2 on a usage error.
+# `setup` rewrites setup/answers.env, from setup fields only: each keeps the
+# value given, else the one the file holds, else its default. `questionnaire`
+# writes setup/questionnaire.md from the schema.
+#
+# `run` writes stages/01-ask/output/NAME/answers.env: the setup fields from
+# setup/answers.env, each FIELD=value after --setup-override replacing one
+# for this run only and recorded in the run's setup.override.env, never in
+# setup/answers.env (decision 103); the run fields given, else their
+# defaults; NAME; and TARGET, TARGET_ROOT with its ~ expanded, then /NAME.
+# An existing run needs --redo, and a target present needs --remove naming
+# it: --remove PATH discards the target render.md names through the shared
+# discard, bin/lib/discard.sh, after the operator's yes at stage 01's
+# checkpoint (AC9, decisions 123, 134, 149, 203), and --redo clears the run's
+# confirmation and its 02 and 03 outputs.
+#
+# `confirm` writes the run's confirmed.md: who, when (UTC) and the answers
+# file's blob id.
+#
+# Every file is written sorted where it is a list of fields, with LF endings,
+# through a temporary file beside it. Exit 0 when done, 1 on a refusal, 2 on
+# a usage error.
 set -u
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 ws=$(CDPATH='' cd -- "$here/.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/answers.sh
 . "$here/lib/answers.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/discard.sh
+. "$here/lib/discard.sh"
 
 SCHEMA=$ws/shared/answers.tsv
 SETUP=$ws/setup/answers.env
@@ -22,7 +46,9 @@ QUESTIONNAIRE=$ws/setup/questionnaire.md
 
 usage() {
   printf 'bin/ask: %s\n' "$1" >&2
-  printf '%s\n' 'usage: bin/ask setup [FIELD=value...]' '       bin/ask questionnaire' >&2
+  printf '%s\n' 'usage: bin/ask setup [FIELD=value...]' '       bin/ask questionnaire' \
+    '       bin/ask run NAME [FIELD=value...] [--setup-override FIELD=value...] [--redo [--remove PATH]]' \
+    '       bin/ask confirm NAME --by WHO' >&2
   exit 2
 }
 refuse() {
@@ -37,9 +63,10 @@ schema_ok() {
 }
 
 # assignments SCOPE ARG...: the FIELD=value arguments as answers lines, in
-# PAIRS; each names a field of SCOPE once, or the command refuses.
+# PAIRS; each names a field of SCOPE once, with a value that is one line, or
+# the command refuses.
 assignments() {
-  local scope=$1 arg field seen=" "
+  local scope=$1 arg field seen=" " fault
   shift
   PAIRS=""
   for arg in "$@"; do
@@ -55,8 +82,10 @@ assignments() {
     case "$(answers_col "$SCHEMA" "$field" scope)" in
       "$scope") ;;
       '') refuse "$field: an unknown field" ;;
+      setup) refuse "$field is a setup field: give it after --setup-override for this run, or set it with bin/ask setup" ;;
       *) refuse "$field is a $(answers_col "$SCHEMA" "$field" scope) field, not a $scope field" ;;
     esac
+    fault=$(answers_check "$SCHEMA" "$field" "${arg#*=}") || refuse "$fault"
     PAIRS="$PAIRS$arg
 "
   done
@@ -75,8 +104,11 @@ write() {
   refuse "cannot write $1"
 }
 
+# present PATH: something, a dangling symbolic link included, is at PATH.
+present() { [ -e "$1" ] || [ -L "$1" ]; }
+
 cmd_setup() {
-  local field value have="" out="" faults="" fault
+  local field value have="" out="" faults="" fault line
   schema_ok
   assignments setup "$@"
   if [ -f "$SETUP" ]; then
@@ -117,11 +149,159 @@ cmd_questionnaire() {
   printf 'bin/ask: wrote setup/questionnaire.md\n'
 }
 
+cmd_run() {
+  local name redo=0 remove="" have_remove=0 to=run arg fault faults="" field value
+  local out="" run_pairs override_pairs setup_have outd render_md recorded="" old_root target root
+  local -a run_args=() override_args=()
+  [ "$#" -ge 1 ] || usage "run needs NAME"
+  name=$1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --redo) redo=1 to=run ;;
+      --remove)
+        [ "$#" -ge 2 ] || usage "--remove needs PATH"
+        remove=$2 have_remove=1 to=run
+        shift
+        ;;
+      --setup-override) to=override ;;
+      -*) usage "unknown option: $1" ;;
+      *)
+        if [ "$to" = override ]; then
+          override_args+=("$1")
+        else
+          run_args+=("$1")
+        fi
+        ;;
+    esac
+    shift
+  done
+  [ "$have_remove" = 0 ] || [ "$redo" = 1 ] || usage "--remove goes with --redo"
+
+  # Everything is judged before anything is removed or written.
+  schema_ok
+  fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
+  answers_col "$SCHEMA" TARGET_ROOT type >/dev/null || refuse "shared/answers.tsv has no TARGET_ROOT"
+  [ -f "$SETUP" ] || refuse "setup/answers.env is missing; run bin/ask setup"
+  fault=$(answers_validate "$SCHEMA" "$SETUP" setup setup/answers.env) ||
+    refuse "setup/answers.env is not valid; fix it with bin/ask setup:" "$fault"
+  setup_have=$(cat "$SETUP")
+  assignments run ${run_args[@]+"${run_args[@]}"}
+  run_pairs=$PAIRS
+  case "
+$run_pairs" in
+    *'
+NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=value" ;;
+  esac
+  assignments setup ${override_args[@]+"${override_args[@]}"}
+  override_pairs=$PAIRS
+
+  while IFS= read -r field; do
+    [ -n "$field" ] || continue
+    if value=$(printf '%s' "$override_pairs" | answers_get - "$field"); then
+      :
+    else
+      value=$(printf '%s\n' "$setup_have" | answers_get - "$field")
+    fi
+    out="$out$field=$value
+"
+  done <<EOF
+$(answers_fields "$SCHEMA" setup)
+EOF
+  out="${out}NAME=$name
+"
+  while IFS= read -r field; do
+    [ -n "$field" ] && [ "$field" != NAME ] || continue
+    if value=$(printf '%s' "$run_pairs" | answers_get - "$field"); then
+      :
+    elif [ -n "$(answers_col "$SCHEMA" "$field" default)" ]; then
+      value=$(answers_default "$SCHEMA" "$field" "$out")
+      fault=$(answers_check "$SCHEMA" "$field" "$value") || faults="$faults$fault
+"
+    else
+      faults="$faults$field is missing; give $field=value
+"
+      continue
+    fi
+    out="$out$field=$value
+"
+  done <<EOF
+$(answers_fields "$SCHEMA" run)
+EOF
+  [ -z "$faults" ] || refuse "the answers are not written:" "$faults"
+  root=$(answers_path "$(printf '%s' "$out" | answers_get - TARGET_ROOT)")
+  target=${root%/}/$name
+  fault=$(answers_target "$target") || refuse "$fault"
+  out="${out}TARGET=$target
+"
+
+  # The run, and its target.
+  outd=$ws/stages/01-ask/output/$name
+  render_md=$ws/stages/02-render/output/$name/render.md
+  if [ -f "$outd/answers.env" ]; then
+    [ "$redo" = 1 ] ||
+      refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
+  else
+    [ "$redo" = 0 ] || refuse "there is no run $name to redo"
+  fi
+  if [ -f "$render_md" ]; then
+    recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
+  fi
+  if [ "$have_remove" = 1 ]; then
+    [ -n "$recorded" ] ||
+      refuse "--remove $remove: no render of $name names a target, so there is nothing to discard"
+    old_root=$(answers_path "$(answers_get "$outd/answers.env" TARGET_ROOT)") ||
+      refuse "the run's answers file holds no TARGET_ROOT"
+    fault=$(discard_check "$remove" "$name" "$recorded" "$old_root") || refuse "$fault"
+  elif [ -n "$recorded" ] && present "$recorded"; then
+    refuse "the target $recorded, which render.md names, is present: with the operator's yes to \"remove $recorded\", run bin/ask run $name --redo --remove \"$recorded\" and the answers"
+  fi
+  if present "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
+    refuse "the target $target is present, and no --remove names it; it is left alone"
+  fi
+
+  # Remove, then write.
+  if [ "$have_remove" = 1 ]; then
+    fault=$(discard_target "$remove" "$name" "$recorded" "$old_root") || refuse "$fault"
+  fi
+  if [ "$redo" = 1 ]; then
+    for value in "$outd/confirmed.md" "$ws/stages/02-render/output/$name" "$ws/stages/03-verify/output/$name"; do
+      fault=$(discard_remove "$value") || refuse "$fault"
+    done
+  fi
+  if [ -n "$override_pairs" ]; then
+    printf '%s' "$override_pairs" | sort | write "$outd/setup.override.env"
+  elif present "$outd/setup.override.env"; then
+    fault=$(discard_remove "$outd/setup.override.env") || refuse "$fault"
+  fi
+  printf '%s' "$out" | sort | write "$outd/answers.env"
+  printf 'bin/ask: wrote stages/01-ask/output/%s/answers.env\n' "$name"
+}
+
+cmd_confirm() {
+  local name who outd fault blob at
+  [ "$#" -eq 3 ] && [ "$2" = --by ] || usage "confirm takes NAME --by WHO"
+  name=$1 who=$3
+  schema_ok
+  fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
+  outd=$ws/stages/01-ask/output/$name
+  [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
+  case "$who" in
+    '' | *[[:cntrl:]]*) refuse "--by names the operator on one line" ;;
+  esac
+  blob=$(answers_blob "$outd/answers.env") || refuse "cannot hash $outd/answers.env"
+  at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '%s\n' "# Confirmed: $name" '' "by: $who" "at: $at" "answers: $blob" | write "$outd/confirmed.md"
+  printf 'bin/ask: wrote stages/01-ask/output/%s/confirmed.md\n' "$name"
+}
+
 [ "$#" -ge 1 ] || usage "a subcommand is required"
 sub=$1
 shift
 case "$sub" in
   setup) cmd_setup "$@" ;;
   questionnaire) cmd_questionnaire "$@" ;;
+  run) cmd_run "$@" ;;
+  confirm) cmd_confirm "$@" ;;
   *) usage "unknown subcommand: $sub" ;;
 esac

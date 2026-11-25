@@ -41,9 +41,18 @@
 #   answers_validate SCHEMA FILE SCOPE [NAME]
 #                                    the whole file, holding exactly the
 #                                    fields of SCOPE (`setup`, or `run` for
-#                                    every field), each once and valid; one
-#                                    line out per refusal, naming the file
-#                                    NAME (FILE by default); exit 0 or 1
+#                                    every field and TARGET), each once and
+#                                    valid; one line out per refusal, naming
+#                                    the file NAME (FILE by default); exit 0
+#                                    or 1
+#   answers_target VALUE             a run's TARGET, TARGET_ROOT expanded
+#                                    and NAME added: absolute, with no `.`,
+#                                    `..` or empty component; exit 0 or 1
+#   answers_record FILE KEY          the value of a run record's `KEY: `
+#                                    line (confirmed.md, render.md); exit 1
+#                                    when FILE has none
+#   answers_blob FILE                FILE's git blob id, its bytes as they
+#                                    stand
 #   answers_questionnaire SCHEMA     setup/questionnaire.md's text: the
 #                                    setup fields' questions, in one flat
 #                                    numbered list, each with its field,
@@ -192,6 +201,26 @@ answers_check() {
   return 0
 }
 
+answers_target() {
+  case "$1" in
+    *[[:cntrl:]]*) answers__no TARGET "the value holds a control character" ;;
+    /*/?*) ;;
+    *) answers__no TARGET "the target is not an absolute path to a directory under TARGET_ROOT" ;;
+  esac || return 1
+  case "$1/" in
+    */../* | */./* | *//*) answers__no TARGET "the target holds a ., .. or empty component" ;;
+  esac
+}
+
+answers_record() {
+  K="$2: " awk 'index($0, ENVIRON["K"]) == 1 { print substr($0, length(ENVIRON["K"]) + 1); found = 1; exit }
+    END { exit !found }' "$1"
+}
+
+answers_blob() {
+  git hash-object -t blob --no-filters --stdin <"$1"
+}
+
 answers_get() {
   F=$2 awk '
     { i = index($0, "=") }
@@ -234,7 +263,12 @@ answers_questionnaire() {
 
 answers_validate() {
   local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field
-  if [ "$scope" = run ]; then want=$(answers_fields "$schema"); else want=$(answers_fields "$schema" "$scope"); fi
+  if [ "$scope" = run ]; then
+    want="$(answers_fields "$schema")
+TARGET"
+  else
+    want=$(answers_fields "$schema" "$scope")
+  fi
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     key=${line%%=*}
@@ -265,7 +299,11 @@ answers_validate() {
       refused=1
       continue
     fi
-    answers_check "$schema" "$key" "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
+    if [ "$key" = TARGET ]; then
+      answers_target "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
+    else
+      answers_check "$schema" "$key" "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
+    fi
     [ "${PIPESTATUS[0]}" = 0 ] || refused=1
   done <"$file"
   while IFS= read -r field; do
