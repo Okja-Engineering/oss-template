@@ -9,18 +9,19 @@
 # It reads the run's answers.env, which confirmed.md must name by its blob
 # id, the schema and `foundation/` at the workspace's committed HEAD, and
 # nothing else (AC11). Everything is judged before anything is removed or
-# written: the answers against HEAD's schema; TARGET_ROOT outside every
-# working tree of the workspace; the foundation rendered in a private
-# directory. The target is written only when it is absent or an empty
-# directory. A run already rendered needs --replace; then a present target
-# needs --remove naming it, which discards it through the shared discard,
-# bin/lib/discard.sh, after the operator's yes at stage 02's checkpoint, and
-# the run's 03 outputs are cleared, so the next verify is a first run
-# (decision 157). The target is then walked and fingerprinted, its git tree
-# id built in a private repository, never in the target, and render.md
-# records the target, the workspace SHA, the answers blob id, the
-# fingerprint and the file list. Exit 0 when done, 1 on a refusal, 2 on a
-# usage error.
+# written: the answers against HEAD's schema; TARGET, still TARGET_ROOT
+# with its ~ expanded under this HOME, then /NAME (decision 227);
+# TARGET_ROOT outside every working tree of the workspace; the foundation
+# rendered in a private directory. The target is written only when it is
+# absent or an empty directory. A run already rendered needs --replace;
+# then a present target needs --remove naming it, which discards it through
+# the shared discard, bin/lib/discard.sh, after the operator's yes at stage
+# 02's checkpoint, and the run's 03 outputs are cleared, so the next verify
+# is a first run (decision 157). The target is then walked and
+# fingerprinted, its git tree id built in a private repository, never in
+# the target, and render.md records the target, the workspace SHA, the
+# answers blob id, the fingerprint and the file list. Exit 0 when done, 1
+# on a refusal, 2 on a usage error.
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -96,10 +97,10 @@ named=$(answers_record "$outd/confirmed.md" answers) || named=""
 fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env") ||
   refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault"
 [ "$(answers_get "$work/answers.env" NAME)" = "$name" ] || refuse "$outd/answers.env names another run"
+fault=$(answers_target_check "$work/answers.env" "$name") ||
+  refuse "$outd/answers.env: $fault; change the answers with bin/ask run $name --redo"
 target=$(answers_get "$work/answers.env" TARGET)
-[ "${target##*/}" = "$name" ] || refuse "the target $target does not end in the run name $name"
 root=${target%/*}
-[ -n "$root" ] || root=/
 
 # Where it goes, and what is in the way.
 fault=$(render_root_ok "$root" "$ws") || refuse "$fault"
@@ -113,7 +114,7 @@ else
   [ "$replace" = 0 ] || refuse "--replace: there is no render of $name to replace; run bin/render $name"
 fi
 if [ "$have_remove" = 1 ]; then
-  fault=$(discard_check "$remove" "$name" "$recorded" "$root") || refuse "$fault"
+  fault=$(discard_check "$remove" "$name" "$recorded" "$target") || refuse "$fault"
 fi
 if present "$target" && ! empty_dir "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
   if [ "$replace" = 1 ]; then
@@ -133,7 +134,7 @@ esac
 
 # Remove, then write.
 if [ "$have_remove" = 1 ]; then
-  fault=$(discard_target "$remove" "$name" "$recorded" "$root") || refuse "$fault"
+  fault=$(discard_target "$remove" "$name" "$recorded" "$target") || refuse "$fault"
 fi
 if [ "$replace" = 1 ]; then
   fault=$(discard_remove "stages/03-verify/output/$name") || refuse "$fault"

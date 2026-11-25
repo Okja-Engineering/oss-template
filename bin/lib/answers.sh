@@ -31,7 +31,9 @@
 #                                    the schema has no FIELD
 #   answers_check SCHEMA FIELD VALUE the reason VALUE is refused, if it is;
 #                                    exit 0 when accepted, 1 when refused
-#   answers_path VALUE               a `path` value with its `~` expanded
+#   answers_path VALUE               a `path` value with its `~` expanded;
+#                                    exit 1 when it starts with `~` and HOME
+#                                    is unset or empty
 #   answers_get FILE FIELD           FIELD's value in an answers file (`-`
 #                                    for standard input); exit 1 when the
 #                                    file does not hold FIELD
@@ -47,9 +49,18 @@
 #                                    valid; one line out per refusal, naming
 #                                    the file NAME (FILE by default); exit 0
 #                                    or 1
-#   answers_target VALUE             a run's TARGET, TARGET_ROOT expanded
-#                                    and NAME added: absolute, with no `.`,
-#                                    `..` or empty component; exit 0 or 1
+#   answers_target VALUE             a TARGET's shape: absolute, not `/`
+#                                    alone, with no empty, `.` or `..`
+#                                    component, the rule a `path` value meets
+#                                    once expanded; exit 0 or 1
+#   answers_target_for TARGET_ROOT NAME
+#                                    a run's TARGET, exactly TARGET_ROOT with
+#                                    its `~` expanded, then `/NAME`; exit 1
+#                                    when `~` cannot be expanded
+#   answers_target_check FILE NAME   the run answers FILE's TARGET is still
+#                                    answers_target_for its TARGET_ROOT and
+#                                    NAME, under this HOME; else the reason
+#                                    out, exit 1
 #   answers_record FILE KEY          the value of a run record's `KEY: `
 #                                    line (confirmed.md, render.md); exit 1
 #                                    when FILE has none
@@ -110,6 +121,9 @@ answers_col() {
 # shellcheck disable=SC2088 # a literal ~, matched and expanded here by hand
 answers_path() {
   case "$1" in
+    '~' | '~/'*) [ -n "${HOME:-}" ] || return 1 ;;
+  esac
+  case "$1" in
     '~') printf '%s\n' "$HOME" ;;
     '~/'*) printf '%s/%s\n' "$HOME" "${1#'~/'}" ;;
     *) printf '%s\n' "$1" ;;
@@ -117,7 +131,7 @@ answers_path() {
 }
 
 answers_check() {
-  local schema=$1 field=$2 v=$3 type pattern default item rest
+  local schema=$1 field=$2 v=$3 type pattern default item rest expanded
   type=$(answers_col "$schema" "$field" type) || {
     printf '%s: an unknown field\n' "$field"
     return 1
@@ -184,13 +198,9 @@ answers_check() {
         '~' | '~/'*) ;;
         '~'*) answers__no "$field" "a path does not start with ~user; write ~/ or an absolute path"; return 1 ;;
       esac
-      case "/$v/" in
-        */../*) answers__no "$field" "a path holds no .. component"; return 1 ;;
-      esac
-      case "$(answers_path "$v")" in
-        /*) ;;
-        *) answers__no "$field" "a path is absolute once ~ is expanded"; return 1 ;;
-      esac
+      expanded=$(answers_path "$v") ||
+        { answers__no "$field" "a path starting with ~ needs HOME, which is not set"; return 1; }
+      answers__abs "$field" "$expanded" || return 1
       ;;
     *)
       printf '%s: the type %s is not one this validator knows\n' "$field" "$type"
@@ -205,13 +215,26 @@ answers_check() {
 
 answers_target() {
   case "$1" in
-    *[[:cntrl:]]*) answers__no TARGET "the value holds a control character" ;;
-    /*/?*) ;;
-    *) answers__no TARGET "the target is not an absolute path to a directory under TARGET_ROOT" ;;
-  esac || return 1
-  case "$1/" in
-    */../* | */./* | *//*) answers__no TARGET "the target holds a ., .. or empty component" ;;
+    *[[:cntrl:]]*) answers__no TARGET "the value holds a control character"; return 1 ;;
   esac
+  answers__abs TARGET "$1"
+}
+
+answers_target_for() {
+  local root
+  root=$(answers_path "$1") || return 1
+  printf '%s/%s\n' "$root" "$2"
+}
+
+answers_target_check() {
+  local target root want
+  target=$(answers_get "$1" TARGET) || { printf 'the answers hold no TARGET\n'; return 1; }
+  root=$(answers_get "$1" TARGET_ROOT) || { printf 'the answers hold no TARGET_ROOT\n'; return 1; }
+  want=$(answers_target_for "$root" "$2") ||
+    { printf 'TARGET_ROOT %s cannot be expanded: HOME is not set\n' "$root"; return 1; }
+  [ "$target" = "$want" ] && return 0
+  printf 'TARGET %s is not TARGET_ROOT %s, expanded here, then /%s, which is %s\n' "$target" "$root" "$2" "$want"
+  return 1
 }
 
 answers_record() {
@@ -326,6 +349,22 @@ EOF
 answers__no() {
   printf '%s: %s\n' "$1" "$2"
   return 1
+}
+
+# answers__abs FIELD PATH: PATH is absolute, not `/` alone, with no empty,
+# `.` or `..` component; the one path rule, for a `path` value once expanded
+# and for a TARGET (decision 227).
+answers__abs() {
+  case "$2" in
+    /*) ;;
+    *) answers__no "$1" "a path is absolute once ~ is expanded"; return 1 ;;
+  esac
+  case "$2/" in
+    *//* | */./* | */../*)
+      answers__no "$1" "a path holds no empty, . or .. component, and is not / alone"
+      return 1
+      ;;
+  esac
 }
 
 # answers__ere VALUE ERE: the whole of VALUE, one line, matches ERE.

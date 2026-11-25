@@ -18,15 +18,17 @@
 # setup/answers.env, each FIELD=value after --setup-override replacing one
 # for this run only and recorded in the run's setup.override.env, never in
 # setup/answers.env (decision 103); the run fields given, else their
-# defaults; NAME; and TARGET, TARGET_ROOT with its ~ expanded, then /NAME.
-# An existing run needs --redo, and a target present needs --remove naming
-# it: --remove PATH discards the target render.md names through the shared
+# defaults; NAME; and TARGET, exactly TARGET_ROOT with its ~ expanded, then
+# /NAME (decision 227). An existing run needs --redo, and a target present
+# needs --remove naming it: --remove PATH discards the target render.md
+# names, or, with no render.md, the run's TARGET, through the shared
 # discard, bin/lib/discard.sh, after the operator's yes at stage 01's
-# checkpoint (AC9, decisions 123, 134, 149, 203), and --redo clears the run's
-# confirmation and its 02 and 03 outputs.
+# checkpoint (AC9, decisions 123, 134, 149, 203, 227), and --redo clears the
+# run's confirmation and its 02 and 03 outputs.
 #
 # `confirm` writes the run's confirmed.md: who, when (UTC) and the answers
-# file's blob id.
+# file's blob id, once TARGET is still TARGET_ROOT, ~ expanded under this
+# HOME, then /NAME.
 #
 # Every file is written sorted where it is a list of fields, with LF endings,
 # through a temporary file beside it. Exit 0 when done, 1 on a refusal, 2 on
@@ -159,7 +161,7 @@ cmd_questionnaire() {
 
 cmd_run() {
   local name redo=0 remove="" have_remove=0 to=run arg fault faults="" field value
-  local out="" run_pairs override_pairs setup_have outd render_md recorded="" old_root target root
+  local out="" run_pairs override_pairs setup_have outd render_md recorded="" old_target="" target
   local answers_text override_text
   local -a run_args=() override_args=()
   [ "$#" -ge 1 ] || usage "run needs NAME"
@@ -195,6 +197,16 @@ cmd_run() {
   fault=$(answers_validate "$SCHEMA" "$SETUP" setup setup/answers.env) ||
     refuse "setup/answers.env is not valid; fix it with bin/ask setup:" "$fault"
   setup_have=$(cat "$SETUP")
+  outd=$ws/stages/01-ask/output/$name
+  render_md=$ws/stages/02-render/output/$name/render.md
+  if [ -f "$outd/answers.env" ]; then
+    [ "$redo" = 1 ] ||
+      refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
+    old_target=$(answers_get "$outd/answers.env" TARGET) ||
+      refuse "stages/01-ask/output/$name/answers.env holds no TARGET"
+  else
+    [ "$redo" = 0 ] || refuse "there is no run $name to redo"
+  fi
   assignments run ${run_args[@]+"${run_args[@]}"}
   run_pairs=$PAIRS
   case "
@@ -238,9 +250,8 @@ EOF
 $(answers_fields "$SCHEMA" run)
 EOF
   [ -z "$faults" ] || refuse "the answers are not written:" "$faults"
-  root=$(answers_path "$(printf '%s' "$out" | answers_get - TARGET_ROOT)")
-  target=${root%/}/$name
-  fault=$(answers_target "$target") || refuse "$fault"
+  target=$(answers_target_for "$(printf '%s' "$out" | answers_get - TARGET_ROOT)" "$name") ||
+    refuse "TARGET_ROOT starts with ~, and HOME is not set"
   out="${out}TARGET=$target
 "
   # What the run writes, made before anything is removed.
@@ -248,26 +259,16 @@ EOF
     refuse "cannot sort the answers"
   fi
 
-  # The run, and its target.
-  outd=$ws/stages/01-ask/output/$name
-  render_md=$ws/stages/02-render/output/$name/render.md
-  if [ -f "$outd/answers.env" ]; then
-    [ "$redo" = 1 ] ||
-      refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
-  else
-    [ "$redo" = 0 ] || refuse "there is no run $name to redo"
-  fi
+  # The target the discard may remove: the one render.md records, or, with
+  # no render.md, the run's TARGET.
+  recorded=$old_target
   if [ -f "$render_md" ]; then
     recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
   fi
   if [ "$have_remove" = 1 ]; then
-    [ -n "$recorded" ] ||
-      refuse "--remove $remove: no render of $name names a target, so there is nothing to discard"
-    old_root=$(answers_path "$(answers_get "$outd/answers.env" TARGET_ROOT)") ||
-      refuse "the run's answers file holds no TARGET_ROOT"
-    fault=$(discard_check "$remove" "$name" "$recorded" "$old_root") || refuse "$fault"
+    fault=$(discard_check "$remove" "$name" "$recorded" "$old_target") || refuse "$fault"
   elif [ -n "$recorded" ] && present "$recorded"; then
-    refuse "the target $recorded, which render.md names, is present: with the operator's yes to \"remove $recorded\", run bin/ask run $name --redo --remove \"$recorded\" and the answers"
+    refuse "the target $recorded is present: with the operator's yes to \"remove $recorded\", run bin/ask run $name --redo --remove \"$recorded\" and the answers"
   fi
   if present "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
     refuse "the target $target is present, and no --remove names it; it is left alone"
@@ -275,7 +276,7 @@ EOF
 
   # Remove, then write.
   if [ "$have_remove" = 1 ]; then
-    fault=$(discard_target "$remove" "$name" "$recorded" "$old_root") || refuse "$fault"
+    fault=$(discard_target "$remove" "$name" "$recorded" "$old_target") || refuse "$fault"
   fi
   if [ "$redo" = 1 ]; then
     for value in "$outd/confirmed.md" "$ws/stages/02-render/output/$name" "$ws/stages/03-verify/output/$name"; do
@@ -299,6 +300,8 @@ cmd_confirm() {
   fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
   outd=$ws/stages/01-ask/output/$name
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
+  fault=$(answers_target_check "$outd/answers.env" "$name") ||
+    refuse "stages/01-ask/output/$name/answers.env: $fault; change the answers with bin/ask run $name --redo"
   case "$who" in
     '' | *[[:cntrl:]]*) refuse "--by names the operator on one line" ;;
   esac

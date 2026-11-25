@@ -213,7 +213,27 @@ confirmed widget
 sed "s|^TARGET=.*|TARGET=$ROOT/gadget|" "$R/stages/01-ask/output/widget/answers.env" >"$SCRATCH/a$n" &&
   mv "$SCRATCH/a$n" "$R/stages/01-ask/output/widget/answers.env"
 ask confirm widget --by 'A Person'
-refused "a TARGET not ending in the run name, confirmed again" "does not end in the run name" widget
+assert_status 1 "$?" "confirm refuses a TARGET edited by hand"
+# confirmed.md written by hand, so render's own check is reached.
+printf '%s\n' '# Confirmed: widget' '' 'by: A Person' 'at: 2026-01-01T00:00:00Z' \
+  "answers: $(git -C "$R" hash-object --no-filters "$R/stages/01-ask/output/widget/answers.env")" \
+  >"$R/stages/01-ask/output/widget/confirmed.md"
+refused "a TARGET that is not TARGET_ROOT then /NAME, confirmed by hand" \
+  "TARGET $ROOT/gadget is not TARGET_ROOT $ROOT, expanded here, then /widget" widget
+assert_contains "$OUT" "bin/ask run widget --redo" "  and routes to --redo"
+assert_eq "gone" "$(gone "$ROOT/gadget")" "  and writes nothing there"
+# A TARGET written under another HOME (decision 227).
+fresh
+mkdir -p "$SCRATCH/home$n/a" "$SCRATCH/home$n/b"
+(cd "$R" &&
+  HOME="$SCRATCH/home$n/a" bin/ask run widget 'DESCRIPTION=One line' --setup-override 'TARGET_ROOT=~/targets' >/dev/null 2>&1 &&
+  HOME="$SCRATCH/home$n/a" bin/ask confirm widget --by 'A Person' >/dev/null 2>&1)
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/b" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a TARGET written under another HOME"
+assert_contains "$OUT" "$SCRATCH/home$n/b/targets/widget" "  and the refusal names the TARGET this HOME gives"
+assert_eq "gone" "$(gone "$SCRATCH/home$n/b/targets")" "  and nothing is written under this HOME"
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/a" bin/render widget 2>&1)
+assert_status 0 "$?" "  and it renders under the HOME it was written under"
 fresh
 confirmed widget
 mkdir -p "$SCRATCH/oldgit$n"
@@ -253,6 +273,12 @@ mkdir -p "$ROOT/other"
 refused "--replace --remove naming another path" "not the target render.md names" widget --replace --remove "$ROOT/other"
 assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  with the target not removed"
 assert_eq "present" "$(gone "$ROOT/other")" "  nor the other path"
+# render.md edited to name another path: the run's TARGET is the one root.
+sed "s|^target: .*|target: $ROOT/other|" "$R/stages/02-render/output/widget/render.md" >"$SCRATCH/r$n" &&
+  mv "$SCRATCH/r$n" "$R/stages/02-render/output/widget/render.md"
+refused "--replace --remove naming a path render.md names, not the run's TARGET" \
+  "but the run's TARGET is $ROOT/widget" widget --replace --remove "$ROOT/other"
+assert_eq "present" "$(gone "$ROOT/other")" "  with it not removed"
 render widget --remove "$ROOT/widget"
 assert_status 2 "$ST" "--remove without --replace is a usage error"
 fresh

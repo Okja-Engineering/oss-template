@@ -12,6 +12,8 @@ TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/answers.sh
 . "$TEST_DIR/../bin/lib/answers.sh"
 
+# The suite gives HOME its own value, so no case depends on the caller's.
+export HOME=/home/someone
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
 S="$SCRATCH/answers.tsv"
@@ -156,6 +158,27 @@ no TARGET_ROOT '~user' "~user"
 assert_eq "/h/Development/x" "$(HOME=/h answers_path '~/Development/x')" "~/ expands to the home directory"
 assert_eq "/h" "$(HOME=/h answers_path '~')" "~ alone is the home directory"
 assert_eq "/srv/x" "$(HOME=/h answers_path '/srv/x')" "an absolute path is kept"
+# One path rule (decision 227): once ~ is expanded, absolute, not / alone,
+# with no empty, . or .. component, the rule a TARGET meets.
+no TARGET_ROOT '/' "not / alone"
+no TARGET_ROOT '/srv/./targets' "no empty, . or .. component"
+no TARGET_ROOT '/srv//targets' "no empty, . or .. component"
+no TARGET_ROOT '//srv/targets' "no empty, . or .. component"
+no TARGET_ROOT '/srv/targets/.' "no empty, . or .. component"
+no TARGET_ROOT '/srv/targets/' "no empty, . or .. component"
+no TARGET_ROOT '~/' "no empty, . or .. component"
+no TARGET_ROOT '~/./x' "no empty, . or .. component"
+out=$(HOME=/ answers_check "$S" TARGET_ROOT '~/x' 2>&1)
+assert_status 1 "$?" "refused: TARGET_ROOT=~/x with HOME /, which expands to //x"
+out=$(unset HOME; answers_check "$S" TARGET_ROOT '~/x' 2>&1)
+assert_status 1 "$?" "refused: TARGET_ROOT=~/x with HOME unset"
+assert_contains "$out" "HOME" "  and the refusal names HOME"
+out=$(unset HOME; answers_path '~/x' 2>&1)
+assert_status 1 "$?" "answers_path cannot expand ~ with HOME unset"
+assert_eq "" "$out" "  and prints nothing"
+out=$(HOME='' answers_path '~' 2>&1)
+assert_status 1 "$?" "  nor with HOME empty"
+ok TARGET_ROOT /srv/targets
 
 # Every type: a newline and {{ refused.
 for f in NAME OWNER TARGET_ROOT TITLE DESCRIPTION PEOPLE VISIBILITY TEAM CONTACT HOME_URL; do
@@ -284,6 +307,42 @@ good_run
 grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
 printf 'TARGET=/srv/../widget\n' >>"$RUN"
 rrefused "a TARGET holding .." "TARGET"
+for t in /srv/targets/./widget //srv/targets/widget /srv/targets//widget /srv/targets/widget/ /; do
+  good_run
+  grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
+  printf 'TARGET=%s\n' "$t" >>"$RUN"
+  rrefused "a TARGET of $t" "TARGET: a path holds no empty, . or .. component"
+done
+good_run
+grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
+printf 'TARGET=/srv/targets/widget\r\n' >>"$RUN"
+rrefused "a TARGET holding a carriage return" "TARGET: the value holds a control character"
+
+# The run's TARGET is TARGET_ROOT, ~ expanded under this HOME, then /NAME,
+# exactly (decision 227).
+assert_eq "/srv/targets/widget" "$(answers_target_for /srv/targets widget)" "TARGET is TARGET_ROOT then /NAME"
+assert_eq "/home/someone/t/widget" "$(answers_target_for '~/t' widget)" "  with ~ expanded"
+target_file() { # TARGET_ROOT TARGET: a run file holding them
+  printf '%s\n' 'NAME=widget' "TARGET_ROOT=$1" "TARGET=$2" >"$SCRATCH/target.env"
+}
+target_file /srv/targets /srv/targets/widget
+answers_target_check "$SCRATCH/target.env" widget >/dev/null
+assert_status 0 "$?" "a TARGET that is TARGET_ROOT then /NAME holds"
+target_file '~/t' /home/someone/t/widget
+answers_target_check "$SCRATCH/target.env" widget >/dev/null
+assert_status 0 "$?" "  and one under ~, with this HOME"
+out=$(HOME=/home/other answers_target_check "$SCRATCH/target.env" widget 2>&1)
+assert_status 1 "$?" "refused: the same TARGET under another HOME"
+assert_contains "$out" "/home/other/t/widget" "  and the refusal names the TARGET it would be"
+target_file /srv/targets /srv/elsewhere/widget
+out=$(answers_target_check "$SCRATCH/target.env" widget 2>&1)
+assert_status 1 "$?" "refused: a TARGET edited to another place"
+target_file /srv/targets /srv/targets/gadget
+out=$(answers_target_check "$SCRATCH/target.env" widget 2>&1)
+assert_status 1 "$?" "refused: a TARGET ending in another name"
+printf '%s\n' 'NAME=widget' 'TARGET_ROOT=/srv/targets' >"$SCRATCH/target.env"
+out=$(answers_target_check "$SCRATCH/target.env" widget 2>&1)
+assert_status 1 "$?" "refused: no TARGET"
 answers_validate "$S" "$SETUP" setup >/dev/null
 printf 'TARGET=/srv/targets/widget\n' >>"$SETUP"
 answers_validate "$S" "$SETUP" setup >/dev/null 2>&1

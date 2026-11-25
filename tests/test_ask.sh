@@ -114,6 +114,8 @@ refused "a field given twice" "OWNER" setup OWNER=a OWNER=b
 refused "an email address in free text" "email" setup 'HOLDER=a.person@example.org'
 refused "a rule word in free text" "never" setup 'HOLDER=It never ends'
 refused "a TARGET_ROOT holding a .. component" ".." setup 'TARGET_ROOT=/srv/../etc'
+refused "a TARGET_ROOT holding a . component" "component" setup 'TARGET_ROOT=/srv/./targets'
+refused "a TARGET_ROOT ending in /" "component" setup 'TARGET_ROOT=/srv/targets/'
 fixture_append "$R/setup/answers.env" 'STALE=1'
 refused "a setup file holding a field the schema does not list" "STALE" setup OWNER=acme
 
@@ -150,6 +152,7 @@ ready() {
 run_state() { cksum 2>/dev/null <"$ANS" || echo absent; }
 # rrefused DESCRIPTION NEEDLE ARGS...: bin/ask refuses, and writes no answers
 # file and no setup file.
+gone() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo gone; fi; }
 rrefused() {
   local what=$1 needle=$2 before setup_before
   shift 2
@@ -252,6 +255,26 @@ ask confirm widget --by 'A
 Person'
 assert_status 1 "$ST" "confirm refuses a name holding a newline"
 
+# confirm holds TARGET to TARGET_ROOT, ~ expanded here, then /NAME (decision
+# 227): a TARGET edited by hand, or one written under another HOME, is
+# refused, routing to --redo.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+sed "s|^TARGET=.*|TARGET=$SCRATCH/elsewhere/widget|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
+ask confirm widget --by 'A Person'
+assert_status 1 "$ST" "confirm refuses a TARGET edited by hand"
+assert_contains "$OUT" "bin/ask run widget --redo" "  and routes to --redo"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes no confirmed.md"
+fresh
+mkdir -p "$SCRATCH/home$n/a" "$SCRATCH/home$n/b"
+ask setup 'TARGET_ROOT=~/targets'
+(cd "$R" && HOME="$SCRATCH/home$n/a" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' >/dev/null 2>&1)
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/b" bin/ask confirm widget --by 'A Person' 2>&1)
+assert_status 1 "$?" "confirm refuses a TARGET written under another HOME"
+assert_contains "$OUT" "$SCRATCH/home$n/b/targets/widget" "  and names the TARGET this HOME gives"
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/a" bin/ask confirm widget --by 'A Person' 2>&1)
+assert_status 0 "$?" "  and confirms it under the HOME it was written under"
+
 # --- --redo, and the shared discard (AC9) -------------------------------------------------
 # rendered: the run as if rendered, its target and render.md in place, with
 # 02 and 03 outputs to clear.
@@ -265,7 +288,6 @@ rendered() {
   printf 'pass\n' >"$R/stages/03-verify/output/widget/verify.md"
   chmod 000 "$R/stages/03-verify/output/widget/judge/locked"
 }
-gone() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo gone; fi; }
 
 ready
 rrefused "--redo on a run that does not exist" "widget" run widget --redo 'TITLE=A' 'DESCRIPTION=B'
@@ -292,6 +314,11 @@ assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with nothing removed"
 rendered
 mkdir -p "$ROOT/other"
 printf '%s\n' '# Render of widget' '' "target: $ROOT/other" >"$R/stages/02-render/output/widget/render.md"
+rrefused "a recorded target that is not the run's TARGET" "but the run's TARGET is $ROOT/widget" \
+  run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
+assert_eq "present" "$(gone "$ROOT/other")" "  with nothing removed"
+# The answers file's TARGET edited by hand to match: the last component.
+sed "s|^TARGET=.*|TARGET=$ROOT/other|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
 rrefused "a recorded target whose last component is not NAME" "last component" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ROOT/other")" "  with nothing removed"
@@ -308,8 +335,48 @@ assert_eq "present" "$(gone "$ROOT/widget")" "  with the link not removed"
 assert_eq "present" "$(gone "$ROOT/real/sub/file")" "  nor what it points to"
 rendered "$SCRATCH/outside/widget"
 mkdir -p "$SCRATCH/outside/widget"
-rrefused "a path outside TARGET_ROOT" "TARGET_ROOT" run widget --redo --remove "$SCRATCH/outside/widget" 'TITLE=C' 'DESCRIPTION=D'
+rrefused "a path outside TARGET_ROOT, which render.md names but the run's TARGET is not" \
+  "but the run's TARGET is $ROOT/widget" run widget --redo --remove "$SCRATCH/outside/widget" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$SCRATCH/outside/widget")" "  with nothing removed"
+# A relative path, which render.md names too, is refused (decision 227):
+# run from TARGET_ROOT's parent, with TARGET_ROOT itself named widget.
+fresh
+ROOT="$SCRATCH/p$n/widget"
+mkdir -p "$ROOT"
+printf 'kept\n' >"$ROOT/kept"
+ask setup "TARGET_ROOT=$ROOT"
+OUTD="$R/stages/01-ask/output/widget"
+ANS="$OUTD/answers.env"
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$R/stages/02-render/output/widget"
+printf '%s\n' '# Render of widget' '' 'target: widget' >"$R/stages/02-render/output/widget/render.md"
+before=$(run_state)
+OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove widget 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+assert_status 1 "$?" "refused: --remove naming a relative path that render.md names"
+assert_contains "$OUT" "remove widget: it is not an absolute path" "  and the refusal says so"
+assert_eq "present" "$(gone "$ROOT/kept")" "  and TARGET_ROOT is left alone"
+assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
+printf '%s\n' '# Render of widget' '' 'target: widget' >"$R/stages/02-render/output/widget/render.md"
+OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+assert_status 1 "$?" "refused: a recorded target that is a relative path"
+assert_contains "$OUT" "the recorded target widget is not an absolute path" "  and the refusal says so"
+assert_eq "present" "$(gone "$ROOT/kept")" "  with nothing removed"
+# A run's target present with no render.md naming it, left by a render that
+# was killed, or a directory made by hand: the redo names it, and removes it
+# only with --remove naming it.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$ROOT/widget/sub"
+rrefused "a redo whose target is present, with no render.md" "--redo --remove \"$ROOT/widget\"" \
+  run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_eq "present" "$(gone "$ROOT/widget/sub")" "  with the target left alone"
+ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+assert_status 0 "$ST" "  and --redo --remove naming it removes it"
+assert_eq "gone" "$(gone "$ROOT/widget")" "  the target gone"
+# A run whose answers file has lost its TARGET has no target to judge.
+grep -v '^TARGET=' "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
+rrefused "a redo of a run whose answers file holds no TARGET" "holds no TARGET" \
+  run widget --redo 'TITLE=C' 'DESCRIPTION=D'
 rendered
 mkdir -p "$ROOT/widget/locked/deeper"
 chmod 000 "$ROOT/widget/locked/deeper" "$ROOT/widget/locked"
