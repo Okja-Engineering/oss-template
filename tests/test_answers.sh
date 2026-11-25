@@ -305,6 +305,17 @@ printf 'AAA=x\n' >"$SCRATCH/long.env"
 OUT=$(answers_validate "$SCRATCH/long.tsv" "$SCRATCH/long.env" run 2>&1)
 assert_not_contains "$OUT" "not one of this file" "a field first in a long list is this file's"
 assert_not_contains "$OUT" "Broken pipe" "  and nothing writes to a broken pipe"
+# The readers given a pipe read it whole: answers_get on standard input, as
+# bin/ask feeds it pairs, and rules_word, so neither fails its writer.
+big=$(cut -f 1 "$SCRATCH/long.tsv" | sed 's/$/=x/')
+OUT=$(printf 'AAB=first\n%s\nAAB=second\n' "$big" | answers_get - AAB 2>&1)
+assert_status 0 "$?" "answers_get finds a pair first in a long pipe"
+assert_eq "first" "$OUT" "  and gives the first value alone"
+OUT=$(rules_word "$(printf 'You must.\n%s\nNever.\n' "$big")" 2>&1)
+assert_status 0 "$?" "rules_word finds a rule word first in a long text"
+assert_eq "must" "$OUT" "  and gives the first word alone"
+printf '%s\n' 'target: /first' 'target: /second' >"$SCRATCH/twice.md"
+assert_eq "/first" "$(answers_record "$SCRATCH/twice.md" target)" "answers_record gives a key's first value alone"
 good_setup
 printf 'BOGUS=1\n' >>"$SETUP"
 vrefused "an unknown field" "BOGUS"

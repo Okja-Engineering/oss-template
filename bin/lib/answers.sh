@@ -43,8 +43,9 @@
 #                                    exit 1 when it starts with `~` and HOME
 #                                    is unset or empty
 #   answers_get FILE FIELD           FIELD's value in an answers file (`-`
-#                                    for standard input); exit 1 when the
-#                                    file does not hold FIELD
+#                                    for standard input, read whole, so a
+#                                    writer on a pipe is never cut off);
+#                                    exit 1 when the file does not hold FIELD
 #   answers_default SCHEMA FIELD PAIRS
 #                                    FIELD's default, each `{{OTHER}}` in it
 #                                    given OTHER's value in PAIRS, answers
@@ -275,7 +276,7 @@ answers_target_check() {
 }
 
 answers_record() {
-  K="$2: " awk 'index($0, ENVIRON["K"]) == 1 { print substr($0, length(ENVIRON["K"]) + 1); found = 1; exit }
+  K="$2: " awk '!found && index($0, ENVIRON["K"]) == 1 { print substr($0, length(ENVIRON["K"]) + 1); found = 1 }
     END { exit !found }' "$1"
 }
 
@@ -286,7 +287,7 @@ answers_blob() {
 answers_get() {
   F=$2 awk '
     { i = index($0, "=") }
-    i > 1 && substr($0, 1, i - 1) == ENVIRON["F"] { print substr($0, i + 1); found = 1; exit }
+    !found && i > 1 && substr($0, 1, i - 1) == ENVIRON["F"] { print substr($0, i + 1); found = 1 }
     END { exit !found }' "$1"
 }
 

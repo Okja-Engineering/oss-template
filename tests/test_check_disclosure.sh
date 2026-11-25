@@ -587,4 +587,19 @@ git -C "$R" commit -q --no-verify -m "test: a quoted stage name"
 run --range HEAD~1 HEAD
 assert_status 1 "$ST" "range mode: the same refusal"
 
+# A stage found early in a long list of stage folders is still a stage
+# folder: each lookup reads the list whole, so no reader leaves a writer to a
+# broken pipe under pipefail (the list here outgrows a pipe's buffer).
+valid
+long=$(printf '%0240d' 0 | tr 0 x)
+i=100
+while [ "$i" -lt 500 ]; do
+  put "stages/zz-$long$i/notes.md" 'notes'
+  i=$((i + 1))
+done
+run
+assert_contains "$OUT" "stages/zz-${long}100/: no CONTEXT.md" "a long list of stage folders is judged"
+assert_not_contains "$OUT" "stages/01-ask/, which is not a stage folder" "  and a routed stage early in it is a stage folder"
+assert_not_contains "$OUT" "does not resolve" "  and an earlier stage's output in it still resolves"
+
 assert_done

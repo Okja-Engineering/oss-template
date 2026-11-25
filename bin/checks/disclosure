@@ -36,6 +36,8 @@ refuse() {
   printf '%s\n' "$1"
   refused=1
 }
+# Each lookup reads a here-string, not a pipe: grep -q stops at its match,
+# and under pipefail a writer it leaves mid-list would fail the lookup.
 has_path() { grep -Fxq -- "$1" <<<"$paths"; }
 # under DIR: the paths under DIR/, matched literally.
 under() { printf '%s\n' "$paths" | P="$1/" awk 'index($0, ENVIRON["P"]) == 1'; }
@@ -196,7 +198,7 @@ stages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "stages" && NF >= 3 { print $2 
 # spaces or expanded as a glob; the tree reader refuses a newline in a path.
 while IFS= read -r s <&3; do
   [ -n "$s" ] || continue
-  printf '%s\n' "$s" | grep -Eq '^[0-9][0-9]-[a-z]+(-[a-z]+)*$' ||
+  grep -Eq '^[0-9][0-9]-[a-z]+(-[a-z]+)*$' <<<"$s" ||
     refuse "stages/$s/: the name is not NN-slug (NN-[a-z]+(-[a-z]+)*)"
   has_path "stages/$s/CONTEXT.md" || refuse "stages/$s/: no CONTEXT.md"
   if has_path "stages/$s/output/.gitignore"; then
@@ -238,7 +240,7 @@ $stages
 EOF
     while IFS= read -r s; do
       [ -n "$s" ] || continue
-      printf '%s\n' "$stages" | grep -Fxq -- "$s" ||
+      grep -Fxq -- "$s" <<<"$stages" ||
         refuse "CONTEXT.md: the routing table names stages/$s/, which is not a stage folder"
     done <<EOF
 $(printf '%s\n' "$routed" | sort -u)
@@ -333,7 +335,7 @@ while IFS= read -r s <&3; do
       other=${target#stages/}
       other=${other%%/*}
       file=${target##*/}
-      if [ "$target" = "stages/$other/output/<name>/$file" ] && printf '%s\n' "$stages" | grep -Fxq -- "$other"; then
+      if [ "$target" = "stages/$other/output/<name>/$file" ] && grep -Fxq -- "$other" <<<"$stages"; then
         onum=$(stage_num "$other")
         if [ -z "$num" ] || [ -z "$onum" ] || [ "$onum" -ge "$num" ]; then
           refuse "$contract: Inputs \`$path\` is an output of the same or a later stage"
@@ -350,7 +352,7 @@ EOF
 
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    printf '%s' "$inputs" | grep -Fxq -- "$p" || refuse "$p: in references/ but not in the stage's Inputs"
+    grep -Fxq -- "$p" <<<"$inputs" || refuse "$p: in references/ but not in the stage's Inputs"
   done <<EOF
 $(under "stages/$s/references")
 EOF

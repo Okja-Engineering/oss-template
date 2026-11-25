@@ -67,8 +67,10 @@ rules__scan() {
       for (i = 1; i <= held; i++) judge(hnr[i], hl[i])
       held = 0
     }
+    # The first word found is the answer; the rest is read, not left, so a
+    # writer on a pipe is never cut off.
     MODE == "word" {
-      if ((w = word(md_spans($0))) != "") { print w; found = 1; exit }
+      if (!found && (w = word(md_spans($0))) != "") { print w; found = 1 }
       next
     }
     NR == 1 && $0 == "---" { front = 1; next }
