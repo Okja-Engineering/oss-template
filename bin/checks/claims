@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Every rule line in the workspace's Markdown names a check or says it is not enforced
+# modes: tree staged range
+#
+# AC4: TAC13's rule over the workspace's own Markdown, through the product's
+# foundation/bin/lib/rules.sh, which holds the rule words and the heading
+# rule (decisions 173, 179). foundation/, docs/adr/, docs/work/ and
+# tests/fixtures/ are not judged.
+set -u
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
+. "$here/../../foundation/bin/lib/tree.sh"
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/links.sh
+. "$here/../../foundation/bin/lib/links.sh"
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/rules.sh
+. "$here/../../foundation/bin/lib/rules.sh"
+
+src=$(tree_source)
+rules_claims "$src" foundation/ docs/adr/ docs/work/ tests/fixtures/
+st=$?
+[ "$st" -le 1 ] || exit 2
+printf 'examined %s Markdown files in %s\n' "$RULES_FILES" "$src"
+exit "$st"
