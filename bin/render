@@ -30,8 +30,9 @@
 # rmdir and renames the staging directory to the target and the temporary
 # file to render.md. A failure or an interrupt removes only what this run
 # made: the staging directory, the temporary file, and the target when this
-# run's rename put it there. Exit 0 when done, 1 on a refusal, 2 on a usage
-# error.
+# run's rename put it there. A kill no trap sees (SIGKILL) leaves its
+# staging directory, which the run's next render removes before it writes.
+# Exit 0 when done, 1 on a refusal, 2 on a usage error.
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -154,6 +155,20 @@ case "$?" in
   1) refuse "the foundation at HEAD does not render; nothing is written:" "$(cat "$work/faults")" ;;
   *) refuse "cannot read foundation/ at HEAD" ;;
 esac
+
+# A staging directory a killed render of this run left, by the staging name
+# this run uses with another process id, goes first, through the removal
+# helper (decision 226); nothing else beside the target is touched. One at
+# this process's own name is not a leftover to remove: the exclusive mkdir
+# below refuses it.
+for left in "$root/.$name.render."*; do
+  case "${left##*/}" in
+    ".$name.render."*[!0-9]* | ".$name.render." | ".$name.render.$$") continue ;;
+  esac
+  if [ -d "$left" ] && [ ! -L "$left" ]; then
+    fault=$(discard_remove "$left") || refuse "$fault"
+  fi
+done
 
 # The places this run writes, each made exclusively, so cleanup removes
 # nothing it did not make.

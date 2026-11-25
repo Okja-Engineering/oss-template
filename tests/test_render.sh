@@ -611,6 +611,35 @@ assert_status 1 "$?" "refused: a foundation file git cannot read"
 assert_contains "$OUT" "cannot read foundation/ at HEAD" "  as a read that failed partway"
 assert_eq "yes" "$([ -s "$SCRATCH/made$n" ] && echo yes)" "  having made temporary files"
 assert_eq "" "$(leftover)" "  and leaves none of them"
+# A staging directory a killed render left, by its own staging name for this
+# run, is removed before staging, also when it holds a chmod 000 directory;
+# nothing else beside the target is touched (decision 226).
+fresh
+confirmed widget
+mkdir -p "$ROOT/.widget.render.4242/a/b" "$ROOT/.widget.render.17" "$ROOT/.widget.render.x1" \
+  "$ROOT/.other.render.5" "$ROOT/.widget.render.6.extra"
+printf 'half\n' >"$ROOT/.widget.render.4242/a/b/README.md"
+printf 'kept\n' >"$ROOT/.widget.render.99"
+chmod 000 "$ROOT/.widget.render.4242/a/b" "$ROOT/.widget.render.4242/a"
+render widget
+assert_status 0 "$ST" "a render with a killed render's staging directories beside its target"
+assert_eq "gone gone" "$(gone "$ROOT/.widget.render.4242") $(gone "$ROOT/.widget.render.17")" \
+  "  removes them, the chmod 000 one whole"
+assert_eq "present present present present" \
+  "$(gone "$ROOT/.widget.render.x1") $(gone "$ROOT/.other.render.5") $(gone "$ROOT/.widget.render.6.extra") $(gone "$ROOT/.widget.render.99")" \
+  "  and nothing else: another name, another run's, and a file"
+assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  and renders"
+# A leftover the removal helper cannot remove is refused, naming it, before
+# anything is written.
+fresh
+confirmed widget
+mkdir -p "$ROOT/.widget.render.4242" "$SCRATCH/stub$n"
+rmstub .widget.render.4242
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a leftover staging directory that cannot be removed"
+assert_contains "$OUT" "could not remove $ROOT/.widget.render.4242" "  and the refusal names it"
+assert_eq "gone gone" "$(gone "$ROOT/widget") $(gone "$R/stages/02-render/output/widget/render.md")" \
+  "  with nothing written"
 # The worktree list's exit status is read.
 fresh
 confirmed widget
