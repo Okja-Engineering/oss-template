@@ -12,7 +12,7 @@ Subjects take the form `type(scope): subject`, types `feat`, `fix`, `docs`, `ref
 
 ## Tests
 
-Write the failing test first and see it fail for the reason you expect. The workspace's suites live in `tests/` and the product's in `foundation/tests/`; each runs with its `run-all.sh`. Every suite builds its own fixtures in a temporary directory. Beyond the code under test, a suite reads from the workspace only the committed test libraries and fixtures in `tests/` and `foundation/tests/`, and git's list of the suites beside it, to check that none is missing.
+Write the failing test first and see it fail for the reason you expect. The workspace's suites live in `tests/` and the product's in `foundation/tests/`; each runs with its `run-all.sh`. Each workspace script sets `set -o pipefail`, which `tests/test_scripts.sh` checks, and runs each write, guard and assert in its own shell, not at the end of a pipeline, where a failure would be lost; that is not enforced (decision 228). Every suite builds its own fixtures in a temporary directory. Beyond the code under test, a suite reads from the workspace only the committed test libraries and fixtures in `tests/` and `foundation/tests/`, and git's list of the suites beside it, to check that none is missing.
 
 ## Checks
 

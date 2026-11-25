@@ -4,6 +4,7 @@
 # type but `identity`, which lands at 3.1 (decision 145).
 # shellcheck disable=SC2016,SC2088 # values hold a literal ~, $ and backticks
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
@@ -72,26 +73,35 @@ assert_eq "yes" "$(answers_col "$S" TITLE render)" "a field's render column"
 answers_schema_check "$TEST_DIR/../shared/answers.tsv" >/dev/null
 assert_status 0 "$?" "the workspace's own schema parses"
 
-bad_schema() { # DESCRIPTION NEEDLE, the schema on stdin
+# bad_schema DESCRIPTION NEEDLE: the schema in $BAD is refused. Each case
+# writes $BAD first and asserts here, in this shell, never at the end of a
+# pipeline, where a failed assert would not count.
+BAD="$SCRATCH/bad.tsv"
+bad_schema() {
   local out st
-  cat >"$SCRATCH/bad.tsv"
-  out=$(answers_schema_check "$SCRATCH/bad.tsv" 2>&1)
+  out=$(answers_schema_check "$BAD" 2>&1)
   st=$?
   assert_status 1 "$st" "schema refused: $1"
   assert_contains "$out" "$2" "  and the refusal says: $2"
 }
-{ row field scope type render selects pattern default; row NAME run name no - - -; } |
-  bad_schema "a header other than the eight columns" "header"
-{ head -n 1 "$S"; row X run bogus no - - - 'X?'; } | bad_schema "an unknown type" "bogus"
-{ head -n 1 "$S"; row X run identity no - - - 'X?'; } |
-  bad_schema "identity, before it lands at 3.1" "identity"
-{ head -n 1 "$S"; row X elsewhere text no - - - 'X?'; } | bad_schema "an unknown scope" "elsewhere"
-{ head -n 1 "$S"; row X run select no - - - 'X?'; } | bad_schema "a select with no values" "X"
-{ head -n 1 "$S"; row X run text maybe - - - 'X?'; } | bad_schema "a render column other than yes or no" "maybe"
-{ head -n 1 "$S"; row X run text no - - - 'X?'; row X run text no - - - 'X?'; } |
-  bad_schema "a field listed twice" "X"
-{ head -n 1 "$S"; row lower run text no - - - 'X?'; } | bad_schema "a field name not in capitals" "lower"
-{ head -n 1 "$S"; row X run text no - - - 'X?' extra; } | bad_schema "a row of nine cells" "X"
+{ row field scope type render selects pattern default; row NAME run name no - - -; } >"$BAD"
+bad_schema "a header other than the eight columns" "header"
+{ head -n 1 "$S"; row X run bogus no - - - 'X?'; } >"$BAD"
+bad_schema "an unknown type" "bogus"
+{ head -n 1 "$S"; row X run identity no - - - 'X?'; } >"$BAD"
+bad_schema "identity, before it lands at 3.1" "identity, which lands with verify at 3.1"
+{ head -n 1 "$S"; row X elsewhere text no - - - 'X?'; } >"$BAD"
+bad_schema "an unknown scope" "elsewhere"
+{ head -n 1 "$S"; row X run select no - - - 'X?'; } >"$BAD"
+bad_schema "a select with no values" "X"
+{ head -n 1 "$S"; row X run text maybe - - - 'X?'; } >"$BAD"
+bad_schema "a render column other than yes or no" "maybe"
+{ head -n 1 "$S"; row X run text no - - - 'X?'; row X run text no - - - 'X?'; } >"$BAD"
+bad_schema "a field listed twice" "X"
+{ head -n 1 "$S"; row lower run text no - - - 'X?'; } >"$BAD"
+bad_schema "a field name not in capitals" "lower"
+{ head -n 1 "$S"; row X run text no - - - 'X?' extra; } >"$BAD"
+bad_schema "a row of nine cells" "X"
 
 # --- each type, and the pattern column ----------------------------------------
 ok NAME my-repo.x_2

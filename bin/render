@@ -22,6 +22,7 @@
 # fingerprint and the file list. Exit 0 when done, 1 on a refusal, 2 on a
 # usage error.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 ws=$(CDPATH='' cd -- "$here/.." && pwd)
@@ -80,7 +81,8 @@ trap 'rm -rf "$work"' EXIT
 # The answers, confirmed, against the schema at HEAD.
 head=$(git rev-parse -q --verify 'HEAD^{commit}') || refuse "the workspace has no commit at HEAD"
 tree_cat "commit:$head" shared/answers.tsv >"$work/schema" || refuse "HEAD holds no shared/answers.tsv"
-fault=$(answers_schema_check "$work/schema") || refuse "shared/answers.tsv at HEAD does not parse:" "$fault"
+fault=$(answers_schema_check "$work/schema" shared/answers.tsv) ||
+  refuse "shared/answers.tsv at HEAD does not parse:" "$fault"
 fault=$(answers_check "$work/schema" NAME "$name") || refuse "$fault"
 outd=stages/01-ask/output/$name
 [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name, and confirm it"

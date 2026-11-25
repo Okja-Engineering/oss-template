@@ -3,6 +3,7 @@
 # through the product's runner library.
 # usage: tests/run-all.sh [DIRECTORY]
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/runner.sh

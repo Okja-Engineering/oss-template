@@ -6,6 +6,7 @@
 # with its own schema; each refusal writes nothing and removes nothing.
 # shellcheck disable=SC2016,SC2088 # values hold a literal ~, $ and backticks
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
@@ -347,4 +348,61 @@ assert_status 1 "$ST" "refused: a removal that fails"
 assert_contains "$OUT" "could not remove $ROOT/widget" "  and the refusal names the path"
 assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
 
+
+# --- a write that fails (decision 228) ------------------------------------------------------
+# A write runs in this shell, never at the end of a pipeline, so a write that
+# fails, or whose input fails, refuses and leaves its file as it was.
+if [ "$(id -u)" != 0 ]; then
+  ready
+  before=$(state)
+  chmod 555 "$R/setup"
+  ask setup OWNER=acme
+  chmod 755 "$R/setup"
+  assert_status 1 "$ST" "refused: setup whose file cannot be written"
+  assert_contains "$OUT" "setup/answers.env" "  and the refusal names it"
+  assert_not_contains "$OUT" "wrote" "  and claims no write"
+  assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+  mkdir -p "$OUTD"
+  chmod 555 "$OUTD"
+  ask run widget 'TITLE=A' 'DESCRIPTION=B'
+  chmod 755 "$OUTD"
+  assert_status 1 "$ST" "refused: run whose answers file cannot be written"
+  assert_eq "absent" "$(run_state)" "  and no answers file is written"
+  ask run widget 'TITLE=A' 'DESCRIPTION=B'
+  chmod 555 "$OUTD"
+  ask confirm widget --by 'A Person'
+  chmod 755 "$OUTD"
+  assert_status 1 "$ST" "refused: confirm whose confirmed.md cannot be written"
+  assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
+fi
+ready
+before=$(state)
+mkdir -p "$SCRATCH/sortstub$n"
+printf '#!/bin/sh\nexit 1\n' >"$SCRATCH/sortstub$n/sort"
+chmod +x "$SCRATCH/sortstub$n/sort"
+OUT=$(cd "$R" && PATH="$SCRATCH/sortstub$n:$PATH" bin/ask setup OWNER=acme 2>&1)
+ST=$?
+assert_status 1 "$ST" "refused: setup whose text cannot be sorted"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+# The temporary file is made exclusively: one already there, a symbolic link
+# planted at the name this process will use, is refused, not written through.
+ready
+printf 'outside\n' >"$SCRATCH/outside$n"
+before=$(state)
+OUT=$(cd "$R" && sh -c 'ln -s "$1" "setup/answers.env.tmp.$$" && exec bin/ask setup OWNER=acme' sh "$SCRATCH/outside$n" 2>&1)
+ST=$?
+assert_status 1 "$ST" "refused: a write whose temporary file is already there, as a symbolic link"
+assert_eq "outside" "$(cat "$SCRATCH/outside$n")" "  and nothing is written through it"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+rendered
+mkdir -p "$SCRATCH/stub$n"
+printf '#!/bin/sh\nexit 1\n' >"$SCRATCH/stub$n/sort"
+chmod +x "$SCRATCH/stub$n/sort"
+before=$(run_state)
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+ST=$?
+assert_status 1 "$ST" "refused: a redo whose answers cannot be sorted"
+assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
+assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and, judged before anything is removed, the target is left alone"
+assert_eq "present" "$(gone "$OUTD/confirmed.md")" "  and the confirmation"
 assert_done

@@ -4,6 +4,7 @@
 # fixture case per refusal, each on an otherwise valid fixture workspace.
 # shellcheck disable=SC2016 # backticks here are Markdown code spans, kept literal
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh

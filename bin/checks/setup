@@ -7,6 +7,7 @@
 # `bin/ask questionnaire` writes from that schema, and a setup file that
 # bin/lib/answers.sh's validator rejects.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
@@ -35,8 +36,8 @@ get() {
 }
 
 get shared/answers.tsv "$tmp/schema" || exit 1
-faults=$(answers_schema_check "$tmp/schema") || {
-  printf '%s\n' "${faults//"$tmp/schema"/shared/answers.tsv}"
+faults=$(answers_schema_check "$tmp/schema" shared/answers.tsv) || {
+  printf '%s\n' "$faults"
   exit 1
 }
 

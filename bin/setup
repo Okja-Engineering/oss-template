@@ -3,6 +3,7 @@
 # bin/setup, which finds the repository from where it sits. A second run
 # changes nothing.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 exec "$here/../foundation/bin/setup" "$@"

@@ -119,7 +119,7 @@ EOF
       refused=1
       continue
     fi
-    if printf '%s' "$produced" | grep -Fxq -e "$name"; then
+    if grep -Fxq -e "$name" <<<"$produced"; then
       printf 'foundation/%s: a second source for %s\n' "$rel" "$name"
       refused=1
       continue
@@ -152,7 +152,7 @@ EOF
   # A selecting field whose value no variant matches.
   while IFS='	' read -r field path values value; do
     [ -n "$field" ] || continue
-    printf '%s' "$produced" | grep -Fxq -e "$path" && continue
+    grep -Fxq -e "$path" <<<"$produced" && continue
     printf '%s=%s selects foundation/%s.%s, which the foundation does not hold\n' "$field" "$value" "$path" "$value"
     refused=1
   done <<EOF
@@ -231,37 +231,18 @@ render__substitute() {
 render_walk() {
   local target=$1 list=$2 p refused=0 tmp
   tmp=$(mktemp -d) || return 1
-  (
-    cd -P -- "$target" || exit 1
-    find . -mindepth 1 -name .git -print0
-  ) | while IFS= read -r -d '' p; do
-    printf 'the target holds %s, an entry named .git\n' "${p#./}"
-  done >"$tmp/git"
-  (
-    cd -P -- "$target" || exit 1
-    find . -mindepth 1 ! -type d -print0
-  ) | while IFS= read -r -d '' p; do
-    case "$p" in
-      *'
-'*) printf 'N\n' ;;
-      *) printf 'F%s\n' "${p#./}" ;;
-    esac
-  done >"$tmp/found"
-  (
-    cd -P -- "$target" || exit 1
-    find . -mindepth 1 -type d -print0
-  ) | while IFS= read -r -d '' p; do
-    case "$p" in
-      *'
-'*) printf 'N\n' ;;
-      *) printf 'D%s\n' "${p#./}" ;;
-    esac
-  done >"$tmp/dirs"
-  if [ -s "$tmp/git" ]; then
-    cat "$tmp/git"
+  if ! render__entries "$target" G -name .git >"$tmp/git" ||
+    ! render__entries "$target" F ! -type d >"$tmp/found" ||
+    ! render__entries "$target" D -type d >"$tmp/dirs"; then
+    printf 'the walk cannot list the target %s\n' "$target"
+    rm -rf "$tmp"
+    return 1
+  fi
+  if grep -q '^G' "$tmp/git"; then
+    sed -n 's/^G\(.*\)$/the target holds \1, an entry named .git/p' "$tmp/git"
     refused=1
   fi
-  if grep -qx N "$tmp/found" "$tmp/dirs"; then
+  if grep -qx N "$tmp/git" "$tmp/found" "$tmp/dirs"; then
     printf 'the target holds a name with a newline in it\n'
     refused=1
   fi
@@ -284,6 +265,23 @@ render_walk() {
   rm -rf "$tmp"
   return "$refused"
 }
+
+# render__entries DIR TAG FIND-TEST...: each entry under DIR that the find
+# tests select, listed without following symbolic links, one a line as TAG
+# then its path, or N for a name holding a newline; exit 1 when DIR cannot be
+# listed whole.
+render__entries() (
+  set -o pipefail
+  dir=$1 tag=$2
+  shift 2
+  (cd -P -- "$dir" && find . -mindepth 1 "$@" -print0) | while IFS= read -r -d '' p; do
+    case "$p" in
+      *'
+'*) printf 'N\n' ;;
+      *) printf '%s%s\n' "$tag" "${p#./}" ;;
+    esac
+  done
+)
 
 render_fingerprint() {
   local target=$1 list=$2 g st tree

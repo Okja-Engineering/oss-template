@@ -10,6 +10,7 @@
 # .claude/settings.json appears in CONTRIBUTING.md § Agent guards.
 # foundation/, docs/adr/, docs/work/ and tests/fixtures/ are not judged.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh

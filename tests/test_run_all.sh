@@ -3,6 +3,7 @@
 # given the workspace's tests/ directory: it runs those suites and no others,
 # and fails when one of them fails.
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 ROOT=$(cd "$TEST_DIR/.." && pwd)

@@ -2,6 +2,7 @@
 # The workspace's bin/setup sets core.hooksPath to .githooks, and a second
 # run changes nothing.
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh

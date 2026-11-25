@@ -4,6 +4,7 @@
 # refuses a questionnaire other than `bin/ask questionnaire`'s output and a
 # setup file bin/lib/answers.sh's validator rejects.
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
@@ -53,6 +54,13 @@ valid
 fixture_remove "$R/setup/questionnaire.md"
 fixture_commit "$R" "test: no questionnaire"
 refused "a missing questionnaire" "setup/questionnaire.md"
+
+# A schema that does not parse, named by its path in the tree on every bash.
+valid
+printf 'X\trun\tbogus\tno\t-\t-\t-\tX?\n' >>"$R/shared/answers.tsv"
+fixture_commit "$R" "test: a schema with an unknown type"
+refused "a schema that does not parse" "shared/answers.tsv:5: X: an unknown type bogus"
+assert_not_contains "$OUT" "examined" "  and nothing past the schema is judged"
 
 # A setup file the validator rejects.
 valid

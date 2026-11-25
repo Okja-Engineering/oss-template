@@ -3,6 +3,7 @@
 # numerically against 2.36 (decisions 143, 154), and the hermetic
 # environment it builds.
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh

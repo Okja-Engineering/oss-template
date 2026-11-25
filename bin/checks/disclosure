@@ -19,6 +19,7 @@
 #   and space, and no two spellings of a path or of its directories that
 #   differ only in case.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
@@ -35,7 +36,7 @@ refuse() {
   printf '%s\n' "$1"
   refused=1
 }
-has_path() { printf '%s\n' "$paths" | grep -Fxq -- "$1"; }
+has_path() { grep -Fxq -- "$1" <<<"$paths"; }
 # under DIR: the paths under DIR/, matched literally.
 under() { printf '%s\n' "$paths" | P="$1/" awk 'index($0, ENVIRON["P"]) == 1'; }
 has_dir() { [ -n "$(under "$1")" ]; }
@@ -223,7 +224,7 @@ EOF
 if has_path CONTEXT.md; then
   count=$(lines_of CONTEXT.md)
   [ "$count" -le 60 ] || refuse "CONTEXT.md: $count lines, over 60"
-  if tree_cat "$src" CONTEXT.md | grep -qx '## Routing'; then
+  if tree_cat "$src" CONTEXT.md | grep -x '## Routing' >/dev/null; then
     # Each row counts a stage once, however often it mentions it.
     routed=$(section CONTEXT.md Routing | body_rows | while IFS= read -r row; do
       printf '%s\n' "$row" | grep -o 'stages/[^/[:space:]`|()]*/' | sort -u
@@ -336,7 +337,7 @@ while IFS= read -r s <&3; do
         onum=$(stage_num "$other")
         if [ -z "$num" ] || [ -z "$onum" ] || [ "$onum" -ge "$num" ]; then
           refuse "$contract: Inputs \`$path\` is an output of the same or a later stage"
-        elif ! outputs_of "$other" | grep -Fxq -e "$file" -e "output/<name>/$file"; then
+        elif ! outputs_of "$other" | grep -Fx -e "$file" -e "output/<name>/$file" >/dev/null; then
           refuse "$contract: Inputs \`$path\` is not in stages/$other/'s Outputs"
         fi
       else

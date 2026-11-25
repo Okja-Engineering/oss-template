@@ -444,3 +444,7 @@ Made at the gate on the first workspace spec and plan. Each gives the option tak
 ### Decisions from S1's landing (chief of staff)
 
 225. **S1 landed by fast-forward.** S1 landed on `main` by fast-forward under ruling 23, so `main` holds S1's commits with their reviewed SHAs. The `commits` baseline is 1144084, S1's last commit on `main`, recorded when 6.1 lands. Later slices still land by rebase merge (decision 169). Amends decision 169.
+
+### Decisions from S2's first ship-gate fix (chief of staff, delegated under ruling 12)
+
+228. **No guard or assert at the end of a pipeline.** Every workspace script, each tracked file outside `foundation/` and `tests/fixtures/` whose first line is a bash shebang, sets `set -o pipefail`, which bash 3.2 has, and `tests/test_scripts.sh` holds each to it. A write, and every guard, runs in the parent shell: `bin/ask`'s `write FILE COMMAND…` runs the command that makes the file's text, and a failure of either refuses and leaves the file as it was; `bin/ask run` makes its sorted text before it removes anything. Every test asserts in the parent shell. A pipeline's reader takes all its input, a here-string or `grep … >/dev/null` in place of `grep -q` on a pipe, so pipefail cannot turn a reader that stops early into a false refusal. The walk refuses a target it cannot list whole. `answers_schema_check` takes the name it reports, so `bin/check setup` names `shared/answers.tsv` on bash 3.2. Fixes T1, T2 and T5 of S2's first ship gate, and its pipefail item.

@@ -23,7 +23,9 @@
 # An answers file holds one FIELD=value a line, the value everything after
 # the first `=`. It is read as data, never sourced, so no value runs.
 #
-#   answers_schema_check SCHEMA      one line out per fault; exit 0 or 1
+#   answers_schema_check SCHEMA [NAME]
+#                                    one line out per fault, naming the file
+#                                    NAME (SCHEMA by default); exit 0 or 1
 #   answers_fields SCHEMA [SCOPE]    the fields, in order, one a line
 #   answers_col SCHEMA FIELD COLUMN  a cell, `-` read as empty; exit 1 when
 #                                    the schema has no FIELD
@@ -69,8 +71,8 @@ ANSWERS_LIB=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$ANSWERS_LIB/../../foundation/bin/lib/rules.sh"
 
 answers_schema_check() {
-  H=$ANSWERS_HEADER T=" $ANSWERS_TYPES " awk -F '\t' '
-    function bad(why) { printf "%s:%d: %s\n", FILENAME, FNR, why; refused = 1 }
+  H=$ANSWERS_HEADER T=" $ANSWERS_TYPES " L=${2:-$1} awk -F '\t' '
+    function bad(why) { printf "%s:%d: %s\n", ENVIRON["L"], FNR, why; refused = 1 }
     FNR == 1 {
       if ($0 != ENVIRON["H"]) bad("the header is not: " ENVIRON["H"])
       next

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Check what is staged with the workspace's bin/check --staged.
 set -u
+set -o pipefail
 export LC_ALL=C
 root=$(git rev-parse --show-toplevel) || exit 2
 exec "$root/bin/check" --staged

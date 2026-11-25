@@ -7,6 +7,7 @@
 # reftable, against render's fingerprint; AC11's variations; AC12 per field.
 # shellcheck disable=SC2016,SC2088 # templates hold literal {{FIELD}} and ${{ }}, a default ~
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
@@ -403,6 +404,12 @@ walk_case "an extra file" "extra"
 fresh_walk
 rm "$W/d/b"
 walk_case "a missing file" "d/b"
+if [ "$(id -u)" != 0 ]; then
+  fresh_walk
+  chmod 000 "$W/d"
+  walk_case "a directory it cannot list whole" "the walk cannot list the target"
+  chmod 755 "$W/d"
+fi
 
 # The fingerprint's index check (decision 166): git adds nothing under a
 # nested repository and still exits 0.

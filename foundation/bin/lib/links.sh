@@ -162,7 +162,7 @@ links_judge() {
     case "$resolved" in *'#'*) ;; *) continue ;; esac
     anchor=${resolved#*#}
     case "$path" in *.md) ;; *) continue ;; esac
-    if ! tree_cat "$src" "$path" | links_anchors | grep -Fxq -e "$anchor"; then
+    if ! tree_cat "$src" "$path" | links_anchors | grep -Fx -e "$anchor" >/dev/null; then
       printf '%s:%s: the link %s does not resolve: %s has no heading #%s\n' \
         "$file" "$nr" "$target" "$path" "$anchor"
       refused=1
@@ -178,6 +178,6 @@ EOF
 links__holds() {
   [ -n "$2" ] || return 0
   printf '%s\n' "$1" | P="$2" awk '
-    $0 == ENVIRON["P"] || index($0, ENVIRON["P"] "/") == 1 { found = 1; exit }
+    $0 == ENVIRON["P"] || index($0, ENVIRON["P"] "/") == 1 { found = 1 }
     END { exit !found }'
 }

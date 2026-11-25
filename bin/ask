@@ -32,6 +32,7 @@
 # through a temporary file beside it. Exit 0 when done, 1 on a refusal, 2 on
 # a usage error.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 ws=$(CDPATH='' cd -- "$here/.." && pwd)
@@ -59,7 +60,8 @@ refuse() {
 # schema_ok: the schema parses, or the command refuses, naming its faults.
 schema_ok() {
   local faults
-  faults=$(answers_schema_check "$SCHEMA" 2>&1) || refuse "shared/answers.tsv does not parse:" "$faults"
+  faults=$(answers_schema_check "$SCHEMA" shared/answers.tsv 2>&1) ||
+    refuse "shared/answers.tsv does not parse:" "$faults"
 }
 
 # assignments SCOPE ARG...: the FIELD=value arguments as answers lines, in
@@ -91,18 +93,24 @@ assignments() {
   done
 }
 
-# write FILE: standard input to FILE, through a temporary file beside it, so
-# FILE is either as it was or whole.
+# write FILE COMMAND [ARG...]: COMMAND's output to FILE, through a temporary
+# file beside it, so FILE is either as it was or whole. COMMAND runs here, in
+# this shell, never at the end of a pipeline (decision 228): when it or the
+# write fails, the command refuses.
 write() {
-  local tmp=$1.tmp.$$
-  mkdir -p "$(dirname "$1")" || refuse "cannot make the directory of $1"
-  (set -C && : >"$tmp") 2>/dev/null || refuse "cannot write beside $1: $tmp"
-  if cat >"$tmp" && mv -f "$tmp" "$1"; then
+  local file=$1 tmp=$1.tmp.$$
+  shift
+  mkdir -p "$(dirname "$file")" || refuse "cannot make the directory of $file"
+  (set -C && : >"$tmp") 2>/dev/null || refuse "cannot write beside $file: $tmp"
+  if "$@" >"$tmp" && mv -f "$tmp" "$file"; then
     return 0
   fi
   rm -f "$tmp"
-  refuse "cannot write $1"
+  refuse "cannot write $file"
 }
+
+# sorted TEXT: TEXT's lines, sorted; a failed sort fails.
+sorted() { printf '%s' "$1" | sort; }
 
 # present PATH: something, a dangling symbolic link included, is at PATH.
 present() { [ -e "$1" ] || [ -L "$1" ]; }
@@ -138,20 +146,21 @@ cmd_setup() {
 $(answers_fields "$SCHEMA" setup)
 EOF
   [ -z "$faults" ] || refuse "setup/answers.env is not written:" "$faults"
-  printf '%s' "$out" | sort | write "$SETUP"
+  write "$SETUP" sorted "$out"
   printf 'bin/ask: wrote setup/answers.env\n'
 }
 
 cmd_questionnaire() {
   [ "$#" -eq 0 ] || usage "questionnaire takes no argument"
   schema_ok
-  answers_questionnaire "$SCHEMA" | write "$QUESTIONNAIRE"
+  write "$QUESTIONNAIRE" answers_questionnaire "$SCHEMA"
   printf 'bin/ask: wrote setup/questionnaire.md\n'
 }
 
 cmd_run() {
   local name redo=0 remove="" have_remove=0 to=run arg fault faults="" field value
   local out="" run_pairs override_pairs setup_have outd render_md recorded="" old_root target root
+  local answers_text override_text
   local -a run_args=() override_args=()
   [ "$#" -ge 1 ] || usage "run needs NAME"
   name=$1
@@ -234,6 +243,10 @@ EOF
   fault=$(answers_target "$target") || refuse "$fault"
   out="${out}TARGET=$target
 "
+  # What the run writes, made before anything is removed.
+  if ! answers_text=$(sorted "$out") || ! override_text=$(sorted "$override_pairs"); then
+    refuse "cannot sort the answers"
+  fi
 
   # The run, and its target.
   outd=$ws/stages/01-ask/output/$name
@@ -270,11 +283,11 @@ EOF
     done
   fi
   if [ -n "$override_pairs" ]; then
-    printf '%s' "$override_pairs" | sort | write "$outd/setup.override.env"
+    write "$outd/setup.override.env" printf '%s\n' "$override_text"
   elif present "$outd/setup.override.env"; then
     fault=$(discard_remove "$outd/setup.override.env") || refuse "$fault"
   fi
-  printf '%s' "$out" | sort | write "$outd/answers.env"
+  write "$outd/answers.env" printf '%s\n' "$answers_text"
   printf 'bin/ask: wrote stages/01-ask/output/%s/answers.env\n' "$name"
 }
 
@@ -291,7 +304,7 @@ cmd_confirm() {
   esac
   blob=$(answers_blob "$outd/answers.env") || refuse "cannot hash $outd/answers.env"
   at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  printf '%s\n' "# Confirmed: $name" '' "by: $who" "at: $at" "answers: $blob" | write "$outd/confirmed.md"
+  write "$outd/confirmed.md" printf '%s\n' "# Confirmed: $name" '' "by: $who" "at: $at" "answers: $blob"
   printf 'bin/ask: wrote stages/01-ask/output/%s/confirmed.md\n' "$name"
 }
 

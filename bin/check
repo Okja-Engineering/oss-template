@@ -2,6 +2,7 @@
 # Run the workspace's own checks, in bin/checks/, through the product's
 # dispatcher (C4). `bin/check --list` lists them.
 set -u
+set -o pipefail
 export LC_ALL=C
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/bin/lib/dispatch.sh
