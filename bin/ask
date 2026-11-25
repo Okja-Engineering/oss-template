@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Stage 01's script (AC7): it writes the answers, from the field schema
+# shared/answers.tsv, through bin/lib/answers.sh. A refusal writes nothing.
+#
+# usage: bin/ask setup [FIELD=value...]   rewrite setup/answers.env
+#        bin/ask questionnaire            write setup/questionnaire.md
+#
+# `setup` takes setup fields only. Each field keeps the value given, else
+# the one setup/answers.env holds, else its default; the whole file is then
+# validated and written sorted, with LF endings. Exit 0 when written, 1 on a
+# refusal, 2 on a usage error.
+set -u
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+ws=$(CDPATH='' cd -- "$here/.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=lib/answers.sh
+. "$here/lib/answers.sh"
+
+SCHEMA=$ws/shared/answers.tsv
+SETUP=$ws/setup/answers.env
+QUESTIONNAIRE=$ws/setup/questionnaire.md
+
+usage() {
+  printf 'bin/ask: %s\n' "$1" >&2
+  printf '%s\n' 'usage: bin/ask setup [FIELD=value...]' '       bin/ask questionnaire' >&2
+  exit 2
+}
+refuse() {
+  printf 'bin/ask: %s\n' "$@" >&2
+  exit 1
+}
+
+# schema_ok: the schema parses, or the command refuses, naming its faults.
+schema_ok() {
+  local faults
+  faults=$(answers_schema_check "$SCHEMA" 2>&1) || refuse "shared/answers.tsv does not parse:" "$faults"
+}
+
+# assignments SCOPE ARG...: the FIELD=value arguments as answers lines, in
+# PAIRS; each names a field of SCOPE once, or the command refuses.
+assignments() {
+  local scope=$1 arg field seen=" "
+  shift
+  PAIRS=""
+  for arg in "$@"; do
+    field=${arg%%=*}
+    case "$arg" in
+      *=*) ;;
+      *) refuse "not FIELD=value: $arg" ;;
+    esac
+    case "$seen" in
+      *" $field "*) refuse "$field is given twice" ;;
+    esac
+    seen="$seen$field "
+    case "$(answers_col "$SCHEMA" "$field" scope)" in
+      "$scope") ;;
+      '') refuse "$field: an unknown field" ;;
+      *) refuse "$field is a $(answers_col "$SCHEMA" "$field" scope) field, not a $scope field" ;;
+    esac
+    PAIRS="$PAIRS$arg
+"
+  done
+}
+
+# write FILE: standard input to FILE, through a temporary file beside it, so
+# FILE is either as it was or whole.
+write() {
+  local tmp=$1.tmp.$$
+  mkdir -p "$(dirname "$1")" || refuse "cannot make the directory of $1"
+  (set -C && : >"$tmp") 2>/dev/null || refuse "cannot write beside $1: $tmp"
+  if cat >"$tmp" && mv -f "$tmp" "$1"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  refuse "cannot write $1"
+}
+
+cmd_setup() {
+  local field value have="" out="" faults="" fault
+  schema_ok
+  assignments setup "$@"
+  if [ -f "$SETUP" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      field=${line%%=*}
+      [ "$(answers_col "$SCHEMA" "$field" scope)" = setup ] ||
+        refuse "setup/answers.env holds a line for $field, which the schema does not list as a setup field: $line"
+    done <"$SETUP"
+    have=$(cat "$SETUP")
+  fi
+  while IFS= read -r field; do
+    [ -n "$field" ] || continue
+    if value=$(printf '%s' "$PAIRS" | answers_get - "$field"); then
+      :
+    elif value=$(printf '%s\n' "$have" | answers_get - "$field"); then
+      :
+    else
+      value=$(answers_default "$SCHEMA" "$field" "$out")
+    fi
+    if ! fault=$(answers_check "$SCHEMA" "$field" "$value"); then
+      faults="$faults$fault
+"
+    fi
+    out="$out$field=$value
+"
+  done <<EOF
+$(answers_fields "$SCHEMA" setup)
+EOF
+  [ -z "$faults" ] || refuse "setup/answers.env is not written:" "$faults"
+  printf '%s' "$out" | sort | write "$SETUP"
+  printf 'bin/ask: wrote setup/answers.env\n'
+}
+
+cmd_questionnaire() {
+  [ "$#" -eq 0 ] || usage "questionnaire takes no argument"
+  schema_ok
+  answers_questionnaire "$SCHEMA" | write "$QUESTIONNAIRE"
+  printf 'bin/ask: wrote setup/questionnaire.md\n'
+}
+
+[ "$#" -ge 1 ] || usage "a subcommand is required"
+sub=$1
+shift
+case "$sub" in
+  setup) cmd_setup "$@" ;;
+  questionnaire) cmd_questionnaire "$@" ;;
+  *) usage "unknown subcommand: $sub" ;;
+esac

@@ -30,13 +30,24 @@
 #   answers_check SCHEMA FIELD VALUE the reason VALUE is refused, if it is;
 #                                    exit 0 when accepted, 1 when refused
 #   answers_path VALUE               a `path` value with its `~` expanded
-#   answers_get FILE FIELD           FIELD's value in an answers file; exit
-#                                    1 when the file does not hold FIELD
-#   answers_validate SCHEMA FILE SCOPE
+#   answers_get FILE FIELD           FIELD's value in an answers file (`-`
+#                                    for standard input); exit 1 when the
+#                                    file does not hold FIELD
+#   answers_default SCHEMA FIELD PAIRS
+#                                    FIELD's default, each `{{OTHER}}` in it
+#                                    given OTHER's value in PAIRS, answers
+#                                    file lines in a string; a `{{OTHER}}`
+#                                    PAIRS lacks is left, for the validator
+#   answers_validate SCHEMA FILE SCOPE [NAME]
 #                                    the whole file, holding exactly the
 #                                    fields of SCOPE (`setup`, or `run` for
 #                                    every field), each once and valid; one
-#                                    line out per refusal; exit 0 or 1
+#                                    line out per refusal, naming the file
+#                                    NAME (FILE by default); exit 0 or 1
+#   answers_questionnaire SCHEMA     setup/questionnaire.md's text: the
+#                                    setup fields' questions, in one flat
+#                                    numbered list, each with its field,
+#                                    type and default
 #
 # The caller exports LC_ALL=C.
 
@@ -188,8 +199,41 @@ answers_get() {
     END { exit !found }' "$1"
 }
 
+answers_default() {
+  local d rest out="" name value
+  d=$(answers_col "$1" "$2" default) || return 1
+  rest=$d
+  while :; do
+    case "$rest" in
+      *'{{'*'}}'*) ;;
+      *) break ;;
+    esac
+    out="$out${rest%%'{{'*}"
+    rest=${rest#*'{{'}
+    name=${rest%%'}}'*}
+    rest=${rest#*'}}'}
+    if value=$(printf '%s\n' "$3" | answers_get - "$name"); then
+      out="$out$value"
+    else
+      out="$out{{$name}}"
+    fi
+  done
+  printf '%s\n' "$out$rest"
+}
+
+answers_questionnaire() {
+  # shellcheck disable=SC2016 # backticks here are Markdown code spans
+  printf '%s\n' '# Setup questionnaire' '' \
+    '`bin/ask questionnaire` writes this file from `shared/answers.tsv`, so a change goes in the schema, not here. Answer every question at once, then record the answers with `bin/ask setup FIELD=value…`, which writes `setup/answers.env`. In a default, `{{FIELD}}` stands for that field'"'"'s answer.' ''
+  awk -F '\t' '
+    NR > 1 && $2 == "setup" {
+      d = ($7 == "-" || $7 == "") ? "no default" : "default `" $7 "`"
+      printf "%d. %s (`%s`, %s; %s)\n", ++n, $8, $1, $3, d
+    }' "$1"
+}
+
 answers_validate() {
-  local schema=$1 file=$2 scope=$3 line n=0 key seen=" " refused=0 want field
+  local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field
   if [ "$scope" = run ]; then want=$(answers_fields "$schema"); else want=$(answers_fields "$schema" "$scope"); fi
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
@@ -199,13 +243,13 @@ answers_validate() {
       *) key="" ;;
     esac
     if ! answers__ere "$key" '[A-Z][A-Z0-9_]*'; then
-      printf '%s:%d: not a FIELD=value line: %s\n' "$file" "$n" "$line"
+      printf '%s:%d: not a FIELD=value line: %s\n' "$label" "$n" "$line"
       refused=1
       continue
     fi
     case "$seen" in
       *" $key "*)
-        printf '%s:%d: %s is given twice\n' "$file" "$n" "$key"
+        printf '%s:%d: %s is given twice\n' "$label" "$n" "$key"
         refused=1
         continue
         ;;
@@ -213,15 +257,15 @@ answers_validate() {
     seen="$seen$key "
     if ! printf '%s\n' "$want" | grep -Fxq -e "$key"; then
       if answers_col "$schema" "$key" scope >/dev/null; then
-        printf '%s:%d: %s is a %s field, not one of this file\n' "$file" "$n" "$key" \
+        printf '%s:%d: %s is a %s field, not one of this file\n' "$label" "$n" "$key" \
           "$(answers_col "$schema" "$key" scope)"
       else
-        printf '%s:%d: %s: an unknown field\n' "$file" "$n" "$key"
+        printf '%s:%d: %s: an unknown field\n' "$label" "$n" "$key"
       fi
       refused=1
       continue
     fi
-    answers_check "$schema" "$key" "${line#*=}" | P="$file:$n: " awk '{ print ENVIRON["P"] $0 }'
+    answers_check "$schema" "$key" "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
     [ "${PIPESTATUS[0]}" = 0 ] || refused=1
   done <"$file"
   while IFS= read -r field; do
@@ -229,7 +273,7 @@ answers_validate() {
     case "$seen" in
       *" $field "*) ;;
       *)
-        printf '%s: %s is missing\n' "$file" "$field"
+        printf '%s: %s is missing\n' "$label" "$field"
         refused=1
         ;;
     esac

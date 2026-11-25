@@ -19,6 +19,10 @@ A run creates one repository. It goes through four stages in order, each a folde
 
 In a stage, an agent loads its `CONTEXT.md` and only the files its `## Inputs` table names. Scripts do every write. The agent drafts, presents each checkpoint and explains failures; the operator and the deciders make the calls. None of the stages exists yet, so these checkpoints are not enforced.
 
+## Setup
+
+The operator's defaults, the setup fields of `shared/answers.tsv`, live in `setup/answers.env`. `bin/ask questionnaire` writes `setup/questionnaire.md` from the schema: every setup question at once, each with its field, type and default. The operator answers them, and `bin/ask setup FIELD=value…` records the answers, keeping each field not given and filling a missing one from its default; it refuses a value the validator in `bin/lib/answers.sh` rejects, and then writes nothing. `bin/check setup` refuses a questionnaire the schema would not produce and a setup file the validator rejects.
+
 ## The target
 
 A run renders into `<TARGET_ROOT>/<NAME>`, outside the workspace, and the target is never edited by hand; this is not enforced until `bin/verify` lands in S3.

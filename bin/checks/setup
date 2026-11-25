@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# The setup file passes the validator, and the questionnaire is bin/ask's output from the schema
+# modes: tree staged range
+#
+# AC8: reads shared/answers.tsv, setup/answers.env and setup/questionnaire.md
+# through the tree reader, and refuses a questionnaire other than what
+# `bin/ask questionnaire` writes from that schema, and a setup file that
+# bin/lib/answers.sh's validator rejects.
+set -u
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
+. "$here/../../foundation/bin/lib/tree.sh"
+# shellcheck source-path=SCRIPTDIR source=../lib/answers.sh
+. "$here/../lib/answers.sh"
+
+src=$(tree_source)
+tmp=$(mktemp -d) || exit 2
+trap 'rm -rf "$tmp"' EXIT
+refused=0
+
+# get PATH FILE: PATH's bytes in the judged tree into FILE; exit 1 when the
+# tree does not hold PATH, 2 when it cannot be read.
+get() {
+  tree_cat "$src" "$1" >"$2"
+  case $? in
+    0) return 0 ;;
+    1)
+      printf '%s is missing\n' "$1"
+      refused=1
+      return 1
+      ;;
+    *) exit 2 ;;
+  esac
+}
+
+get shared/answers.tsv "$tmp/schema" || exit 1
+faults=$(answers_schema_check "$tmp/schema") || {
+  printf '%s\n' "${faults//"$tmp/schema"/shared/answers.tsv}"
+  exit 1
+}
+
+if get setup/questionnaire.md "$tmp/questionnaire"; then
+  answers_questionnaire "$tmp/schema" >"$tmp/expected" || exit 2
+  if ! cmp -s "$tmp/expected" "$tmp/questionnaire"; then
+    printf 'setup/questionnaire.md is not what bin/ask questionnaire writes from shared/answers.tsv; run bin/ask questionnaire\n'
+    refused=1
+  fi
+else
+  printf '  run bin/ask questionnaire to write it\n'
+fi
+
+if get setup/answers.env "$tmp/answers"; then
+  answers_validate "$tmp/schema" "$tmp/answers" setup setup/answers.env || refused=1
+else
+  printf '  run bin/ask setup to write it\n'
+fi
+
+printf 'examined shared/answers.tsv, setup/answers.env and setup/questionnaire.md in %s\n' "$src"
+exit "$refused"
