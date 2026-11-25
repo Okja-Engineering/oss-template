@@ -17,7 +17,7 @@ Render a confirmed run's answers into its target with `bin/render` ([docs/workfl
 
 ## Checkpoints
 
-- To render a rendered run again, after the workspace's `HEAD` moves or at the operator's ask, run `bin/render NAME --replace`. If it refuses because the target is present, it prints that path: ask the operator "remove <that path>", and only with their yes run `bin/render NAME --replace --remove "<that path>"`; without it, stop and leave the target alone ([docs/workflow.md](../../docs/workflow.md#replacing-a-render)).
+- To render a rendered run again, after the workspace's `HEAD` moves or at the operator's ask, run `bin/render NAME --replace`. If it refuses because the target is present, also for a first render whose target a killed render left, it prints that path: ask the operator "remove <that path>", and only with their yes run `bin/render NAME --replace --remove "<that path>"`; without it, stop and leave the target alone ([docs/workflow.md](../../docs/workflow.md#replacing-a-render)).
 
 ## Outputs
 

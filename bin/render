@@ -11,17 +11,27 @@
 # nothing else (AC11). Everything is judged before anything is removed or
 # written: the answers against HEAD's schema; TARGET, still TARGET_ROOT
 # with its ~ expanded under this HOME, then /NAME (decision 227);
-# TARGET_ROOT outside every working tree of the workspace; the foundation
-# rendered in a private directory. The target is written only when it is
-# absent or an empty directory. A run already rendered needs --replace;
-# then a present target needs --remove naming it, which discards it through
-# the shared discard, bin/lib/discard.sh, after the operator's yes at stage
-# 02's checkpoint, and the run's 03 outputs are cleared, so the next verify
-# is a first run (decision 157). The target is then walked and
-# fingerprinted, its git tree id built in a private repository, never in
-# the target, and render.md records the target, the workspace SHA, the
-# answers blob id, the fingerprint and the file list. Exit 0 when done, 1
-# on a refusal, 2 on a usage error.
+# TARGET_ROOT outside every working tree of the workspace; the target
+# absent, or an empty directory; the foundation rendered in a private
+# directory. A run already rendered needs --replace. A present target, the
+# one render.md records or one a killed render left with no render.md,
+# needs --replace --remove naming it, which discards it through the shared
+# discard, bin/lib/discard.sh, after the operator's yes at stage 02's
+# checkpoint. --replace then clears the run's 03 outputs, so the next
+# verify is a first run (decision 157), and removes the old render.md.
+#
+# The write is one transaction (decision 226). Render makes TARGET_ROOT and
+# any missing ancestor, which stay, then a staging directory beside the
+# target with an exclusive mkdir; it copies the render there, walks and
+# fingerprints it there, its git tree id built in a private repository,
+# and writes render.md's text to a temporary file beside it: the target,
+# the workspace SHA, the answers blob id, the fingerprint and the file
+# list. Then, with interrupts held off, it removes an empty target with
+# rmdir and renames the staging directory to the target and the temporary
+# file to render.md. A failure or an interrupt removes only what this run
+# made: the staging directory, the temporary file, and the target when this
+# run's rename put it there. Exit 0 when done, 1 on a refusal, 2 on a usage
+# error.
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -73,11 +83,25 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$have_remove" = 0 ] || [ "$replace" = 1 ] || usage "--remove goes with --replace"
 
+# What this run made, all that a failure or an interrupt removes.
+work="" stage="" placed="" tmp=""
+cleanup() {
+  local gone
+  for gone in "$placed" "$stage"; do
+    [ -z "$gone" ] || gone=$(discard_remove "$gone") || printf 'bin/render: %s\n' "$gone" >&2
+  done
+  [ -z "$tmp" ] || rm -f -- "$tmp"
+  [ -z "$work" ] || rm -rf -- "$work"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 fault=$(git_version_ok) || refuse "$fault"
 git_hermetic || refuse "cannot build git's environment"
 cd "$ws" || refuse "cannot enter the workspace $ws"
 work=$(mktemp -d) || refuse "cannot make a temporary directory"
-trap 'rm -rf "$work"' EXIT
 
 # The answers, confirmed, against the schema at HEAD.
 head=$(git rev-parse -q --verify 'HEAD^{commit}') || refuse "the workspace has no commit at HEAD"
@@ -105,22 +129,21 @@ root=${target%/*}
 # Where it goes, and what is in the way.
 fault=$(render_root_ok "$root" "$ws") || refuse "$fault"
 render_md=stages/02-render/output/$name/render.md
-recorded=""
+if present "$render_md" && [ ! -f "$render_md" ]; then
+  refuse "$render_md is not a file; it is left alone"
+fi
+recorded=$target
 if [ -f "$render_md" ]; then
   [ "$replace" = 1 ] ||
     refuse "the run $name is rendered already; render it again with --replace, at stage 02's checkpoint"
   recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
-else
-  [ "$replace" = 0 ] || refuse "--replace: there is no render of $name to replace; run bin/render $name"
 fi
 if [ "$have_remove" = 1 ]; then
   fault=$(discard_check "$remove" "$name" "$recorded" "$target") || refuse "$fault"
-fi
-if present "$target" && ! empty_dir "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
-  if [ "$replace" = 1 ]; then
-    refuse "the target $target is present: with the operator's yes to \"remove $target\", run bin/render $name --replace --remove \"$target\""
-  fi
-  refuse "the target $target is present and not empty, and no --remove names it; it is left alone"
+elif present "$target" && ! empty_dir "$target"; then
+  refuse "the target $target is present: with the operator's yes to \"remove $target\", run bin/render $name --replace --remove \"$target\"; without it, it is left alone"
+elif [ "$replace" = 1 ] && [ ! -f "$render_md" ]; then
+  refuse "--replace: there is no render of $name to replace; run bin/render $name"
 fi
 
 # The foundation, rendered aside.
@@ -132,33 +155,45 @@ case "$?" in
   *) refuse "cannot read foundation/ at HEAD" ;;
 esac
 
-# Remove, then write.
+# The places this run writes, each made exclusively, so cleanup removes
+# nothing it did not make.
+mkdir -p "${render_md%/*}" || refuse "cannot make ${render_md%/*}"
+(set -C && : >"$render_md.tmp.$$") 2>/dev/null || refuse "cannot write beside $render_md: $render_md.tmp.$$"
+tmp=$render_md.tmp.$$
+mkdir -p "$root" || refuse "cannot make TARGET_ROOT $root"
+mkdir "$root/.$name.render.$$" 2>/dev/null || refuse "cannot make the staging directory $root/.$name.render.$$"
+stage=$root/.$name.render.$$
+
+# Remove what the operator's yes names: the old target, then the run's 03
+# outputs, then its render.md, so a failure leaves a render.md asking for
+# --replace again, and one after leaves the run unrendered.
 if [ "$have_remove" = 1 ]; then
   fault=$(discard_target "$remove" "$name" "$recorded" "$target") || refuse "$fault"
 fi
 if [ "$replace" = 1 ]; then
   fault=$(discard_remove "stages/03-verify/output/$name") || refuse "$fault"
+  fault=$(discard_remove "$render_md") || refuse "$fault"
 fi
-# written REASON...: the target this run wrote is removed, and render refuses.
-written() {
-  local gone
-  gone=$(discard_remove "$target") || refuse "$@" "$gone"
-  refuse "$@" "the target $target is removed; run bin/render $name again"
-}
-mkdir -p "$target" || refuse "cannot make the target $target"
-cp -Rp "$work/out/." "$target/" || written "cannot copy the render into $target"
-fault=$(render_walk "$target" "$RENDER_LIST") || written "the walk refuses the target:" "$fault"
-fp=$(render_fingerprint "$target" "$RENDER_LIST") || written "cannot fingerprint the target:" "$fp"
 
-mkdir -p "${render_md%/*}" || refuse "cannot make ${render_md%/*}"
-tmp=$render_md.tmp.$$
-(set -C && : >"$tmp") 2>/dev/null || refuse "cannot write beside $render_md: $tmp"
-if ! {
+# Write, in the staging directory, then one rename into place.
+cp -Rp "$work/out/." "$stage/" || refuse "cannot copy the render into $stage"
+fault=$(render_walk "$stage" "$RENDER_LIST") || refuse "the walk refuses the render:" "$fault"
+fp=$(render_fingerprint "$stage" "$RENDER_LIST") || refuse "cannot fingerprint the render:" "$fp"
+{
   printf '%s\n' "# Render of $name" '' "target: $target" "workspace: $head" "answers: $blob" \
     "fingerprint: $fp" '' '## Files' ''
   printf '%s\n' "$RENDER_LIST"
-} >"$tmp" || ! mv -f "$tmp" "$render_md"; then
-  rm -f "$tmp"
-  refuse "cannot write $render_md"
+} >"$tmp" || refuse "cannot write $tmp"
+trap '' HUP INT TERM
+if [ -d "$target" ] && [ ! -L "$target" ]; then
+  rmdir -- "$target" 2>/dev/null || refuse "the target $target is no longer an empty directory; it is left alone"
 fi
+mv -- "$stage" "$target" 2>/dev/null || refuse "cannot move the render into $target"
+if [ -e "$target/${stage##*/}" ]; then
+  stage=$target/${stage##*/}
+  refuse "the target $target appeared while render ran; it is left alone"
+fi
+placed=$target stage=""
+mv -f -- "$tmp" "$render_md" || refuse "cannot write $render_md"
+placed="" tmp=""
 printf 'bin/render: rendered %s into %s, fingerprint %s\n' "$name" "$target" "$fp"
