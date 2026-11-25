@@ -33,10 +33,18 @@ passes() {
   assert_status 0 "$ST" "passes: $1"
 }
 
-# fresh: a fixture workspace with a README and the workspace's claims.
+# fresh: a fixture workspace with a README and the workspace's claims; built
+# once, by build_fresh, and copied for each case.
 fresh() {
+  [ -d "$SCRATCH/fresh" ] || {
+    R="$SCRATCH/fresh"
+    build_fresh
+  }
   n=$((n + 1))
   R="$SCRATCH/ws$n"
+  ws_copy "$SCRATCH/fresh" "$R"
+}
+build_fresh() {
   ws_fixture "$R"
   ws_real_check "$R" claims
   put README.md '# A fixture' '' 'A workspace with no rule in it.'
@@ -72,6 +80,15 @@ refused "a line naming a path the tree does not hold" "README.md:4"
 fresh
 line 'Force pushes to main are refused by `docs/workflow.md`.'
 refused "a line naming a path outside the enforcer folders" "README.md:4"
+for p in .claude/hooks/guard.sh .github/workflows/ci.yml; do
+  fresh
+  put "$p" 'x'
+  line "Force pushes to main are refused by \`$p\`."
+  passes "the same line naming $p"
+done
+fresh
+line 'Unrequired and prerefused steps are listed.'
+passes "words that only end like rule words"
 fresh
 line 'Force pushes to main are refused; this is not enforced yet.'
 passes "the line saying it is not enforced"

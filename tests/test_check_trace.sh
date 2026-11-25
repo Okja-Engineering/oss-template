@@ -36,10 +36,18 @@ passes() {
 C1=stages/01-ask/CONTEXT.md
 
 # valid: agent files whose rule lines link a source, a contract, the human
-# docs and a deny list each entry of which CONTRIBUTING.md lists.
+# docs and a deny list each entry of which CONTRIBUTING.md lists; built once,
+# by build_valid, and copied for each case.
 valid() {
+  [ -d "$SCRATCH/valid" ] || {
+    R="$SCRATCH/valid"
+    build_valid
+  }
   n=$((n + 1))
   R="$SCRATCH/ws$n"
+  ws_copy "$SCRATCH/valid" "$R"
+}
+build_valid() {
   ws_fixture "$R"
   ws_real_check "$R" trace
   put CLAUDE.md '@AGENTS.md'
@@ -82,6 +90,12 @@ refused "an unsourced rule line in a contract" "$C1:10"
 valid
 line AGENTS.md "Don't push."
 refused "an unsourced rule line in AGENTS.md" "AGENTS.md:5"
+valid
+line CLAUDE.md 'Never push.'
+refused "an unsourced rule line in CLAUDE.md" "CLAUDE.md:2"
+valid
+line AGENTS.md 'Don’t push.'
+refused "a rule line with a curly apostrophe" "AGENTS.md:5"
 valid
 line AGENTS.md 'STOP here.'
 refused "STOP in capitals" "AGENTS.md:5"
@@ -141,6 +155,12 @@ passes "links that are not relative"
 valid
 line CONTEXT.md 'See `[not a link](absent.md)`.'
 passes "a link in a code span"
+valid
+line CONTEXT.md 'See [the settings](.claude/settings.json#permissions).'
+passes "an anchor on a file that is not Markdown, which is not judged"
+valid
+line CONTEXT.md 'See [the stages](<docs/workflow.md#stages> "The stages").'
+passes "a target in angle brackets, with a title"
 
 # Each deny entry is listed in CONTRIBUTING.md § Agent guards.
 valid
@@ -154,6 +174,16 @@ fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)
 fixture_append "$R/CONTRIBUTING.md" '`Read(**/secrets/**)` is listed under another heading.'
 fixture_commit "$R" "test: a deny entry outside the section"
 refused "a deny entry listed outside § Agent guards" "Read(**/secrets/**)"
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
+```
+## Not a heading, in a fence
+```
+- `Read(**/secrets/**)`'
+fixture_commit "$R" "test: a fence in the guards section"
+passes "a deny entry listed after a fence in § Agent guards"
 
 # Read through the tree reader.
 valid

@@ -35,11 +35,22 @@ put() { # FILE LINE...: under the workspace R
 
 # fresh: a fixture workspace holding bin/ask, bin/render, a schema with a
 # field of each kind render uses, and a foundation of templates, variants
-# and verbatim files; its setup sends targets to ROOT.
+# and verbatim files; its setup sends targets to ROOT, this case's own.
+# Built once, by build_fresh, and copied for each case, the copy's setup
+# given its ROOT: the line bin/ask setup writes, with this ROOT.
 fresh() {
+  [ -d "$SCRATCH/fresh" ] || {
+    R="$SCRATCH/fresh" ROOT="$SCRATCH/targets"
+    build_fresh
+  }
   n=$((n + 1))
   R="$SCRATCH/ws$n"
   ROOT="$SCRATCH/targets$n"
+  ws_copy "$SCRATCH/fresh" "$R"
+  sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$ROOT|" "$SCRATCH/fresh/setup/answers.env" >"$R/setup/answers.env"
+  fixture_commit "$R" "test: this case's TARGET_ROOT"
+}
+build_fresh() {
   ws_fixture "$R"
   cp -p "$WS_ROOT/bin/ask" "$WS_ROOT/bin/render" "$R/bin/"
   {
@@ -111,6 +122,8 @@ assert_eq "Listed: A Person, B Person." "$(grep '^Listed' "$ROOT/widget/GOVERNAN
 assert_eq "The Apache licence text." "$(cat "$ROOT/widget/LICENSE" 2>/dev/null)" "the selected variant is used"
 assert_eq 'echo ${{ github.sha }} {{NAME}}' "$(cat "$ROOT/widget/tool" 2>/dev/null)" "a verbatim file is copied as it is"
 assert_eq "yes" "$([ -x "$ROOT/widget/tool" ] && echo yes)" "  with its mode"
+assert_eq "no no" "$([ -x "$ROOT/widget/crlf.txt" ] && echo yes || echo no) $([ -x "$ROOT/widget/README.md" ] && echo yes || echo no)" \
+  "a 100644 file and a template arrive not executable"
 assert_eq "$(printf 'one\r\ntwo\r\n' | cksum)" "$(cksum <"$ROOT/widget/crlf.txt")" "  byte for byte"
 assert_eq "README.md" "$(readlink "$ROOT/widget/readme-link")" "a symbolic link stays one"
 assert_eq "" "$(cd "$ROOT/widget" && find . -name '*.tmpl' -o -name 'LICENSE.*')" "no template or variant name reaches the target"
@@ -298,12 +311,26 @@ assert_eq "gone" "$(gone "$R/stages/03-verify/output/widget")" "  leaves no veri
 fresh
 confirmed widget
 render widget
-mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n"
-printf '#!/bin/sh\nexit 0\n' >"$SCRATCH/stub$n/rm"
-chmod +x "$SCRATCH/stub$n/rm"
-OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n" "$SCRATCH/tmp$n"
+# rm: a stub that leaves PATH, when PATH holds NEEDLE, and is rm otherwise,
+# so render's own clean-up still runs.
+rmstub() {
+  printf '#!/bin/sh\ncase "$*" in *%s*) exit 0 ;; esac\nexec %s "$@"\n' "$1" "$(command -v rm)" >"$SCRATCH/stub$n/rm"
+  chmod +x "$SCRATCH/stub$n/rm"
+}
+rmstub "$ROOT/widget"
+OUT=$(cd "$R" && TMPDIR="$SCRATCH/tmp$n" PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
 assert_status 1 "$?" "refused: --replace whose removal fails under a stub rm"
 assert_contains "$OUT" "could not remove $ROOT/widget" "  and the refusal names the path"
+assert_eq "" "$(entries "$SCRATCH/tmp$n")" "  and leaves no temporary directory"
+# The clear of the 03 outputs, reached once the target is gone (decision
+# 211's L-4): refused naming its path, render.md kept, so --replace is
+# asked for again and clears them then.
+rmstub 03-verify
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+assert_status 1 "$?" "refused: --replace whose clear of the 03 outputs fails"
+assert_contains "$OUT" "could not remove stages/03-verify/output/widget" "  and the refusal names that path"
+assert_eq "present" "$(gone "$R/stages/02-render/output/widget/render.md")" "  and render.md stays, asking for --replace"
 
 # --- the write is one transaction (decision 226) ---------------------------------------------
 # gitstub CODE: a git first on PATH that runs CODE when called for
@@ -423,6 +450,30 @@ confirmed widget
 mkdir -p "$R/stages/02-render/output/widget/render.md/sub"
 refused "a render.md that is a directory" "render.md is not a file" widget
 assert_eq "present" "$(gone "$R/stages/02-render/output/widget/render.md/sub")" "  and it is left alone"
+# The walk, end to end: a copy that brings a file the list does not hold,
+# or an empty directory whose name holds a newline, is refused, and
+# nothing is written.
+cpstub() { # CODE: a cp first on PATH that copies, then runs CODE with $last
+  mkdir -p "$SCRATCH/cpstub$n"
+  printf '#!/bin/sh\n%s "$@" || exit\nfor a; do last=$a; done\n[ ! -d "$last" ] || { %s; }\n' "$(command -v cp)" "$1" \
+    >"$SCRATCH/cpstub$n/cp"
+  chmod +x "$SCRATCH/cpstub$n/cp"
+}
+fresh
+confirmed widget
+cpstub ': >"$last/extra"'
+OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render whose copy brings a file the list does not hold"
+assert_contains "$OUT" "the target holds a file render did not write: extra" "  and the walk says so"
+assert_eq "" "$(left)" "  with nothing written"
+fresh
+confirmed widget
+cpstub 'mkdir "$last/a
+b"'
+OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render whose copy brings an empty directory named with a newline"
+assert_contains "$OUT" "a name with a newline" "  and the walk says so"
+assert_eq "" "$(left)" "  with nothing written"
 # What render makes, it makes exclusively: a staging directory or a
 # temporary render.md planted at its name is refused and left.
 fresh
@@ -531,6 +582,52 @@ stubbed widget
 assert_status 1 "$ST" "refused: a worktree list that fails"
 assert_contains "$OUT" "cannot list the workspace's worktrees" "  and the refusal says so"
 assert_eq "" "$(left)" "  with nothing written"
+
+# --- each refusal reached, and each path rendered as it must be (T3, T6) ---------------------
+# A render.md that names no target.
+fresh
+confirmed widget
+render widget
+printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$R/stages/02-render/output/widget/render.md"
+refused "--replace when render.md names no target" "render.md names no target" widget --replace
+# A present target that only looks empty: unreadable, or a link to an empty
+# directory. Each is refused with the route, and left.
+if [ "$(id -u)" != 0 ]; then
+  fresh
+  confirmed widget
+  mkdir -p "$ROOT/widget/kept"
+  chmod 000 "$ROOT/widget"
+  refused "an unreadable target holding a directory" "--replace --remove" widget
+  chmod 755 "$ROOT/widget"
+  assert_eq "present" "$(gone "$ROOT/widget/kept")" "  and it is left whole"
+fi
+fresh
+confirmed widget
+mkdir -p "$ROOT" "$SCRATCH/emptydir$n"
+ln -s "$SCRATCH/emptydir$n" "$ROOT/widget"
+refused "a symbolic link to an empty directory at the target" "--replace --remove" widget
+assert_eq "yes" "$([ -L "$ROOT/widget" ] && echo yes)" "  and the link is left"
+assert_eq "" "$(entries "$SCRATCH/emptydir$n")" "  and nothing is written through it"
+# A directory named like a variant is not one: its files are verbatim.
+fresh
+put foundation/LICENSE.extra/notes.md 'Notes.'
+fixture_commit "$R" "test: a directory named like a variant"
+confirmed widget
+render widget
+assert_status 0 "$ST" "a directory named like a variant renders"
+assert_eq "Notes." "$(cat "$ROOT/widget/LICENSE.extra/notes.md" 2>/dev/null)" "  its files copied verbatim"
+# Render's file list is sorted: doc.md, then doc.tmpl's doc, in tree order,
+# are doc and doc.md in the list git builds the fingerprint from.
+fresh
+put foundation/doc.md 'Doc.'
+put foundation/doc.tmpl '{{NAME}}'
+fixture_commit "$R" "test: a file and a template whose names sort apart"
+confirmed widget
+render widget
+assert_status 0 "$ST" "a file and a template whose rendered names sort apart render"
+assert_eq "doc
+doc.md" "$(grep -E -x 'doc|doc\.md' "$R/stages/02-render/output/widget/render.md")" \
+  "  and render.md lists them sorted"
 
 # --- TARGET_ROOT outside every working tree of the workspace ----------------------------------
 # outside_refused DESCRIPTION NEEDLE ROOT [DIR]: a run whose TARGET_ROOT is
@@ -731,21 +828,52 @@ assert_eq "$BASE" "$(record widget fingerprint)" "render from a pre-commit hook 
 assert_eq "judged.txt" "$(git -C "$R" show --name-only --format= HEAD)" "  and the commit holds only its own change"
 
 # --- AC11: the same fingerprint, whatever the environment --------------------------------------
-for env in "TZ=Asia/Tokyo" "LC_ALL=en_US.UTF-8" "HOME=$SCRATCH" "TZ=UTC0"; do
+# stale: a line render.md must lose, so a render.md left by an earlier run
+# is not taken for this one's.
+stale() { printf 'stale: yes\n' >>"$R/stages/02-render/output/widget/render.md"; }
+# anew STATUS WHAT: the run exited 0 and wrote render.md, with the baseline.
+anew() {
+  assert_status 0 "$1" "render $2"
+  assert_eq "" "$(grep '^stale:' "$R/stages/02-render/output/widget/render.md")" "  writes its own render.md"
+  assert_eq "$BASE" "$(record widget fingerprint)" "  with the baseline fingerprint"
+}
+for env in "TZ=Asia/Tokyo" "LC_ALL=en_US.UTF-8" "TZ=UTC0"; do
+  stale
   OUT=$(cd "$R" && env "$env" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
-  assert_eq "$BASE" "$(record widget fingerprint)" "the fingerprint with $env"
+  anew "$?" "with $env"
 done
+# A real HOME, holding a global config and attributes, with the suite's own
+# isolation lifted: git would read them, and render does not.
+mkdir -p "$SCRATCH/home/.config/git"
+printf '.claude/\nbin/\n' >"$SCRATCH/home/excludes"
+printf '[core]\n\tautocrlf = true\n\texcludesFile = %s\n' "$SCRATCH/home/excludes" >"$SCRATCH/home/.gitconfig"
+printf '* text\n' >"$SCRATCH/home/.config/git/attributes"
+assert_eq "true" "$(env -u GIT_CONFIG_GLOBAL -u XDG_CONFIG_HOME HOME="$SCRATCH/home" git config --get core.autocrlf)" \
+  "a git run under that HOME reads its config"
+stale
+OUT=$(cd "$R" && env -u GIT_CONFIG_GLOBAL -u GIT_CONFIG_NOSYSTEM -u GIT_ATTR_NOSYSTEM -u XDG_CONFIG_HOME \
+  HOME="$SCRATCH/home" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+anew "$?" "with a real HOME holding a global config and attributes"
+stale
 OUT=$(cd / && "$R/bin/render" widget --replace --remove "$ROOT/widget" 2>&1)
-assert_eq "$BASE" "$(record widget fingerprint)" "the fingerprint run from another working directory"
+anew "$?" "run from another working directory"
+stale
 OUT=$(cd "$R" && umask 077 && bin/render widget --replace --remove "$ROOT/widget" 2>&1)
-assert_eq "$BASE" "$(record widget fingerprint)" "the fingerprint under umask 077"
+anew "$?" "under umask 077"
 assert_eq "$(tree_id "$ROOT/widget")" "$(record widget fingerprint)" "  and it is still the target's tree id"
+# shellcheck disable=SC2012 # ls shows the mode; stat's flags differ between BSD and GNU
+assert_eq "-rwxr-xr-x -rw-r--r--" "$(ls -l "$ROOT/widget/tool" | cut -c1-10) $(ls -l "$ROOT/widget/README.md" | cut -c1-10)" \
+  "  with each file's mode from the tree, not the umask"
 
 # --- AC12: one field changes exactly the paths it reaches ------------------------------------------
 # sums DIR: "PATH CKSUM" per file under DIR, a link by its text.
 sums() {
   (cd "$1" && find . -mindepth 1 ! -type d | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r p; do
-    if [ -L "$p" ]; then printf '%s link %s\n' "$p" "$(readlink "$p")"; else printf '%s %s\n' "$p" "$(cksum <"$p")"; fi
+    if [ -L "$p" ]; then
+      printf '%s link %s\n' "$p" "$(readlink "$p")"
+    else
+      printf '%s %s %s\n' "$p" "$([ -x "$p" ] && echo x || echo -)" "$(cksum <"$p")"
+    fi
   done)
 }
 changed() { # A B: the paths whose bytes differ, or that one of them lacks

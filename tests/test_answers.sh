@@ -239,6 +239,11 @@ assert_eq "$VALUE" "$(answers_get "$A" TITLE)" "non-ASCII, &, \\, = and \$ kept 
 assert_eq "Okja-Engineering" "$(answers_get "$A" OWNER)" "a value read back"
 answers_get "$A" NAME >/dev/null
 assert_status 1 "$?" "an absent field reads as absent"
+printf '=orphan\n' >>"$A"
+answers_get "$A" '' >/dev/null
+assert_status 1 "$?" "a line with no field before its = is no field's"
+assert_eq "TARGET_ROOT=~/Development/{{OWNER}}" "TARGET_ROOT=$(answers_default "$S" TARGET_ROOT '')" \
+  "a default's {{OWNER}} is left when the pairs lack OWNER, for the validator"
 
 mkdir "$SCRATCH/cwd"
 printf 'TITLE=$(touch made-by-value)\nCODE=`touch made-by-backticks`\n' >"$SCRATCH/cwd/answers.env"
@@ -389,5 +394,7 @@ assert_eq "A Person: the operator" "$(answers_record "$SCRATCH/record.md" by)" "
 assert_eq "abc123" "$(answers_record "$SCRATCH/record.md" answers)" "another"
 answers_record "$SCRATCH/record.md" at >/dev/null
 assert_status 1 "$?" "a key the record lacks reads as absent"
+printf '%s\n' '# Render of widget, once at target: /old' 'target: /srv/widget' >"$SCRATCH/record.md"
+assert_eq "/srv/widget" "$(answers_record "$SCRATCH/record.md" target)" "a key is read only at the start of its line"
 
 assert_done

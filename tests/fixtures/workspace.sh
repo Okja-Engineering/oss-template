@@ -8,6 +8,7 @@
 #
 # usage: . tests/fixtures/workspace.sh; ws_fixture DIR [CHECK...]
 #        ws_real_check DIR NAME   (the workspace's own bin/checks/NAME)
+#        ws_copy FROM DIR         (a built fixture, copied)
 
 WS_ROOT=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/tests/lib/fixture.sh
@@ -36,6 +37,15 @@ ws_fixture() {
   git init -q --bare -b main "$dir-origin.git" || return 1
   git -C "$dir" remote add origin "$dir-origin.git" || return 1
   git -C "$dir" push -q -u origin main 2>/dev/null || return 1
+}
+
+# ws_copy FROM DIR: a copy of the fixture workspace FROM, and of its bare
+# remote, at DIR and DIR-origin.git, DIR's origin being its own copy. A suite
+# builds a fixture once and copies it for each case, rather than building
+# the same repository again.
+ws_copy() {
+  cp -Rp "$1" "$2" && cp -Rp "$1-origin.git" "$2-origin.git" &&
+    git -C "$2" remote set-url origin "$2-origin.git"
 }
 
 # ws_real_check DIR NAME: install the workspace's own check NAME, the code

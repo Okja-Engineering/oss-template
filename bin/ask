@@ -28,7 +28,8 @@
 # names, or, with no render.md, the run's TARGET, through the shared
 # discard, bin/lib/discard.sh, after the operator's yes at stage 01's
 # checkpoint (AC9, decisions 123, 134, 149, 203, 227), and --redo clears the
-# run's confirmation and its 02 and 03 outputs.
+# run's 03 and 02 outputs and then its confirmation, so a clear that fails
+# leaves the run confirmed and its files in step.
 #
 # `confirm` writes the run's confirmed.md: who, when (UTC) and the answers
 # file's blob id, once TARGET is still TARGET_ROOT, ~ expanded under this
@@ -308,7 +309,9 @@ EOF
     fault=$(discard_target "$remove" "$name" "$recorded" "$old_target") || refuse "$fault"
   fi
   if [ "$redo" = 1 ]; then
-    for value in "$outd/confirmed.md" "$ws/stages/02-render/output/$name" "$ws/stages/03-verify/output/$name"; do
+    # What derives from the confirmation goes first, so a clear that fails
+    # leaves the run confirmed and rendered, and the redo is asked for again.
+    for value in "$ws/stages/03-verify/output/$name" "$ws/stages/02-render/output/$name" "$outd/confirmed.md"; do
       fault=$(discard_remove "$value") || refuse "$fault"
     done
   fi

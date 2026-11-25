@@ -10,6 +10,8 @@ TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/git.sh
 . "$TEST_DIR/../bin/lib/git.sh"
+# shellcheck source-path=SCRIPTDIR source=../bin/lib/render.sh
+. "$TEST_DIR/../bin/lib/render.sh"
 
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
@@ -78,11 +80,52 @@ false
 false" "$(printf '%s\n' "$ENV" | tail -n 6)" \
   "every git it starts reads core.attributesFile, core.excludesFile, core.fileMode, commit.gpgsign, core.hooksPath and core.fsmonitor from GIT_CONFIG_COUNT"
 
+# Each setting, seen at work alone (decision 167): a git run under the
+# environment, against a setting planted where it would otherwise apply.
+# GIT_DEFAULT_HASH planted before: a repository made with no
+# --object-format is SHA-1.
+OUT=$(export GIT_DEFAULT_HASH=sha256 && git_hermetic &&
+  git init -q --template= "$SCRATCH/hash" && git -C "$SCRATCH/hash" rev-parse --show-object-format 2>&1)
+assert_eq "sha1" "$OUT" "GIT_DEFAULT_HASH planted before git_hermetic does not reach git init"
+# --object-format=sha1, seen alone: under a git whose default is SHA-256,
+# which GIT_DEFAULT_HASH set after the environment stands for, the
+# fingerprint is still a SHA-1 tree id, 40 hex digits.
+mkdir -p "$SCRATCH/fp" && printf 'x\n' >"$SCRATCH/fp/file"
+OUT=$(git_hermetic && export GIT_DEFAULT_HASH=sha256 && render_fingerprint "$SCRATCH/fp" file)
+assert_eq "40" "${#OUT}" "the fingerprint is a SHA-1 tree id under a git that defaults to SHA-256"
+
 # The pathspec and trace variables, and every other GIT_* outside the recipe.
 OUT=$(export GIT_ICASE_PATHSPECS=1 GIT_GLOB_PATHSPECS=1 GIT_TRACE=/dev/stdout GIT_PLANTED=x &&
   git_hermetic && printf '%s %s %s %s\n' "${GIT_ICASE_PATHSPECS-unset}" "${GIT_GLOB_PATHSPECS-unset}" \
   "${GIT_TRACE-unset}" "${GIT_PLANTED-unset}" && git --version)
 assert_eq "unset unset unset unset
 $(git --version)" "$OUT" "GIT_ICASE_PATHSPECS, GIT_GLOB_PATHSPECS, GIT_TRACE and any other GIT_* are unset"
+# core.fileMode=false in a repository's own config: an executable is still
+# added as 100755.
+git init -q --template= "$SCRATCH/mode"
+git -C "$SCRATCH/mode" config core.fileMode false
+printf '#!/bin/sh\n' >"$SCRATCH/mode/tool"
+chmod 755 "$SCRATCH/mode/tool"
+OUT=$(git_hermetic && git -C "$SCRATCH/mode" add tool && git -C "$SCRATCH/mode" ls-files -s tool | cut -c1-6)
+assert_eq "100755" "$OUT" "a repository's core.fileMode=false does not drop the executable bit"
+# core.fsmonitor naming a hook in a repository's own config: not run.
+git init -q --template= "$SCRATCH/fsm"
+printf '#!/bin/sh\n: >"%s"\nexit 1\n' "$SCRATCH/fsm-ran" >"$SCRATCH/fsm-hook"
+chmod +x "$SCRATCH/fsm-hook"
+git -C "$SCRATCH/fsm" config core.fsmonitor "$SCRATCH/fsm-hook"
+(GIT_CONFIG_GLOBAL=/dev/null git -C "$SCRATCH/fsm" status >/dev/null 2>&1)
+assert_eq "yes" "$([ -e "$SCRATCH/fsm-ran" ] && echo yes)" "a planted core.fsmonitor hook runs without the environment"
+rm -f "$SCRATCH/fsm-ran"
+(git_hermetic && git -C "$SCRATCH/fsm" status >/dev/null 2>&1)
+assert_eq "no" "$([ -e "$SCRATCH/fsm-ran" ] && echo yes || echo no)" "  and not under it"
+# The system config and the system attributes file, planted as git would
+# find them: neither is read.
+printf '[core]\n\tautocrlf = true\n' >"$SCRATCH/system.gitconfig"
+OUT=$(git_hermetic && export GIT_CONFIG_SYSTEM="$SCRATCH/system.gitconfig" && git config --get core.autocrlf)
+assert_eq "" "$OUT" "a system config git would read is not read"
+if git var GIT_ATTR_SYSTEM >/dev/null 2>&1; then
+  OUT=$(git_hermetic && git var GIT_ATTR_SYSTEM 2>/dev/null)
+  assert_eq "" "$OUT" "git names no system attributes file to read"
+fi
 
 assert_done

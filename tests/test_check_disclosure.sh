@@ -48,10 +48,22 @@ C2=stages/02-render/CONTEXT.md
 HEADER='| Source | File/Location | Section/Scope | Why |'
 DELIM='|---|---|---|---|'
 
-# empty: a fixture workspace with the agent files and no stage.
-empty() {
+# empty: a fixture workspace with the agent files and no stage. valid: two
+# stages, routed, with every optional section, an earlier stage's output as
+# an input, and a named reference. Each is built once, by build_empty and
+# build_valid, and copied for each case.
+empty() { copy empty; }
+valid() { copy valid; }
+copy() { # KIND: the KIND fixture, built once, copied to a new R
+  [ -d "$SCRATCH/$1" ] || {
+    R="$SCRATCH/$1"
+    "build_$1"
+  }
   n=$((n + 1))
   R="$SCRATCH/ws$n"
+  ws_copy "$SCRATCH/$1" "$R"
+}
+build_empty() {
   ws_fixture "$R"
   ws_real_check "$R" disclosure
   put CLAUDE.md '@AGENTS.md'
@@ -61,10 +73,8 @@ empty() {
   fixture_commit "$R" "test: an empty workspace"
 }
 
-# valid: two stages, routed, with every optional section, an earlier stage's
-# output as an input, and a named reference.
-valid() {
-  empty
+build_valid() {
+  build_empty
   put shared/answers.tsv 'field'
   printf '%s\n%s\n' "$ROW1" "$ROW2" >>"$R/CONTEXT.md"
   put "$C1" '# 01-ask' '' '## Inputs' '' "$HEADER" "$DELIM" \

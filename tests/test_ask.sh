@@ -104,6 +104,13 @@ ask setup 'HOLDER=$(touch made-by-value) `touch made-by-backticks`'
 assert_status 0 "$ST" "setup with \$(touch x) in a value"
 assert_eq "" "$(find "$SCRATCH" -name 'made-by-*')" "  creates nothing"
 
+# A stored value its check now refuses is not written back (T6's k11).
+fresh
+ask setup
+printf 'HOLDER=a\001b\nOWNER=acme\nTARGET_ROOT=/srv/t\n' >"$R/setup/answers.env"
+refused "a stored setup value that fails its check" "setup/answers.env is not written" setup OWNER=other
+assert_contains "$OUT" "HOLDER" "  and the refusal names the stored field"
+
 fresh
 ask setup
 refused "a run field given to setup" "NAME" setup NAME=widget
@@ -173,6 +180,39 @@ rrefused() {
   assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
   assert_eq "$setup_before" "$(state)" "  and setup/answers.env is as it was"
 }
+
+# T6's survivors: a schema with no TARGET_ROOT, a default its check refuses,
+# a render.md naming no target, and a stale setup.override.env.
+ready
+grep -v '^TARGET_ROOT' "$R/shared/answers.tsv" >"$SCRATCH/schema$n" && mv "$SCRATCH/schema$n" "$R/shared/answers.tsv"
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: a run under a schema with no TARGET_ROOT"
+assert_contains "$OUT" "shared/answers.tsv has no TARGET_ROOT" "  and the refusal says so"
+assert_eq "gone" "$(gone "$ANS")" "  and writes no answers file"
+ready
+awk -F '\t' -v OFS='\t' '$1 == "TITLE" { $7 = "you must" } { print }' "$R/shared/answers.tsv" >"$SCRATCH/schema$n" &&
+  mv "$SCRATCH/schema$n" "$R/shared/answers.tsv"
+ask run widget 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: a run field's default that its check refuses"
+assert_contains "$OUT" "the answers are not written" "  and the refusal says so"
+assert_contains "$OUT" "TITLE" "  naming the field"
+assert_eq "gone" "$(gone "$ANS")" "  and writes no answers file"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$R/stages/02-render/output/widget"
+printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$R/stages/02-render/output/widget/render.md"
+ask run widget --redo 'TITLE=C'
+assert_status 1 "$ST" "refused: a redo whose render.md names no target"
+assert_contains "$OUT" "render.md names no target" "  and the refusal says so"
+assert_eq "TITLE=A" "$(grep '^TITLE=' "$ANS")" "  and the answers are as they were"
+ready
+mkdir -p "$OUTD"
+printf 'OWNER=stale\n' >"$OUTD/setup.override.env"
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 0 "$ST" "a run with no override, beside a stale setup.override.env"
+assert_eq "gone" "$(gone "$OUTD/setup.override.env")" "  removes it"
+assert_eq "OWNER=Okja-Engineering" "$(grep '^OWNER=' "$ANS")" "  and records the setup value"
+
 
 ready
 ask run widget 'TITLE=A title' 'DESCRIPTION=One line'
@@ -277,6 +317,7 @@ assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes nothing"
 mkdir -p "$R/stages/01-ask/output"
 ask confirm ../../../setup --by 'A Person'
 assert_status 1 "$ST" "confirm refuses a NAME its type refuses, as ../../../setup"
+assert_contains "$OUT" "a name is lowercase" "  by the NAME rule"
 assert_eq "gone" "$(gone "$R/setup/confirmed.md")" "  and writes nothing outside the run's folder"
 # confirm hashes as render does, in the workspace under git.sh's
 # environment, whatever repository the caller stands in (render R7).
@@ -483,6 +524,22 @@ ST=$?
 assert_status 1 "$ST" "refused: a removal that fails"
 assert_contains "$OUT" "could not remove $ROOT/widget" "  and the refusal names the path"
 assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+# The clear of the 03 outputs, reached once the target is gone, made to fail
+# by a stub rm that fails on that path only (decision 211's L-4): refused
+# naming it, with the run's files as they were, its confirmation and
+# render.md among them, so the redo is asked for again.
+rendered
+mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n"
+printf '#!/bin/sh\ncase "$*" in *03-verify*) exit 0 ;; esac\nexec %s "$@"\n' "$(command -v rm)" >"$SCRATCH/stub$n/rm"
+chmod +x "$SCRATCH/stub$n/rm"
+before=$(run_state)
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+ST=$?
+assert_status 1 "$ST" "refused: a redo whose clear of the 03 outputs fails"
+assert_contains "$OUT" "stages/03-verify/output/widget" "  and the refusal names that path"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+assert_eq "gone" "$(gone "$ROOT/widget")" "  the target, which the operator's yes removed, aside"
+
 
 
 # --- a write that fails (decision 228) ------------------------------------------------------

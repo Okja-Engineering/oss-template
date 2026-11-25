@@ -55,6 +55,12 @@ fixture_remove "$R/setup/questionnaire.md"
 fixture_commit "$R" "test: no questionnaire"
 refused "a missing questionnaire" "setup/questionnaire.md"
 
+valid
+fixture_remove "$R/shared/answers.tsv"
+fixture_commit "$R" "test: no schema"
+refused "a missing schema" "shared/answers.tsv is missing"
+assert_not_contains "$OUT" "header" "  and nothing is judged against it"
+
 # A schema that does not parse, named by its path in the tree on every bash.
 valid
 printf 'X\trun\tbogus\tno\t-\t-\t-\tX?\n' >>"$R/shared/answers.tsv"
