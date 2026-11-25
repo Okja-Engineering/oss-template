@@ -17,7 +17,7 @@ Draft a run's answers, have the operator confirm them, and record them with `bin
 ## Checkpoints
 
 - The operator confirms the answers: run `bin/ask confirm NAME --by "<operator>"`. Or the operator gives edits.
-- For edits, run `bin/ask run NAME --redo FIELD=value…`. If it refuses because the target `render.md` names is present, it prints that path: ask the operator "remove <that path>", and only with their yes run `bin/ask run NAME --redo --remove "<that path>" FIELD=value…`; without it, stop and leave the target alone ([docs/workflow.md](../../docs/workflow.md#redoing-a-run)). Then the operator confirms again.
+- For edits, run `bin/ask run NAME --redo FIELD=value…`, giving only the fields that change: the redo keeps every other answer and every `--setup-override` not given again, and an override changes only by giving it again, `--setup-override FIELD=value`. If it refuses because the target `render.md` names is present, it prints that path: ask the operator "remove <that path>", and only with their yes run `bin/ask run NAME --redo --remove "<that path>" FIELD=value…`; without it, stop and leave the target alone ([docs/workflow.md](../../docs/workflow.md#redoing-a-run)). Then the operator confirms again.
 
 ## Audit
 

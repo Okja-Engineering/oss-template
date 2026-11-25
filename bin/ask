@@ -19,7 +19,11 @@
 # for this run only and recorded in the run's setup.override.env, never in
 # setup/answers.env (decision 103); the run fields given, else their
 # defaults; NAME; and TARGET, exactly TARGET_ROOT with its ~ expanded, then
-# /NAME (decision 227). An existing run needs --redo, and a target present
+# /NAME (decision 227). A --redo keeps every run answer and every override
+# not given again, as setup keeps what it is not given: a field given
+# replaces its value, and an override is changed by giving it again, the
+# setup value making it harmless (decision 229). An existing run needs
+# --redo, and a target present
 # needs --remove naming it: --remove PATH discards the target render.md
 # names, or, with no render.md, the run's TARGET, through the shared
 # discard, bin/lib/discard.sh, after the operator's yes at stage 01's
@@ -42,6 +46,8 @@ ws=$(CDPATH='' cd -- "$here/.." && pwd)
 . "$here/lib/answers.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/discard.sh
 . "$here/lib/discard.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/git.sh
+. "$here/lib/git.sh"
 
 SCHEMA=$ws/shared/answers.tsv
 SETUP=$ws/setup/answers.env
@@ -162,6 +168,7 @@ cmd_questionnaire() {
 cmd_run() {
   local name redo=0 remove="" have_remove=0 to=run arg fault faults="" field value
   local out="" run_pairs override_pairs setup_have outd render_md recorded="" old_target="" target
+  local old_answers="" old_overrides="" line
   local answers_text override_text
   local -a run_args=() override_args=()
   [ "$#" -ge 1 ] || usage "run needs NAME"
@@ -204,6 +211,11 @@ cmd_run() {
       refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
     old_target=$(answers_get "$outd/answers.env" TARGET) ||
       refuse "stages/01-ask/output/$name/answers.env holds no TARGET"
+    old_answers=$(cat "$outd/answers.env") || refuse "cannot read stages/01-ask/output/$name/answers.env"
+    if [ -f "$outd/setup.override.env" ]; then
+      old_overrides=$(cat "$outd/setup.override.env") ||
+        refuse "cannot read stages/01-ask/output/$name/setup.override.env"
+    fi
   else
     [ "$redo" = 0 ] || refuse "there is no run $name to redo"
   fi
@@ -216,6 +228,20 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
   esac
   assignments setup ${override_args[@]+"${override_args[@]}"}
   override_pairs=$PAIRS
+  # A redo keeps each override not given again (decision 229).
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    field=${line%%=*}
+    ! answers_get - "$field" <<<"$override_pairs" >/dev/null || continue
+    [ "$(answers_col "$SCHEMA" "$field" scope)" = setup ] ||
+      refuse "stages/01-ask/output/$name/setup.override.env holds $field, which is not a setup field"
+    fault=$(answers_check "$SCHEMA" "$field" "${line#*=}") ||
+      refuse "stages/01-ask/output/$name/setup.override.env: $fault; give it again with --setup-override"
+    override_pairs="$override_pairs$line
+"
+  done <<EOF
+$old_overrides
+EOF
 
   while IFS= read -r field; do
     [ -n "$field" ] || continue
@@ -235,6 +261,9 @@ EOF
     [ -n "$field" ] && [ "$field" != NAME ] || continue
     if value=$(printf '%s' "$run_pairs" | answers_get - "$field"); then
       :
+    elif [ "$redo" = 1 ] && value=$(answers_get - "$field" <<<"$old_answers"); then
+      fault=$(answers_check "$SCHEMA" "$field" "$value") || faults="$faults$fault; give $field again
+"
     elif [ -n "$(answers_col "$SCHEMA" "$field" default)" ]; then
       value=$(answers_default "$SCHEMA" "$field" "$out")
       fault=$(answers_check "$SCHEMA" "$field" "$value") || faults="$faults$fault
@@ -298,6 +327,7 @@ cmd_confirm() {
   name=$1 who=$3
   schema_ok
   fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
+  git_hermetic || refuse "cannot build git's environment"
   outd=$ws/stages/01-ask/output/$name
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
   fault=$(answers_target_check "$outd/answers.env" "$name") ||
@@ -305,7 +335,8 @@ cmd_confirm() {
   case "$who" in
     '' | *[[:cntrl:]]*) refuse "--by names the operator on one line" ;;
   esac
-  blob=$(answers_blob "$outd/answers.env") || refuse "cannot hash $outd/answers.env"
+  # Hashed as render hashes it: in the workspace, under git.sh's environment.
+  blob=$(cd "$ws" && answers_blob "$outd/answers.env") || refuse "cannot hash $outd/answers.env"
   at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   write "$outd/confirmed.md" printf '%s\n' "# Confirmed: $name" '' "by: $who" "at: $at" "answers: $blob"
   printf 'bin/ask: wrote stages/01-ask/output/%s/confirmed.md\n' "$name"

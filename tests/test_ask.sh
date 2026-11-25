@@ -149,7 +149,16 @@ ready() {
   OUTD="$R/stages/01-ask/output/widget"
   ANS="$OUTD/answers.env"
 }
-run_state() { cksum 2>/dev/null <"$ANS" || echo absent; }
+# run_state: the run's answers file, confirmed.md and setup.override.env,
+# and its 02 and 03 outputs, so a refused redo is seen to leave them all.
+run_state() {
+  local f
+  for f in "$ANS" "$OUTD/confirmed.md" "$OUTD/setup.override.env"; do
+    if [ -e "$f" ]; then cksum <"$f"; fi
+  done
+  (cd "$R/stages" 2>/dev/null && find 02-render/output/widget 03-verify/output/widget 2>/dev/null | LC_ALL=C sort)
+  [ -e "$ANS" ] || echo absent
+}
 # rrefused DESCRIPTION NEEDLE ARGS...: bin/ask refuses, and writes no answers
 # file and no setup file.
 gone() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo gone; fi; }
@@ -161,7 +170,7 @@ rrefused() {
   ask "$@"
   assert_status 1 "$ST" "refused: $what"
   assert_contains "$OUT" "$needle" "  and the refusal says: $needle"
-  assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
+  assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
   assert_eq "$setup_before" "$(state)" "  and setup/answers.env is as it was"
 }
 
@@ -218,7 +227,11 @@ rrefused "a rule word in a text field" "never" run widget 'TITLE=It never stops'
 rrefused "an email address in a text field" "email" run widget 'TITLE=Mail a.person@example.org' 'DESCRIPTION=B'
 rrefused "a missing field" "TITLE" run widget 'DESCRIPTION=B'
 rrefused "a setup field given outside --setup-override" "OWNER" run widget 'TITLE=A' 'DESCRIPTION=B' OWNER=acme
-rrefused "a run field given to --setup-override" "TITLE" run widget 'DESCRIPTION=B' --setup-override 'TITLE=A'
+rrefused "a run field given to --setup-override" "TITLE is a run field, not a setup field" \
+  run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override 'TITLE=C'
+rrefused "a select value of two listed values joined" "VISIBILITY" \
+  run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public|private'
+rrefused "a value holding a C1 control" "C1 control" run widget "$(printf 'TITLE=A\302\205')" 'DESCRIPTION=B'
 rrefused "an override its type refuses" "OWNER" run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=-acme
 rrefused "a NAME over GitHub's limit" "100" run "$(rep 101 a)" 'TITLE=A' 'DESCRIPTION=B'
 rrefused "a NAME its type refuses" "NAME" run Widget 'TITLE=A' 'DESCRIPTION=B'
@@ -254,6 +267,28 @@ assert_status 2 "$ST" "confirm without --by is a usage error"
 ask confirm widget --by 'A
 Person'
 assert_status 1 "$ST" "confirm refuses a name holding a newline"
+rm -f "$OUTD/confirmed.md"
+ask confirm widget X 'A Person'
+assert_status 2 "$ST" "confirm NAME X WHO, without --by, is a usage error"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes nothing"
+ask confirm widget --by ''
+assert_status 1 "$ST" "confirm refuses an empty --by"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes nothing"
+mkdir -p "$R/stages/01-ask/output"
+ask confirm ../../../setup --by 'A Person'
+assert_status 1 "$ST" "confirm refuses a NAME its type refuses, as ../../../setup"
+assert_eq "gone" "$(gone "$R/setup/confirmed.md")" "  and writes nothing outside the run's folder"
+# confirm hashes as render does, in the workspace under git.sh's
+# environment, whatever repository the caller stands in (render R7).
+mkdir -p "$SCRATCH/sha256$n"
+git init -q --template= --object-format=sha256 "$SCRATCH/sha256$n"
+WANT=$(git -C "$R" hash-object --no-filters "$ANS")
+OUT=$(cd "$SCRATCH/sha256$n" && "$R/bin/ask" confirm widget --by 'A Person' 2>&1)
+assert_contains "$(cat "$OUTD/confirmed.md" 2>/dev/null)" "answers: $WANT" \
+  "confirm run from a SHA-256 repository records the workspace's blob id"
+OUT=$(cd "$R" && GIT_DIR="$SCRATCH/sha256$n/.git" bin/ask confirm widget --by 'A Person' 2>&1)
+assert_contains "$(cat "$OUTD/confirmed.md" 2>/dev/null)" "answers: $WANT" \
+  "  and with GIT_DIR naming one"
 
 # confirm holds TARGET to TARGET_ROOT, ~ expanded here, then /NAME (decision
 # 227): a TARGET edited by hand, or one written under another HOME, is
@@ -298,6 +333,40 @@ ask run widget --redo 'TITLE=C' 'DESCRIPTION=D'
 assert_status 0 "$ST" "--redo of a run never rendered needs no --remove"
 assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  and rewrites the answers"
 assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and clears the confirmation"
+
+# --redo keeps every answer and override not given again, as setup does
+# (decision 229): a field given replaces its value, and an override is
+# changed by giving it again.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=private' --setup-override OWNER=acme
+ask run widget --redo 'TITLE=C'
+assert_status 0 "$ST" "--redo given one field"
+assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  replaces it"
+assert_eq "DESCRIPTION=B" "$(grep '^DESCRIPTION=' "$ANS")" "  and keeps a run answer not given again"
+assert_eq "VISIBILITY=private" "$(grep '^VISIBILITY=' "$ANS")" "  even one that has a default"
+assert_eq "OWNER=acme" "$(grep '^OWNER=' "$ANS")" "  and keeps an override not given again"
+assert_eq "OWNER=acme" "$(cat "$OUTD/setup.override.env" 2>/dev/null)" "  still recorded in setup.override.env"
+assert_eq "HOLDER=Okja-Engineering" "$(grep '^HOLDER=' "$ANS")" "  and a setup field not overridden comes from setup"
+ask run widget --redo --setup-override OWNER=Okja-Engineering
+assert_status 0 "$ST" "--redo giving an override again"
+assert_eq "OWNER=Okja-Engineering" "$(grep '^OWNER=' "$ANS")" "  changes it"
+assert_eq "OWNER=Okja-Engineering" "$(cat "$OUTD/setup.override.env" 2>/dev/null)" \
+  "  recorded, the setup value making it harmless"
+assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  and keeps the run answers"
+# A kept answer the schema now refuses is refused, naming it.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=private'
+sed 's/public|private/public|internal/' "$R/shared/answers.tsv" >"$R/shared/answers.tsv.x" &&
+  mv "$R/shared/answers.tsv.x" "$R/shared/answers.tsv"
+rrefused "a kept answer the schema now refuses" "give VISIBILITY again" run widget --redo 'TITLE=C'
+ask run widget --redo 'TITLE=C' 'VISIBILITY=internal'
+assert_status 0 "$ST" "  and giving it again redoes the run"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=acme
+printf 'TITLE=X\n' >>"$OUTD/setup.override.env"
+rrefused "a kept override that is not a setup field" "TITLE, which is not a setup field" run widget --redo 'TITLE=C'
+printf 'OWNER=-acme\n' >"$OUTD/setup.override.env"
+rrefused "a kept override the schema refuses" "setup.override.env: OWNER" run widget --redo 'TITLE=C'
 
 rendered
 rrefused "--redo of a rendered run without --remove" "--remove" run widget --redo 'TITLE=C' 'DESCRIPTION=D'
@@ -355,7 +424,7 @@ OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove widget 'TITLE
 assert_status 1 "$?" "refused: --remove naming a relative path that render.md names"
 assert_contains "$OUT" "remove widget: it is not an absolute path" "  and the refusal says so"
 assert_eq "present" "$(gone "$ROOT/kept")" "  and TARGET_ROOT is left alone"
-assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 printf '%s\n' '# Render of widget' '' 'target: widget' >"$R/stages/02-render/output/widget/render.md"
 OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
 assert_status 1 "$?" "refused: a recorded target that is a relative path"
@@ -413,7 +482,7 @@ OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/ask run widget --redo --remove
 ST=$?
 assert_status 1 "$ST" "refused: a removal that fails"
 assert_contains "$OUT" "could not remove $ROOT/widget" "  and the refusal names the path"
-assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 
 
 # --- a write that fails (decision 228) ------------------------------------------------------
@@ -469,7 +538,7 @@ before=$(run_state)
 OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
 ST=$?
 assert_status 1 "$ST" "refused: a redo whose answers cannot be sorted"
-assert_eq "$before" "$(run_state)" "  and the answers file is as it was"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and, judged before anything is removed, the target is left alone"
 assert_eq "present" "$(gone "$OUTD/confirmed.md")" "  and the confirmation"
 assert_done

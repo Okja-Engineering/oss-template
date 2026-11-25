@@ -126,6 +126,27 @@ no CODE abc "CODE"
 ok VISIBILITY public
 ok VISIBILITY private
 no VISIBILITY secret "public|private"
+# A select value is exactly one listed value (decision 229).
+no VISIBILITY 'public|private' "public|private"
+no VISIBILITY 'public|' "public|private"
+no VISIBILITY 'publi' "public|private"
+no LICENSE 'apache-2.0|none' "apache-2.0|none"
+# Every value is valid UTF-8 with no C0, DEL or C1 control, and no U+2028 or
+# U+2029 (decision 229).
+ok TITLE "$(printf 'B\303\251 \342\202\254 \360\237\230\200 \302\240 \357\277\275')"
+no TITLE "$(printf 'a\377\376b')" "not valid UTF-8"
+no TITLE "$(printf 'a\300\257b')" "not valid UTF-8"
+no TITLE "$(printf 'a\355\240\200b')" "not valid UTF-8"
+no TITLE "$(printf 'a\364\220\200\200b')" "not valid UTF-8"
+no TITLE "$(printf 'a\303')" "not valid UTF-8"
+no TITLE "$(printf 'a\302\205b')" "C1 control"
+no TITLE "$(printf 'a\302\233b')" "C1 control"
+no TITLE "$(printf 'a\177b')" "control character"
+no TITLE "$(printf 'a\tb')" "control character"
+no TITLE "$(printf 'a\342\200\250b')" "U+2028"
+no TITLE "$(printf 'a\342\200\251b')" "U+2029"
+no OWNER "$(printf 'Okja\302\205')" "C1 control"
+no TARGET_ROOT "$(printf '/srv/t\342\200\250')" "U+2028"
 ok TEAM '@octo'
 ok TEAM '@okja-eng/maintainers'
 no TEAM octo "TEAM"
@@ -277,6 +298,16 @@ grep -v '^OWNER=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
 printf 'OWNER=Okja-Engineering' >>"$SETUP"
 answers_validate "$S" "$SETUP" setup >/dev/null
 assert_status 0 "$?" "a last line without a newline is read"
+# A NUL, which bash's read drops and awk may stop at, so readers would get
+# different values (decision 229).
+good_setup
+grep -v '^OWNER=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
+printf 'OWNER=Okja-Eng\000ineering\n' >>"$SETUP"
+vrefused "a NUL byte in a value" "NUL"
+good_setup
+grep -v '^PEOPLE=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
+printf 'PEOPLE=B\302\205\n' >>"$SETUP"
+vrefused "a C1 control in a setup file" "PEOPLE: the value is not valid UTF-8, or holds a C1 control character"
 
 # A run's answers file: every field, and TARGET.
 RUN="$SCRATCH/run.env"
@@ -317,6 +348,10 @@ good_run
 grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
 printf 'TARGET=/srv/targets/widget\r\n' >>"$RUN"
 rrefused "a TARGET holding a carriage return" "TARGET: the value holds a control character"
+good_run
+grep -v '^TARGET=' "$RUN" >"$RUN.x" && mv "$RUN.x" "$RUN"
+printf 'TARGET=/srv/targets/wid\377get\n' >>"$RUN"
+rrefused "a TARGET that is not valid UTF-8" "TARGET: the value is not valid UTF-8"
 
 # The run's TARGET is TARGET_ROOT, ~ expanded under this HOME, then /NAME,
 # exactly (decision 227).

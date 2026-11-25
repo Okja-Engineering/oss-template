@@ -14,8 +14,11 @@
 #
 # Types (AC6): name, text, description, list, select, owner, login-or-team,
 # email-or-url, url, path. `identity` lands with verify (decision 145).
-# Every value is one line: not empty, no control character (a newline, a
-# carriage return or a tab among them) and no `{{`. `text`, `description`
+# Every value is one line of valid UTF-8 (decision 229): not empty, no
+# control character, C0, DEL or C1 (a newline, a carriage return or a tab
+# among them), no U+2028 or U+2029, and no `{{`; an answers file holds no
+# NUL byte, so the validator judges the bytes every reader gets. A `select`
+# value is exactly one of its listed values. `text`, `description`
 # and `list` are free text: no email address (decisions 109, 114) and no
 # word from foundation/bin/lib/rules.sh's lists (decision 73). A `list`
 # value is its items joined by `,`, each trimmed and none empty.
@@ -77,6 +80,10 @@ ANSWERS_HEADER='field	scope	type	render	selects	pattern	default	question'
 ANSWERS_TYPES='name text description list select owner login-or-team email-or-url url path'
 ANSWERS_OWNER='[A-Za-z0-9](-?[A-Za-z0-9])*'
 ANSWERS_EMAIL='[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+# Valid UTF-8 holding no C0 control, DEL or C1 control, byte by byte under
+# LC_ALL=C: printable ASCII, then each well-formed sequence of two, three or
+# four bytes, with no overlong form, surrogate or code point past U+10FFFF.
+ANSWERS_UTF8=$'([\x20-\x7e]|\xc2[\xa0-\xbf]|[\xc3-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee\xef][\x80-\xbf][\x80-\xbf]|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf3][\x80-\xbf][\x80-\xbf][\x80-\xbf]|\xf4[\x80-\x8f][\x80-\xbf][\x80-\xbf])*'
 ANSWERS_LIB=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/rules.sh
 . "$ANSWERS_LIB/../../foundation/bin/lib/rules.sh"
@@ -138,13 +145,7 @@ answers_check() {
   }
   pattern=$(answers_col "$schema" "$field" pattern)
   default=$(answers_col "$schema" "$field" default)
-  case "$v" in
-    '') answers__no "$field" "the value is empty" ;;
-    *'
-'*) answers__no "$field" "the value holds a newline" ;;
-    *[[:cntrl:]]*) answers__no "$field" "the value holds a control character" ;;
-    *'{{'*) answers__no "$field" "the value holds {{" ;;
-  esac || return 1
+  answers__value "$field" "$v" || return 1
   case "$type" in
     name)
       answers__ere "$v" '[a-z0-9][a-z0-9._-]*' ||
@@ -174,10 +175,13 @@ answers_check() {
       done
       ;;
     select)
-      case "|$pattern|" in
-        *"|$v|"*) ;;
-        *) answers__no "$field" "the value is not one of $pattern"; return 1 ;;
-      esac
+      rest=$pattern'|'
+      while [ -n "$rest" ]; do
+        item=${rest%%|*}
+        rest=${rest#*|}
+        [ "$item" != "$v" ] || break
+      done
+      [ "$item" = "$v" ] || { answers__no "$field" "the value is not one of $pattern"; return 1; }
       ;;
     login-or-team)
       answers__ere "$v" "@$ANSWERS_OWNER(/[A-Za-z0-9]([A-Za-z0-9_-]*[A-Za-z0-9])?)?" ||
@@ -214,9 +218,7 @@ answers_check() {
 }
 
 answers_target() {
-  case "$1" in
-    *[[:cntrl:]]*) answers__no TARGET "the value holds a control character"; return 1 ;;
-  esac
+  answers__value TARGET "$1" || return 1
   answers__abs TARGET "$1"
 }
 
@@ -294,6 +296,10 @@ TARGET"
   else
     want=$(answers_fields "$schema" "$scope")
   fi
+  if [ "$(tr -d '\000' <"$file" | wc -c)" -ne "$(wc -c <"$file")" ]; then
+    printf '%s: the file holds a NUL byte, which some readers drop and others stop at\n' "$label"
+    return 1
+  fi
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     key=${line%%=*}
@@ -365,6 +371,20 @@ answers__abs() {
       return 1
       ;;
   esac
+}
+
+# answers__value FIELD VALUE: the rule every value meets, whatever its type.
+answers__value() {
+  case "$2" in
+    '') answers__no "$1" "the value is empty" ;;
+    *'
+'*) answers__no "$1" "the value holds a newline" ;;
+    *[[:cntrl:]]*) answers__no "$1" "the value holds a control character" ;;
+    *$'\xe2\x80\xa8'* | *$'\xe2\x80\xa9'*) answers__no "$1" "the value holds U+2028 or U+2029, a line or paragraph separator" ;;
+    *'{{'*) answers__no "$1" "the value holds {{" ;;
+  esac || return 1
+  answers__ere "$2" "$ANSWERS_UTF8" ||
+    answers__no "$1" "the value is not valid UTF-8, or holds a C1 control character"
 }
 
 # answers__ere VALUE ERE: the whole of VALUE, one line, matches ERE.

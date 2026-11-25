@@ -695,13 +695,15 @@ sums() {
 changed() { # A B: the paths whose bytes differ, or that one of them lacks
   diff <(sums "$1") <(sums "$2") | sed -n 's/^[<>] \([^ ]*\) .*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//'
 }
-# variant LICENSE FIELD=value...: widget redone with these answers under
-# the LICENSE given, its old target removed, rendered, and copied to $SCRATCH/v.
+# variant LICENSE FIELD=value...: widget run afresh with these answers and
+# overrides alone under the LICENSE given, its old run and target removed,
+# since a --redo keeps what it is not given (decision 229); rendered, and
+# copied to $SCRATCH/v.
 variant() {
-  local lic=$1 old
+  local lic=$1
   shift
-  old=$(record widget target)
-  ask run widget --redo --remove "$old" "DESCRIPTION=$DESC" "LICENSE=$lic" "$@" &&
+  rm -rf "$(record widget target)" "$R/stages/01-ask/output/widget" "$R/stages/02-render/output/widget"
+  ask run widget "DESCRIPTION=$DESC" "LICENSE=$lic" "$@" &&
     ask confirm widget --by 'A Person' && render widget
   rm -rf "$SCRATCH/v" && cp -R "$(record widget target)" "$SCRATCH/v"
 }
