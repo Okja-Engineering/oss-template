@@ -320,7 +320,9 @@ TARGET"
         ;;
     esac
     seen="$seen$key "
-    if ! printf '%s\n' "$want" | grep -Fxq -e "$key"; then
+    # A here-string, not a pipe: grep -q stops at its match, and under
+    # pipefail a writer it leaves mid-list fails the lookup.
+    if ! grep -Fxq -e "$key" <<<"$want"; then
       if answers_col "$schema" "$key" scope >/dev/null; then
         printf '%s:%d: %s is a %s field, not one of this file\n' "$label" "$n" "$key" \
           "$(answers_col "$schema" "$key" scope)"
@@ -389,14 +391,14 @@ answers__value() {
 
 # answers__ere VALUE ERE: the whole of VALUE, one line, matches ERE.
 answers__ere() {
-  printf '%s\n' "$1" | grep -Eq -e "^($2)\$"
+  grep -Eq -e "^($2)\$" <<<"$1"
 }
 
 # answers__free FIELD VALUE: free text holds no email address and no rule
 # word.
 answers__free() {
   local word
-  if printf '%s\n' "$2" | grep -Eq -e "$ANSWERS_EMAIL"; then
+  if grep -Eq -e "$ANSWERS_EMAIL" <<<"$2"; then
     answers__no "$1" "free text holds no email address"
     return 1
   fi

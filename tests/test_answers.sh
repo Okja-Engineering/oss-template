@@ -273,6 +273,22 @@ vrefused() { # DESCRIPTION NEEDLE
 good_setup
 answers_validate "$S" "$SETUP" setup >/dev/null
 assert_status 0 "$?" "a valid setup file passes"
+# A field found early in a long list is still this file's: the lookup reads
+# the list whole, so no reader leaves a writer to a broken pipe under
+# pipefail (the list here outgrows a pipe's buffer).
+{
+  head -n 1 "$S"
+  row AAA run text no - - - 'A?'
+  i=0
+  while [ "$i" -lt 15000 ]; do
+    row "F$i" run text no - - - 'F?'
+    i=$((i + 1))
+  done
+} >"$SCRATCH/long.tsv"
+printf 'AAA=x\n' >"$SCRATCH/long.env"
+OUT=$(answers_validate "$SCRATCH/long.tsv" "$SCRATCH/long.env" run 2>&1)
+assert_not_contains "$OUT" "not one of this file" "a field first in a long list is this file's"
+assert_not_contains "$OUT" "Broken pipe" "  and nothing writes to a broken pipe"
 good_setup
 printf 'BOGUS=1\n' >>"$SETUP"
 vrefused "an unknown field" "BOGUS"
