@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Stage 02's script (AC9-AC12): it renders a confirmed run's answers into
+# its target through bin/lib/render.sh, under hermetic git
+# (bin/lib/git.sh), and records the render in
+# stages/02-render/output/NAME/render.md.
+#
+# usage: bin/render NAME [--replace [--remove PATH]]
+#
+# It reads the run's answers.env, which confirmed.md must name by its blob
+# id, the schema and `foundation/` at the workspace's committed HEAD, and
+# nothing else (AC11). Everything is judged before anything is removed or
+# written: the answers against HEAD's schema; TARGET_ROOT outside every
+# working tree of the workspace; the foundation rendered in a private
+# directory. The target is written only when it is absent or an empty
+# directory. A run already rendered needs --replace; then a present target
+# needs --remove naming it, which discards it through the shared discard,
+# bin/lib/discard.sh, after the operator's yes at stage 02's checkpoint, and
+# the run's 03 outputs are cleared, so the next verify is a first run
+# (decision 157). The target is then walked and fingerprinted, its git tree
+# id built in a private repository, never in the target, and render.md
+# records the target, the workspace SHA, the answers blob id, the
+# fingerprint and the file list. Exit 0 when done, 1 on a refusal, 2 on a
+# usage error.
+set -u
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+ws=$(CDPATH='' cd -- "$here/.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=../foundation/bin/lib/tree.sh
+. "$here/../foundation/bin/lib/tree.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/answers.sh
+. "$here/lib/answers.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/discard.sh
+. "$here/lib/discard.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/git.sh
+. "$here/lib/git.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/render.sh
+. "$here/lib/render.sh"
+
+usage() {
+  printf 'bin/render: %s\n' "$1" >&2
+  printf '%s\n' 'usage: bin/render NAME [--replace [--remove PATH]]' >&2
+  exit 2
+}
+refuse() {
+  printf 'bin/render: %s\n' "$@" >&2
+  exit 1
+}
+
+# present PATH: something, a dangling symbolic link included, is at PATH.
+present() { [ -e "$1" ] || [ -L "$1" ]; }
+# empty_dir PATH: PATH is a directory, not a symbolic link, holding nothing.
+empty_dir() {
+  [ -d "$1" ] && [ ! -L "$1" ] && [ -z "$(ls -A -- "$1" 2>/dev/null)" ] && [ -r "$1" ]
+}
+
+[ "$#" -ge 1 ] || usage "NAME is required"
+name=$1
+shift
+replace=0 remove="" have_remove=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --replace) replace=1 ;;
+    --remove)
+      [ "$#" -ge 2 ] || usage "--remove needs PATH"
+      remove=$2 have_remove=1
+      shift
+      ;;
+    *) usage "unknown argument: $1" ;;
+  esac
+  shift
+done
+[ "$have_remove" = 0 ] || [ "$replace" = 1 ] || usage "--remove goes with --replace"
+
+fault=$(git_version_ok) || refuse "$fault"
+git_hermetic || refuse "cannot build git's environment"
+cd "$ws" || refuse "cannot enter the workspace $ws"
+work=$(mktemp -d) || refuse "cannot make a temporary directory"
+trap 'rm -rf "$work"' EXIT
+
+# The answers, confirmed, against the schema at HEAD.
+head=$(git rev-parse -q --verify 'HEAD^{commit}') || refuse "the workspace has no commit at HEAD"
+tree_cat "commit:$head" shared/answers.tsv >"$work/schema" || refuse "HEAD holds no shared/answers.tsv"
+fault=$(answers_schema_check "$work/schema") || refuse "shared/answers.tsv at HEAD does not parse:" "$fault"
+fault=$(answers_check "$work/schema" NAME "$name") || refuse "$fault"
+outd=stages/01-ask/output/$name
+[ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name, and confirm it"
+[ -f "$outd/confirmed.md" ] ||
+  refuse "the run $name has no confirmed.md; the operator confirms its answers at stage 01's checkpoint"
+cp "$outd/answers.env" "$work/answers.env" || refuse "cannot read $outd/answers.env"
+blob=$(answers_blob "$work/answers.env") || refuse "cannot hash $outd/answers.env"
+named=$(answers_record "$outd/confirmed.md" answers) || named=""
+[ "$blob" = "$named" ] ||
+  refuse "$outd/answers.env is not the answers confirmed.md names (blob $blob, not ${named:-none}); the operator confirms them again at stage 01's checkpoint"
+fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env") ||
+  refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault"
+[ "$(answers_get "$work/answers.env" NAME)" = "$name" ] || refuse "$outd/answers.env names another run"
+target=$(answers_get "$work/answers.env" TARGET)
+[ "${target##*/}" = "$name" ] || refuse "the target $target does not end in the run name $name"
+root=${target%/*}
+[ -n "$root" ] || root=/
+
+# Where it goes, and what is in the way.
+fault=$(render_root_ok "$root" "$ws") || refuse "$fault"
+render_md=stages/02-render/output/$name/render.md
+recorded=""
+if [ -f "$render_md" ]; then
+  [ "$replace" = 1 ] ||
+    refuse "the run $name is rendered already; render it again with --replace, at stage 02's checkpoint"
+  recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
+else
+  [ "$replace" = 0 ] || refuse "--replace: there is no render of $name to replace; run bin/render $name"
+fi
+if [ "$have_remove" = 1 ]; then
+  fault=$(discard_check "$remove" "$name" "$recorded" "$root") || refuse "$fault"
+fi
+if present "$target" && ! empty_dir "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
+  if [ "$replace" = 1 ]; then
+    refuse "the target $target is present: with the operator's yes to \"remove $target\", run bin/render $name --replace --remove \"$target\""
+  fi
+  refuse "the target $target is present and not empty, and no --remove names it; it is left alone"
+fi
+
+# The foundation, rendered aside.
+mkdir "$work/out" || refuse "cannot make a temporary directory"
+render_tree "$head" "$work/schema" "$work/answers.env" "$work/out" >"$work/faults"
+case "$?" in
+  0) ;;
+  1) refuse "the foundation at HEAD does not render; nothing is written:" "$(cat "$work/faults")" ;;
+  *) refuse "cannot read foundation/ at HEAD" ;;
+esac
+
+# Remove, then write.
+if [ "$have_remove" = 1 ]; then
+  fault=$(discard_target "$remove" "$name" "$recorded" "$root") || refuse "$fault"
+fi
+if [ "$replace" = 1 ]; then
+  fault=$(discard_remove "stages/03-verify/output/$name") || refuse "$fault"
+fi
+# written REASON...: the target this run wrote is removed, and render refuses.
+written() {
+  local gone
+  gone=$(discard_remove "$target") || refuse "$@" "$gone"
+  refuse "$@" "the target $target is removed; run bin/render $name again"
+}
+mkdir -p "$target" || refuse "cannot make the target $target"
+cp -Rp "$work/out/." "$target/" || written "cannot copy the render into $target"
+fault=$(render_walk "$target" "$RENDER_LIST") || written "the walk refuses the target:" "$fault"
+fp=$(render_fingerprint "$target" "$RENDER_LIST") || written "cannot fingerprint the target:" "$fp"
+
+mkdir -p "${render_md%/*}" || refuse "cannot make ${render_md%/*}"
+tmp=$render_md.tmp.$$
+(set -C && : >"$tmp") 2>/dev/null || refuse "cannot write beside $render_md: $tmp"
+if ! {
+  printf '%s\n' "# Render of $name" '' "target: $target" "workspace: $head" "answers: $blob" \
+    "fingerprint: $fp" '' '## Files' ''
+  printf '%s\n' "$RENDER_LIST"
+} >"$tmp" || ! mv -f "$tmp" "$render_md"; then
+  rm -f "$tmp"
+  refuse "cannot write $render_md"
+fi
+printf 'bin/render: rendered %s into %s, fingerprint %s\n' "$name" "$target" "$fp"
