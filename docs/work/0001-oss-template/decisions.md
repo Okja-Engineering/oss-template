@@ -2,7 +2,7 @@
 
 The decider's rulings during intake, in the decider's words, and every call made on the decider's behalf under ruling 12. The spec and plan cite this file. The rulings come from the chief of staff's intake notes, recorded at the time in chat. Only words about this template are quoted; `[…]` marks an omission.
 
-## The decider's rulings (2026-11-22 and 2026-11-23, in chat)
+## The decider's rulings (2026-11-22 to 2026-11-25, in chat)
 
 **Rulings 1–4, 18:28.** "Accept all four", accepting the chief of staff's recommendations on four open points in the intent:
 1. Measure 1's "first commit" is the commit exactly as GitHub generates it; the template must pass before `bin/init`.
@@ -50,6 +50,8 @@ What it changes:
 **Ruling 21, 23:46 (a question card in chat).** "Use noreply from now on (Recommended)", choosing that the workspace's own commits use the GitHub noreply address.
 
 **Ruling 22, 2026-11-23 20:53 CST (in chat).** "You add them", answering "Will you add the two CI checks as required on main's ruleset?" The chief of staff added `check (macos-latest)` and `check (ubuntu-latest)` to ruleset 27863825.
+
+**Ruling 23, 2026-11-25 09:07 CST (in chat).** "Fast-forward main", answering "How should PR #1 land?" after GitHub refused the rebase merge (the API reported `rebaseable: false`, with no conflicts, merge commits or empty commits among its 136 commits). The chief of staff pushed the acked head, 1144084, to `main` without force, and GitHub marked PR #1 merged.
 
 ### Design principles from rulings 15 and 16
 
@@ -327,7 +329,7 @@ Made at the gate on the first workspace spec and plan. Each gives the option tak
 
 ### Decisions under rulings 18–21 and from S1's ship gate (chief of staff, delegated under ruling 12)
 
-169. **Slices land on `main` by rebase merge** (ruling 18), because `main`'s ruleset requires linear history. The ack record is the decider's `Ack at <SHA>` pull request comment, which the chief of staff quotes on the pull request before merging; no merge commit carries it. The `commits` baseline is S1's last rebased commit on `main`, recorded when 6.1 lands, so the docs commits that predate the check stay unjudged and unrewritten. Decisions 10 and 11 still hold for produced repositories, whose merges stay squash or merge commits with rebase merging off (AC16). Amends decision 92. *Amended by decision 183.*
+169. **Slices land on `main` by rebase merge** (ruling 18), because `main`'s ruleset requires linear history. The ack record is the decider's `Ack at <SHA>` pull request comment, which the chief of staff quotes on the pull request before merging; no merge commit carries it. The `commits` baseline is S1's last rebased commit on `main`, recorded when 6.1 lands, so the docs commits that predate the check stay unjudged and unrewritten. Decisions 10 and 11 still hold for produced repositories, whose merges stay squash or merge commits with rebase merging off (AC16). Amends decision 92. *Amended by decisions 183 and 225.*
 170. **The workspace names no private repository** (ruling 19). The current text of `docs/work/` calls the upstream repository "the upstream AI-native SDLC process"; TAC40's two upstream links (§ Commits' upstream link, and § Issues and pull requests' link to the writing bar) are dropped, and contract 01's audit states the writing bar in words. Earlier commits are not rewritten. *Amended by decision 183.*
 171. **The workspace's CI is required** (rulings 20 and 22): its checks are added as required status checks on `main`'s ruleset at the decider's direction, so a red run cannot merge, and the spec's not-enforced list no longer counts the workspace's CI among its items. *Amended by decision 183.*
 172. **The workspace's own commits use the committer's GitHub noreply address** (ruling 21). No check reads commit metadata for it, so the spec lists it as not enforced.
@@ -438,3 +440,7 @@ Made at the gate on the first workspace spec and plan. Each gives the option tak
 ### Decisions from S1's seventh ship-gate fix (chief of staff, delegated under ruling 12)
 
 224. **Every tracked path is portable.** In every mode `disclosure` refuses a tracked path that holds anything but ASCII letters, digits, `.`, `_`, `-`, `/` and space, and two distinct spellings of a tracked path, or of any of its directories, that are equal under ASCII lowercasing, a case-only twin; the refusal names each offending path, both twins. So no disk that folds case or Unicode opens a tracked path as another, and every rule that judges a path by its literal spelling, stage order, `references/` and `output/` among them, is sound. Rejected: case-folding Inputs paths, because it chases each filesystem's folding and gave three wrong-cause bugs. Amends decision 223.
+
+### Decisions from S1's landing (chief of staff)
+
+225. **S1 landed by fast-forward.** S1 landed on `main` by fast-forward under ruling 23, so `main` holds S1's commits with their reviewed SHAs. The `commits` baseline is 1144084, S1's last commit on `main`, recorded when 6.1 lands. Later slices still land by rebase merge (decision 169). Amends decision 169.

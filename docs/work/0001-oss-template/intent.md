@@ -1,6 +1,6 @@
 # 0001 oss-template: intent
 
-**Status:** accepted 2026-11-22 by the decider; amended 2026-11-22 under ruling 14 by the chief of staff, and measure 1's gates amended 2026-11-22 by the chief of staff; both pending the decider's acceptance with the first slice's ack. **Decider:** Matthew Van Dusen. **Rests on:** [`research.md`](research.md), [`decisions.md`](decisions.md).
+**Status:** accepted 2026-11-22 by the decider; amended 2026-11-22 under ruling 14 by the chief of staff, and measure 1's gates amended 2026-11-22 by the chief of staff; both accepted by the decider with S1's ack, 2026-11-25 08:46 CST, in chat: "Ack at 1144084". **Decider:** Matthew Van Dusen. **Rests on:** [`research.md`](research.md), [`decisions.md`](decisions.md).
 
 ## The problem
 
