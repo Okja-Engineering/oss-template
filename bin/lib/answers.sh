@@ -1,0 +1,264 @@
+# shellcheck shell=bash
+# The one parser and validator of the field schema, shared/answers.tsv, and
+# of answers files (AC6, AC7; decisions 107, 117, 149). bin/ask and the
+# `setup` check, and later render, verify and publish, read through it.
+#
+# The schema is tab-separated, with the header
+#   field scope type render selects pattern default question
+# and one row per field: FIELD in capitals; scope `setup` or `run`; a type
+# below; render `yes` or `no`; selects, the product path the field's value
+# chooses a variant of; pattern, an extended regular expression the whole
+# value matches too, or for a `select`, its values joined by `|`; default,
+# where `{{FIELD}}` stands for another field's value; the question. A cell
+# of `-` is empty.
+#
+# Types (AC6): name, text, description, list, select, owner, login-or-team,
+# email-or-url, url, path. `identity` lands with verify (decision 145).
+# Every value is one line: not empty, no control character (a newline, a
+# carriage return or a tab among them) and no `{{`. `text`, `description`
+# and `list` are free text: no email address (decisions 109, 114) and no
+# word from foundation/bin/lib/rules.sh's lists (decision 73). A `list`
+# value is its items joined by `,`, each trimmed and none empty.
+#
+# An answers file holds one FIELD=value a line, the value everything after
+# the first `=`. It is read as data, never sourced, so no value runs.
+#
+#   answers_schema_check SCHEMA      one line out per fault; exit 0 or 1
+#   answers_fields SCHEMA [SCOPE]    the fields, in order, one a line
+#   answers_col SCHEMA FIELD COLUMN  a cell, `-` read as empty; exit 1 when
+#                                    the schema has no FIELD
+#   answers_check SCHEMA FIELD VALUE the reason VALUE is refused, if it is;
+#                                    exit 0 when accepted, 1 when refused
+#   answers_path VALUE               a `path` value with its `~` expanded
+#   answers_get FILE FIELD           FIELD's value in an answers file; exit
+#                                    1 when the file does not hold FIELD
+#   answers_validate SCHEMA FILE SCOPE
+#                                    the whole file, holding exactly the
+#                                    fields of SCOPE (`setup`, or `run` for
+#                                    every field), each once and valid; one
+#                                    line out per refusal; exit 0 or 1
+#
+# The caller exports LC_ALL=C.
+
+ANSWERS_HEADER='field	scope	type	render	selects	pattern	default	question'
+ANSWERS_TYPES='name text description list select owner login-or-team email-or-url url path'
+ANSWERS_OWNER='[A-Za-z0-9](-?[A-Za-z0-9])*'
+ANSWERS_EMAIL='[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+ANSWERS_LIB=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/rules.sh
+. "$ANSWERS_LIB/../../foundation/bin/lib/rules.sh"
+
+answers_schema_check() {
+  H=$ANSWERS_HEADER T=" $ANSWERS_TYPES " awk -F '\t' '
+    function bad(why) { printf "%s:%d: %s\n", FILENAME, FNR, why; refused = 1 }
+    FNR == 1 {
+      if ($0 != ENVIRON["H"]) bad("the header is not: " ENVIRON["H"])
+      next
+    }
+    NF != 8 { bad("a row of " NF " cells, not 8: " $0); next }
+    $1 !~ /^[A-Z][A-Z0-9_]*$/ { bad("a field name not in capitals: " $1) }
+    $1 in seen { bad("the field " $1 " is listed twice") }
+    { seen[$1] = 1 }
+    $2 != "setup" && $2 != "run" { bad($1 ": an unknown scope " $2 ", not setup or run") }
+    index(ENVIRON["T"], " " $3 " ") == 0 {
+      if ($3 == "identity") bad($1 ": the type identity, which lands with verify at 3.1")
+      else bad($1 ": an unknown type " $3)
+    }
+    $4 != "yes" && $4 != "no" { bad($1 ": a render column of " $4 ", not yes or no") }
+    $3 == "select" && ($6 == "-" || $6 == "") { bad($1 ": a select with no values in its pattern column") }
+    END { exit refused }' "$1"
+}
+
+answers_fields() {
+  S=${2:-} awk -F '\t' 'NR > 1 && (ENVIRON["S"] == "" || $2 == ENVIRON["S"]) { print $1 }' "$1"
+}
+
+answers_col() {
+  F=$2 C=$3 awk -F '\t' '
+    NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; next }
+    $1 == ENVIRON["F"] {
+      v = $(col[ENVIRON["C"]])
+      print (v == "-" ? "" : v)
+      found = 1
+      exit
+    }
+    END { exit !found }' "$1"
+}
+
+# shellcheck disable=SC2088 # a literal ~, matched and expanded here by hand
+answers_path() {
+  case "$1" in
+    '~') printf '%s\n' "$HOME" ;;
+    '~/'*) printf '%s/%s\n' "$HOME" "${1#'~/'}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+answers_check() {
+  local schema=$1 field=$2 v=$3 type pattern default item rest
+  type=$(answers_col "$schema" "$field" type) || {
+    printf '%s: an unknown field\n' "$field"
+    return 1
+  }
+  pattern=$(answers_col "$schema" "$field" pattern)
+  default=$(answers_col "$schema" "$field" default)
+  case "$v" in
+    '') answers__no "$field" "the value is empty" ;;
+    *'
+'*) answers__no "$field" "the value holds a newline" ;;
+    *[[:cntrl:]]*) answers__no "$field" "the value holds a control character" ;;
+    *'{{'*) answers__no "$field" "the value holds {{" ;;
+  esac || return 1
+  case "$type" in
+    name)
+      answers__ere "$v" '[a-z0-9][a-z0-9._-]*' ||
+        { answers__no "$field" "a name is lowercase letters, digits, ., _ and -, starting with a letter or digit"; return 1; }
+      [ "${#v}" -le 100 ] || { answers__no "$field" "a name is at most 100 characters"; return 1; }
+      case "$v" in *.git) answers__no "$field" "a name does not end .git"; return 1 ;; esac
+      ;;
+    owner)
+      answers__ere "$v" "$ANSWERS_OWNER" ||
+        { answers__no "$field" "a GitHub login is letters, digits and single hyphens between them"; return 1; }
+      [ "${#v}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return 1; }
+      ;;
+    text) answers__free "$field" "$v" || return 1 ;;
+    description)
+      answers__free "$field" "$v" || return 1
+      [ "$(printf '%s' "$v" | tr -d '\200-\277' | wc -c | tr -d ' ')" -le 350 ] ||
+        { answers__no "$field" "a description is at most 350 characters"; return 1; }
+      ;;
+    list)
+      rest=$v,
+      while [ -n "$rest" ]; do
+        item=${rest%%,*}
+        rest=${rest#*,}
+        item=$(printf '%s' "$item" | sed 's/^ *//; s/ *$//')
+        [ -n "$item" ] || { answers__no "$field" "a list holds an empty item"; return 1; }
+        answers__free "$field" "$item" || return 1
+      done
+      ;;
+    select)
+      case "|$pattern|" in
+        *"|$v|"*) ;;
+        *) answers__no "$field" "the value is not one of $pattern"; return 1 ;;
+      esac
+      ;;
+    login-or-team)
+      answers__ere "$v" "@$ANSWERS_OWNER(/[A-Za-z0-9]([A-Za-z0-9_-]*[A-Za-z0-9])?)?" ||
+        { answers__no "$field" "the value is not @login or @organization/team"; return 1; }
+      ;;
+    email-or-url)
+      [ "$v" = "$default" ] || answers__ere "$v" 'https://[^[:space:]]+' ||
+        answers__ere "$v" "$ANSWERS_EMAIL" ||
+        { answers__no "$field" "the value is not an https:// URL or an email address"; return 1; }
+      ;;
+    url)
+      answers__ere "$v" "https://github\\.com/$ANSWERS_OWNER/[A-Za-z0-9._-]+" ||
+        { answers__no "$field" "the value is not https://github.com/OWNER/REPOSITORY"; return 1; }
+      ;;
+    path)
+      # shellcheck disable=SC2088 # a literal ~, as the value holds it
+      case "$v" in
+        '~' | '~/'*) ;;
+        '~'*) answers__no "$field" "a path does not start with ~user; write ~/ or an absolute path"; return 1 ;;
+      esac
+      case "/$v/" in
+        */../*) answers__no "$field" "a path holds no .. component"; return 1 ;;
+      esac
+      case "$(answers_path "$v")" in
+        /*) ;;
+        *) answers__no "$field" "a path is absolute once ~ is expanded"; return 1 ;;
+      esac
+      ;;
+    *)
+      printf '%s: the type %s is not one this validator knows\n' "$field" "$type"
+      return 1
+      ;;
+  esac
+  if [ "$type" != select ] && [ -n "$pattern" ]; then
+    answers__ere "$v" "$pattern" || { answers__no "$field" "the value does not match $pattern"; return 1; }
+  fi
+  return 0
+}
+
+answers_get() {
+  F=$2 awk '
+    { i = index($0, "=") }
+    i > 1 && substr($0, 1, i - 1) == ENVIRON["F"] { print substr($0, i + 1); found = 1; exit }
+    END { exit !found }' "$1"
+}
+
+answers_validate() {
+  local schema=$1 file=$2 scope=$3 line n=0 key seen=" " refused=0 want field
+  if [ "$scope" = run ]; then want=$(answers_fields "$schema"); else want=$(answers_fields "$schema" "$scope"); fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    key=${line%%=*}
+    case "$line" in
+      *=*) ;;
+      *) key="" ;;
+    esac
+    if ! answers__ere "$key" '[A-Z][A-Z0-9_]*'; then
+      printf '%s:%d: not a FIELD=value line: %s\n' "$file" "$n" "$line"
+      refused=1
+      continue
+    fi
+    case "$seen" in
+      *" $key "*)
+        printf '%s:%d: %s is given twice\n' "$file" "$n" "$key"
+        refused=1
+        continue
+        ;;
+    esac
+    seen="$seen$key "
+    if ! printf '%s\n' "$want" | grep -Fxq -e "$key"; then
+      if answers_col "$schema" "$key" scope >/dev/null; then
+        printf '%s:%d: %s is a %s field, not one of this file\n' "$file" "$n" "$key" \
+          "$(answers_col "$schema" "$key" scope)"
+      else
+        printf '%s:%d: %s: an unknown field\n' "$file" "$n" "$key"
+      fi
+      refused=1
+      continue
+    fi
+    answers_check "$schema" "$key" "${line#*=}" | P="$file:$n: " awk '{ print ENVIRON["P"] $0 }'
+    [ "${PIPESTATUS[0]}" = 0 ] || refused=1
+  done <"$file"
+  while IFS= read -r field; do
+    [ -n "$field" ] || continue
+    case "$seen" in
+      *" $field "*) ;;
+      *)
+        printf '%s: %s is missing\n' "$file" "$field"
+        refused=1
+        ;;
+    esac
+  done <<EOF
+$want
+EOF
+  return "$refused"
+}
+
+answers__no() {
+  printf '%s: %s\n' "$1" "$2"
+  return 1
+}
+
+# answers__ere VALUE ERE: the whole of VALUE, one line, matches ERE.
+answers__ere() {
+  printf '%s\n' "$1" | grep -Eq -e "^($2)\$"
+}
+
+# answers__free FIELD VALUE: free text holds no email address and no rule
+# word.
+answers__free() {
+  local word
+  if printf '%s\n' "$2" | grep -Eq -e "$ANSWERS_EMAIL"; then
+    answers__no "$1" "free text holds no email address"
+    return 1
+  fi
+  if word=$(rules_word "$2"); then
+    answers__no "$1" "free text holds no rule word, and this holds \"$word\" (foundation/bin/lib/rules.sh)"
+    return 1
+  fi
+}
