@@ -12,11 +12,12 @@
 #   rules_lines claims|trace   Markdown in; "NR<TAB>LINE" out for each line
 #                              holding a word of that list, LINE as written.
 #                              YAML frontmatter and fenced blocks are not
-#                              judged, and code spans are blanked first. For
+#                              judged, and code spans are blanked first, as
+#                              links.sh's Markdown subset reads them. For
 #                              `claims` a heading is not a sentence, so no
-#                              heading line is judged: the heading rule
-#                              (decisions 173, 179), shared by the product's
-#                              `claims` and the workspace's.
+#                              heading line is judged, ATX or setext: the
+#                              heading rule (decisions 173, 179), shared by
+#                              the product's `claims` and the workspace's.
 #   rules_word TEXT            print the first word of the `trace` list, the
 #                              union of both, that TEXT holds as one line of
 #                              prose; exit 1 when it holds none.
@@ -29,11 +30,11 @@
 #                              the number of files judged.
 #
 # A line names a check when one of its code spans, or one of its relative
-# link targets, starts with a path the tree holds, as a file or a directory,
-# under bin/, .githooks/, .claude/hooks/ or .github/workflows/ (so
-# `bin/check NAME` names one); it says it is not enforced when it holds
-# "not enforced" or "unenforced", in any case. Source tree.sh and links.sh
-# first; the caller exports LC_ALL=C.
+# link targets, inline or by reference, starts with a path the tree holds,
+# as a file or a directory, under bin/, .githooks/, .claude/hooks/ or
+# .github/workflows/ (so `bin/check NAME` names one); it says it is not
+# enforced when it holds "not enforced" or "unenforced", in any case. Source
+# tree.sh and links.sh first; the caller exports LC_ALL=C.
 
 RULES_CLAIMS_WORDS='must|required|never|refuse[sd]?|blocks?|blocked|rejects?|rejected|enforce[sd]?|prevents?|prevented'
 RULES_TRACE_WORDS="always|do not|don't|don’t"
@@ -45,28 +46,7 @@ rules__scan() {
     words="$words|$RULES_TRACE_WORDS"
     caps=STOP
   fi
-  awk -v W="$words" -v CAPS="$caps" -v LIST="$1" -v MODE="$2" '
-    # spans S: S with each code span, its backticks included, blanked. A run
-    # of backticks with no closing run of the same length is text.
-    function spans(s,   out, i, n, run, j) {
-      out = ""
-      while ((i = index(s, "`")) > 0) {
-        out = out substr(s, 1, i - 1)
-        s = substr(s, i)
-        match(s, /^`+/)
-        n = RLENGTH
-        run = substr(s, 1, n)
-        j = index(substr(s, n + 1), run)
-        if (j == 0) {
-          out = out run
-          s = substr(s, n + 1)
-          continue
-        }
-        out = out sprintf("%" (j - 1 + 2 * n) "s", "")
-        s = substr(s, n + j + n)
-      }
-      return out s
-    }
+  awk -v W="$words" -v CAPS="$caps" -v LIST="$1" -v MODE="$2" "$LINKS_MD_AWK"'
     # word S: the first rule word S holds, or "".
     function word(s,   l, w) {
       l = tolower(s)
@@ -79,17 +59,34 @@ rules__scan() {
       if (CAPS != "" && match(s, "(^|[^A-Za-z0-9_])" CAPS "([^A-Za-z0-9_]|$)")) return CAPS
       return ""
     }
+    # judge NR LINE: LINE out when it holds a rule word.
+    function judge(nr, l) { if (word(md_spans(l)) != "") printf "%d\t%s\n", nr, l }
+    # flush: judge the paragraph lines held back, which no setext underline
+    # made a heading.
+    function flush(   i) {
+      for (i = 1; i <= held; i++) judge(hnr[i], hl[i])
+      held = 0
+    }
     MODE == "word" {
-      if ((w = word(spans($0))) != "") { print w; found = 1; exit }
+      if ((w = word(md_spans($0))) != "") { print w; found = 1; exit }
       next
     }
     NR == 1 && $0 == "---" { front = 1; next }
     front { if ($0 == "---" || $0 == "...") front = 0; next }
-    /^ ? ? ?(```|~~~)/ { fence = !fence; next }
-    fence { next }
-    LIST == "claims" && /^ ? ? ?#+([ \t]|$)/ { next }
-    word(spans($0)) != "" { printf "%d\t%s\n", NR, $0 }
-    END { if (MODE == "word") exit !found }'
+    {
+      k = md_block($0)
+      # For claims a paragraph line waits for the next one, an underline
+      # making the paragraph a heading.
+      if (LIST == "claims" && k == "text") { hnr[++held] = NR; hl[held] = $0; next }
+      if (k == "under" && held) { held = 0; next }
+      flush()
+      if (k == "fence" || (LIST == "claims" && k == "atx")) next
+      judge(NR, $0)
+    }
+    END {
+      if (MODE == "word") exit !found
+      flush()
+    }'
 }
 
 rules_lines() {
@@ -107,7 +104,7 @@ rules_word() {
 }
 
 rules_claims() {
-  local src=$1 listing paths file hits nr text refused=0
+  local src=$1 listing paths file hits targets nr text refused=0
   shift
   RULES_FILES=0
   listing=$(tree_list "$src" "$@") || return 2
@@ -117,9 +114,12 @@ rules_claims() {
     RULES_FILES=$((RULES_FILES + 1))
     hits=$(tree_cat "$src" "$file" | rules_lines claims) || return 2
     [ -n "$hits" ] || continue
+    # The file's links, read whole, since a reference's definition may sit on
+    # any line.
+    targets=$(tree_cat "$src" "$file" | links_targets) || return 2
     while IFS='	' read -r nr text; do
       rules__unenforced "$text" && continue
-      rules__names_check "$file" "$text" "$paths" && continue
+      rules__names_check "$file" "$text" "$paths" "$(links_on "$nr" "$targets")" && continue
       printf '%s:%s: a rule line that names no check and does not say it is not enforced: %s\n' \
         "$file" "$nr" "$text"
       refused=1
@@ -139,18 +139,19 @@ rules__unenforced() {
   return 1
 }
 
-# rules__names_check FILE LINE PATHS: LINE, in FILE, names an enforcer that
-# PATHS (the tree's paths, one per line) holds.
+# rules__names_check FILE LINE PATHS TARGETS: LINE, in FILE, names an
+# enforcer that PATHS (the tree's paths, one per line) holds, by a code span
+# or by one of TARGETS, its link targets, one per line.
 rules__names_check() {
   local file=$1 text=$2 paths=$3 cands target resolved cand
   cands=$(rules__spans "$text")
-  while IFS='	' read -r _ target; do
+  while IFS= read -r target; do
     [ -n "$target" ] || continue
     resolved=$(links_resolve "$file" "$target") || continue
     cands="$cands
 ${resolved%%#*}"
   done <<EOF
-$(printf '%s\n' "$text" | links_targets)
+$4
 EOF
   while IFS= read -r cand; do
     case "$cand" in

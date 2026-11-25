@@ -28,10 +28,15 @@
 #
 #   answers_schema_check SCHEMA [NAME]
 #                                    one line out per fault, naming the file
-#                                    NAME (SCHEMA by default); exit 0 or 1
+#                                    NAME (SCHEMA by default), a field named
+#                                    TARGET, a selects cell on a type other
+#                                    than select and a default naming a
+#                                    field not listed before it among them;
+#                                    exit 0 or 1
 #   answers_fields SCHEMA [SCOPE]    the fields, in order, one a line
 #   answers_col SCHEMA FIELD COLUMN  a cell, `-` read as empty; exit 1 when
-#                                    the schema has no FIELD
+#                                    the schema has no FIELD, 2 when it has
+#                                    no COLUMN
 #   answers_check SCHEMA FIELD VALUE the reason VALUE is refused, if it is;
 #                                    exit 0 when accepted, 1 when refused
 #   answers_path VALUE               a `path` value with its `~` expanded;
@@ -85,6 +90,9 @@ ANSWERS_EMAIL='[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
 # four bytes, with no overlong form, surrogate or code point past U+10FFFF.
 ANSWERS_UTF8=$'([\x20-\x7e]|\xc2[\xa0-\xbf]|[\xc3-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee\xef][\x80-\xbf][\x80-\xbf]|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf3][\x80-\xbf][\x80-\xbf][\x80-\xbf]|\xf4[\x80-\x8f][\x80-\xbf][\x80-\xbf])*'
 ANSWERS_LIB=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# rules.sh reads Markdown through links.sh's subset.
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/links.sh
+. "$ANSWERS_LIB/../../foundation/bin/lib/links.sh"
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/rules.sh
 . "$ANSWERS_LIB/../../foundation/bin/lib/rules.sh"
 
@@ -106,7 +114,23 @@ answers_schema_check() {
     }
     $4 != "yes" && $4 != "no" { bad($1 ": a render column of " $4 ", not yes or no") }
     $3 == "select" && ($6 == "-" || $6 == "") { bad($1 ": a select with no values in its pattern column") }
-    END { exit refused }' "$1"
+    $1 == "TARGET" { bad("the field TARGET, which is a run file'"'"'s own line, not a field") }
+    $5 != "-" && $5 != "" && $3 != "select" { bad($1 ": selects " $5 ", but only a select selects a path") }
+    # A default names only fields listed before it, which are given first.
+    {
+      d = $7
+      while (match(d, /[{][{][A-Z][A-Z0-9_]*[}][}]/)) {
+        x = substr(d, RSTART + 2, RLENGTH - 4)
+        if (!(x in before)) bad($1 ": a default naming {{" x "}}, which no earlier field is")
+        d = substr(d, RSTART + RLENGTH)
+      }
+      before[$1] = 1
+    }
+    # An empty schema has no header line either.
+    END {
+      if (NR == 0) printf "%s:1: the header is not: %s\n", ENVIRON["L"], ENVIRON["H"]
+      exit refused || NR == 0
+    }' "$1"
 }
 
 answers_fields() {
@@ -115,14 +139,25 @@ answers_fields() {
 
 answers_col() {
   F=$2 C=$3 awk -F '\t' '
-    NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; next }
+    NR == 1 {
+      for (i = 1; i <= NF; i++) col[$i] = i
+      if (!(ENVIRON["C"] in col)) {
+        printf "answers: the schema has no column %s\n", ENVIRON["C"] >"/dev/stderr"
+        nocol = 1
+        exit
+      }
+      next
+    }
     $1 == ENVIRON["F"] {
       v = $(col[ENVIRON["C"]])
       print (v == "-" ? "" : v)
       found = 1
       exit
     }
-    END { exit !found }' "$1"
+    END {
+      if (nocol) exit 2
+      exit !found
+    }' "$1"
 }
 
 # shellcheck disable=SC2088 # a literal ~, matched and expanded here by hand

@@ -155,6 +155,53 @@ passes "links that are not relative"
 valid
 line CONTEXT.md 'See `[not a link](absent.md)`.'
 passes "a link in a code span"
+
+# Links by reference resolve, and source a rule line, as inline ones do.
+valid
+line CONTEXT.md 'See [the doc][d].'
+line CONTEXT.md '[d]: docs/absent.md'
+refused "a reference whose definition names an unresolved path" "docs/absent.md"
+valid
+line CONTEXT.md '[e]: docs/workflow.md#nowhere'
+refused "a definition no link uses, naming an unresolved anchor" "docs/workflow.md#nowhere"
+valid
+line AGENTS.md 'Never push ([workflow][w]).'
+line AGENTS.md '[w]: docs/workflow.md#stages'
+passes "a rule line sourced by a reference, its definition on another line"
+valid
+line AGENTS.md 'Never push ([workflow][]).'
+line AGENTS.md '[Workflow]: docs/workflow.md#stages'
+passes "a collapsed reference, its label in another case"
+valid
+line AGENTS.md 'Never push ([workflow]).'
+line AGENTS.md '[workflow]: docs/workflow.md#stages'
+passes "a shortcut reference"
+valid
+line AGENTS.md 'Never push ([workflow]).'
+refused "a label no definition gives, which is not a link" "AGENTS.md:5"
+
+# Anchors drop markup as GitHub does (C7).
+valid
+line docs/workflow.md '## The _first_ step'
+line docs/workflow.md '## A snake_case name'
+line docs/workflow.md '## An _emphasised snake_case_ name'
+line CONTEXT.md 'See [first](docs/workflow.md#the-first-step) and [snake](docs/workflow.md#a-snake_case-name).'
+line CONTEXT.md 'See [both](docs/workflow.md#an-emphasised-snake_case-name).'
+passes "anchors with emphasis underscores dropped, and an underscore inside a word kept"
+valid
+line docs/workflow.md '## The _first_ step'
+line CONTEXT.md 'See [first](docs/workflow.md#the-_first_-step).'
+refused "an anchor that keeps emphasis underscores" "docs/workflow.md#the-_first_-step"
+valid
+line docs/workflow.md '## The `_first_` step'
+line CONTEXT.md 'See [first](docs/workflow.md#the-_first_-step).'
+passes "an anchor keeping the underscores of a code span"
+valid
+line docs/workflow.md ''
+line docs/workflow.md 'A setext heading'
+line docs/workflow.md '----------------'
+line CONTEXT.md 'See [it](docs/workflow.md#a-setext-heading).'
+passes "the anchor of a setext heading"
 valid
 line CONTEXT.md 'See [the settings](.claude/settings.json#permissions).'
 passes "an anchor on a file that is not Markdown, which is not judged"

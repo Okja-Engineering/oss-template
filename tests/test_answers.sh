@@ -104,6 +104,22 @@ bad_schema "a field listed twice" "X"
 bad_schema "a field name not in capitals" "lower"
 { head -n 1 "$S"; row X run text no - - - 'X?' extra; } >"$BAD"
 bad_schema "a row of nine cells" "X"
+: >"$BAD"
+bad_schema "an empty schema, with no header" "the header is not"
+{ head -n 1 "$S"; row TARGET run path no - - - 'X?'; } >"$BAD"
+bad_schema "a field named TARGET, the run file's own line" "TARGET"
+{ head -n 1 "$S"; row X run text no LICENSE - - 'X?'; } >"$BAD"
+bad_schema "selects on a type other than select" "only a select selects"
+{ head -n 1 "$S"; row X run text no - - '{{Y}} and more' 'X?'; row Y run text no - - - 'Y?'; } >"$BAD"
+bad_schema "a default naming a field later in the schema" "{{Y}}"
+{ head -n 1 "$S"; row X run text no - - '{{X}}' 'X?'; } >"$BAD"
+bad_schema "a default naming its own field" "{{X}}"
+{ head -n 1 "$S"; row Y run text no - - - 'Y?'; row X run text no - - '{{Y}} and more' 'X?'; } >"$BAD"
+answers_schema_check "$BAD" >/dev/null
+assert_status 0 "$?" "a default naming an earlier field is accepted"
+OUT=$(answers_col "$S" NAME nosuchcolumn 2>&1)
+assert_status 2 "$?" "answers_col with an unknown column exits 2"
+assert_eq "answers: the schema has no column nosuchcolumn" "$OUT" "  and prints only that, not the row"
 
 # --- each type, and the pattern column ----------------------------------------
 ok NAME my-repo.x_2

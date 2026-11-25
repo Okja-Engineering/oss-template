@@ -75,6 +75,14 @@ fresh
 line 'Force pushes to main are refused by [the hook](.githooks/pre-push).'
 passes "the same line linking a hook under .githooks/"
 fresh
+put README.md '# A fixture' '' 'Force pushes to main are refused by [the hook][h].' '' '[h]: .githooks/pre-push'
+fixture_commit "$R" "test: a reference link"
+passes "the same line linking a hook by reference, its definition on another line"
+fresh
+put README.md '# A fixture' '' 'Force pushes to main are refused by [the hook][h].' '' '[h]: docs/workflow.md'
+fixture_commit "$R" "test: a reference link outside the enforcer folders"
+refused "a line linking by reference a path outside the enforcer folders" "README.md:3"
+fresh
 line 'Force pushes to main are refused by `bin/absent`.'
 refused "a line naming a path the tree does not hold" "README.md:4"
 fresh
@@ -120,6 +128,18 @@ refused "the same words in a sentence naming no check" "README.md:4"
 fresh
 line '### Never pushed'
 passes "a heading of any level"
+fresh
+put README.md 'What is enforced' '================' '' 'Never pushed' '------------'
+fixture_commit "$R" "test: setext headings"
+passes "a setext heading, of either level"
+fresh
+put README.md '# A fixture' '' 'Force pushes to main are refused.' '' '---'
+fixture_commit "$R" "test: a thematic break"
+refused "a sentence followed by a blank line and a thematic break" "README.md:3"
+fresh
+put README.md '# A fixture' '' '- Force pushes to main are refused.' '---'
+fixture_commit "$R" "test: a list item over a thematic break"
+refused "a list item over a thematic break" "README.md:3"
 
 # What is not prose.
 fresh

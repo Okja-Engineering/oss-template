@@ -311,7 +311,22 @@ assert_eq "gone" "$(gone "$R/stages/03-verify/output/widget")" "  leaves no veri
 fresh
 confirmed widget
 render widget
-mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n" "$SCRATCH/tmp$n"
+mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n"
+# mktemp: a stub in DIR that is mktemp, noting each path it makes, so a test
+# sees each one gone (macOS's mktemp does not heed TMPDIR); leftover prints
+# each noted path still present.
+mkstub() {
+  printf '#!/bin/sh\np=$(%s "$@") || exit\nprintf "%%s\\n" "$p" >>"%s"\nprintf "%%s\\n" "$p"\n' \
+    "$(command -v mktemp)" "$SCRATCH/made$n" >"$1/mktemp"
+  chmod +x "$1/mktemp"
+}
+leftover() {
+  local p
+  while IFS= read -r p; do
+    if [ -e "$p" ] || [ -L "$p" ]; then printf '%s\n' "$p"; fi
+  done <"$SCRATCH/made$n"
+}
+mkstub "$SCRATCH/stub$n"
 # rm: a stub that leaves PATH, when PATH holds NEEDLE, and is rm otherwise,
 # so render's own clean-up still runs.
 rmstub() {
@@ -319,10 +334,11 @@ rmstub() {
   chmod +x "$SCRATCH/stub$n/rm"
 }
 rmstub "$ROOT/widget"
-OUT=$(cd "$R" && TMPDIR="$SCRATCH/tmp$n" PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
 assert_status 1 "$?" "refused: --replace whose removal fails under a stub rm"
 assert_contains "$OUT" "could not remove $ROOT/widget" "  and the refusal names the path"
-assert_eq "" "$(entries "$SCRATCH/tmp$n")" "  and leaves no temporary directory"
+assert_eq "yes" "$([ -s "$SCRATCH/made$n" ] && echo yes)" "  having made temporary files"
+assert_eq "" "$(leftover)" "  and leaves none of them"
 # The clear of the 03 outputs, reached once the target is gone (decision
 # 211's L-4): refused naming its path, render.md kept, so --replace is
 # asked for again and clears them then.
@@ -572,6 +588,29 @@ twin foundation/lnk/x 100644
 confirmed widget
 refused "a link and a directory that differ only in case" "differ only in case" widget
 assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  and nothing is written through the link"
+# A template with CRLF line endings repeats its list line per item, each
+# item's line ending CRLF too.
+fresh
+put foundation/crlf-list.md.tmpl "$(printf 'Deciders:\r\n- {{PEOPLE}}\r\nEnd.\r')"
+fixture_commit "$R" "test: a CRLF template with a list line"
+confirmed widget
+render widget
+assert_eq "$(printf 'Deciders:\r\n- A Person\r\n- B Person\r\nEnd.\r')" "$(cat "$ROOT/widget/crlf-list.md")" \
+  "a CRLF list line is repeated per item, each line ending CRLF"
+# A render that fails partway, exit 2 in render_tree, leaves no temporary
+# directory.
+fresh
+confirmed widget
+mkdir -p "$SCRATCH/gstub$n"
+printf '#!/bin/sh\ncase "$*" in *"cat-file blob"*foundation/*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v git)" \
+  >"$SCRATCH/gstub$n/git"
+chmod +x "$SCRATCH/gstub$n/git"
+mkstub "$SCRATCH/gstub$n"
+OUT=$(cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a foundation file git cannot read"
+assert_contains "$OUT" "cannot read foundation/ at HEAD" "  as a read that failed partway"
+assert_eq "yes" "$([ -s "$SCRATCH/made$n" ] && echo yes)" "  having made temporary files"
+assert_eq "" "$(leftover)" "  and leaves none of them"
 # The worktree list's exit status is read.
 fresh
 confirmed widget

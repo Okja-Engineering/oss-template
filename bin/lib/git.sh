@@ -29,8 +29,12 @@
 
 git_version_ok() {
   local out version major minor
+  if ! command -v git >/dev/null 2>&1; then
+    printf 'git is missing; install git 2.36 or later\n'
+    return 1
+  fi
   if ! out=$(git --version 2>/dev/null); then
-    printf 'git is missing, or git --version failed; install git 2.36 or later\n'
+    printf 'git --version failed: %s\n' "$(git --version 2>&1)"
     return 1
   fi
   case "$out" in
@@ -45,8 +49,10 @@ git_version_ok() {
   major=${version%%.*}
   minor=${version#*.}
   minor=${minor%%.*}
-  case "$major:$minor" in
-    *[!0-9:]*)
+  # Each of major and minor is digits, neither empty: major starts with one,
+  # by the pattern above, and minor is empty after `2..`.
+  case "$major.$minor" in
+    *. | *[!0-9.]*)
       printf 'git reports a version this workspace cannot read: %s\n' "$out"
       return 1
       ;;

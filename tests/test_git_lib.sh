@@ -19,7 +19,7 @@ REAL_GIT=$(command -v git)
 mkdir "$SCRATCH/bin"
 # A git that reports the version VERSION names and is the real git otherwise.
 # shellcheck disable=SC2016 # the stub's text, expanded when it runs
-printf '#!/bin/sh\nif [ "$1" = --version ]; then printf "git version %%s\\n" "$VERSION"; exit 0; fi\nexec %s "$@"\n' \
+printf '#!/bin/sh\nif [ "$1" = --version ]; then\n  [ "$VERSION" != fail ] || { echo "fatal: bad config line 1" >&2; exit 128; }\n  printf "git version %%s\\n" "$VERSION"; exit 0\nfi\nexec %s "$@"\n' \
   "$REAL_GIT" >"$SCRATCH/bin/git"
 chmod +x "$SCRATCH/bin/git"
 
@@ -36,7 +36,13 @@ for v in 2.36.0 2.100.0 3.0.0 '2.50.1 (Apple Git-155)'; do
 done
 gate 1.99.99
 assert_status 1 "$ST" "git 1.99.99 is refused"
-for v in 'something else' '2' '2.3x'; do
+gate fail
+assert_status 1 "$ST" "a git whose --version fails is refused"
+assert_contains "$OUT" "git --version failed: fatal: bad config line 1" "  with git's own reason"
+assert_not_contains "$OUT" "missing" "  and not as a missing git"
+OUT=$(PATH=/nonexistent git_version_ok 2>&1)
+assert_contains "$OUT" "git is missing" "a git not on PATH is reported missing"
+for v in 'something else' '2' '2.3x' '2..36' '.36.0'; do
   gate "$v"
   assert_status 1 "$ST" "a version the gate cannot read, '$v', is refused"
   assert_contains "$OUT" "cannot read" "  as one it cannot read"

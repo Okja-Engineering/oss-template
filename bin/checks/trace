@@ -7,8 +7,9 @@
 # foundation/bin/lib/rules.sh's `trace` list links docs/workflow.md,
 # CONTRIBUTING.md or GOVERNANCE.md; every relative link and anchor resolves,
 # through foundation/bin/lib/links.sh; and each deny entry in
-# .claude/settings.json appears in CONTRIBUTING.md § Agent guards.
-# foundation/, docs/adr/, docs/work/ and tests/fixtures/ are not judged.
+# .claude/settings.json appears in CONTRIBUTING.md § Agent guards. The
+# agent files are the top level's and stages/*/CONTEXT.md, so none lies
+# under foundation/, docs/adr/, docs/work/ or tests/fixtures/.
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -24,22 +25,22 @@ SOURCES='docs/workflow.md CONTRIBUTING.md GOVERNANCE.md'
 src=$(tree_source)
 all=$(tree_list "$src") || exit 2
 paths=$(printf '%s\n' "$all" | sed 's/^[^	]*	//')
-judged=$(tree_list "$src" foundation/ docs/adr/ docs/work/ tests/fixtures/) || exit 2
-agents=$(printf '%s\n' "$judged" | sed 's/^[^	]*	//' | awk '
+agents=$(printf '%s\n' "$paths" | awk '
   $0 == "AGENTS.md" || $0 == "CLAUDE.md" || $0 == "CONTEXT.md" ||
     $0 ~ /^stages\/[^\/]+\/CONTEXT\.md$/')
 refused=0
 files=0
 
-# sourced FILE LINE: LINE, in FILE, links one of SOURCES.
+# sourced FILE TARGETS: one of TARGETS, link targets in FILE one a line, is
+# one of SOURCES.
 sourced() {
   local target resolved
-  while IFS='	' read -r _ target; do
+  while IFS= read -r target; do
     [ -n "$target" ] || continue
     resolved=$(links_resolve "$1" "$target") || continue
     case " $SOURCES " in *" ${resolved%%#*} "*) return 0 ;; esac
   done <<EOF
-$(printf '%s\n' "$2" | links_targets)
+$2
 EOF
   return 1
 }
@@ -48,9 +49,12 @@ while IFS= read -r file; do
   [ -n "$file" ] || continue
   files=$((files + 1))
   hits=$(tree_cat "$src" "$file" | rules_lines trace) || exit 2
+  # The file's links, read whole, since a reference's definition may sit on
+  # any line.
+  targets=$(tree_cat "$src" "$file" | links_targets) || exit 2
   while IFS='	' read -r nr text; do
     [ -n "$nr" ] || continue
-    sourced "$file" "$text" && continue
+    sourced "$file" "$(links_on "$nr" "$targets")" && continue
     printf '%s:%s: a rule line that links none of %s: %s\n' "$file" "$nr" "$SOURCES" "$text"
     refused=1
   done <<EOF

@@ -149,15 +149,15 @@ EOF
     fi
     produced="$produced$name
 "
-    mkdir -p "$out/$(dirname "$name")" || return 2
+    mkdir -p "$out/$(dirname "$name")" || { refused=2; break; }
     if [ "$mode" = 120000 ]; then
-      v=$(tree_cat "commit:$commit" "foundation/$rel" && printf x) || return 2
-      ln -s "${v%x}" "$out/$name" || return 2
+      v=$(tree_cat "commit:$commit" "foundation/$rel" && printf x) || { refused=2; break; }
+      ln -s "${v%x}" "$out/$name" || { refused=2; break; }
       continue
     fi
     if [ "$tmpl" = 1 ]; then
-      tree_cat "commit:$commit" "foundation/$rel" >"$tmp/in" || return 2
-      render__substitute "$tmp/fields" "foundation/$rel" "$tmp/in" >"$out/$name" 2>"$tmp/err" || return 2
+      tree_cat "commit:$commit" "foundation/$rel" >"$tmp/in" || { refused=2; break; }
+      render__substitute "$tmp/fields" "foundation/$rel" "$tmp/in" >"$out/$name" 2>"$tmp/err" || { refused=2; break; }
       if [ -s "$tmp/err" ]; then
         cat "$tmp/err"
         refused=1
@@ -166,12 +166,15 @@ EOF
         refused=1
       fi
     else
-      tree_cat "commit:$commit" "foundation/$rel" >"$out/$name" || return 2
+      tree_cat "commit:$commit" "foundation/$rel" >"$out/$name" || { refused=2; break; }
     fi
     if [ "$mode" = 100755 ]; then chmod 755 "$out/$name"; else chmod 644 "$out/$name"; fi
   done 3<<EOF
 $entries
 EOF
+  # One clean-up, also for a read or write that failed inside the loop.
+  rm -rf "$tmp"
+  [ "$refused" != 2 ] || return 2
   # A selecting field whose value no variant matches.
   while IFS='	' read -r field path values value; do
     [ -n "$field" ] || continue
@@ -181,7 +184,6 @@ EOF
   done <<EOF
 $sel
 EOF
-  rm -rf "$tmp"
   # shellcheck disable=SC2034 # RENDER_LIST is read by the caller
   RENDER_LIST=$(printf '%s' "$produced" | sort)
   return "$refused"
@@ -234,14 +236,16 @@ render__substitute() {
     }
     {
       if (NR > 1) printf "\n"
-      if (match($0, /^- [{][{][A-Z_][A-Z0-9_]*[}][}]$/)) {
-        name = substr($0, 5, length($0) - 6)
+      # A list line, `- {{FIELD}}`, its CR kept on the line of each item.
+      if (match($0, /^- [{][{][A-Z_][A-Z0-9_]*[}][}]\r?$/)) {
+        cr = ($0 ~ /\r$/) ? "\r" : ""
+        name = substr($0, 5, length($0) - 6 - length(cr))
         if ((name in val) && type[name] == "list") {
           n = split(val[name], items, ",")
           for (k = 1; k <= n; k++) {
             item = items[k]
             sub(/^ +/, "", item); sub(/ +$/, "", item)
-            printf "%s- %s", (k == 1 ? "" : "\n"), item
+            printf "%s- %s%s", (k == 1 ? "" : "\n"), item, cr
           }
           next
         }
