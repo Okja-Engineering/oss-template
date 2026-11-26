@@ -163,6 +163,16 @@ cannot_judge grep '-Eq -e ^((\[*' 1 "a value of setup/answers.env"
 # setup/given.env's first line.
 cannot_judge grep '-Eq -e ^(\[A-Z]\[A-Z0-9_]*' "$(($(wc -l <"$R/setup/answers.env") + 1))" "a line of setup/given.env"
 cannot_judge awk '*!found && i > 1*' 1 "what was given, for setup/answers.env"
+# setup/given.env's own judge: the scope of a field it gives, a lookup only
+# it makes of a valid tree, and the sort of its lines (conformance N-I's n17
+# and n18 of S2's fourth ship gate).
+mkdir -p "$SCRATCH/scope$n"
+printf '#!/bin/sh\n[ "$C" != scope ] || exit 2\nexec %s "$@"\n' "$(command -v awk)" >"$SCRATCH/scope$n/awk"
+chmod +x "$SCRATCH/scope$n/awk"
+OUT=$(cd "$R" && PATH="$SCRATCH/scope$n:$PATH" bin/checks/setup 2>&1)
+assert_status 2 "$?" "the check cannot run when it cannot read the scope of a field setup/given.env gives"
+assert_not_contains "$OUT" "is not a setup field" "  and names no refusal"
+cannot_judge sort '' 1 "the order of setup/given.env"
 OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/setup 2>&1)
 assert_status 2 "$?" "the check cannot run on a commit that does not exist"
 assert_not_contains "$OUT" "examined" "  and judges nothing"
