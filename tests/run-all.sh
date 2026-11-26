@@ -69,13 +69,16 @@ trap 'stop 129' HUP
 trap 'stop 130' INT
 trap 'stop 143' TERM
 
-# A worker runs, one after another, each suite it claims first: the claim is
-# an exclusive mkdir, so each suite runs once, by whichever worker is free.
+# A worker runs, one after another, each suite it claims first, so each
+# suite runs once, by whichever worker is free. The claim is a file the
+# shell itself creates exclusively, noclobber opening an absent file with
+# O_EXCL: mkdir(1) need not refuse the second of two racing callers, and
+# Ubuntu 26.04's, uutils coreutils 0.10, lets both succeed most times.
 work() {
   local i=0 s
   for s in "${suites[@]}"; do
     i=$((i + 1))
-    mkdir "$tmp/claim.$i" 2>/dev/null || continue
+    (set -C && : >"$tmp/claim.$i") 2>/dev/null || continue
     { bash "$s" </dev/null; } >"$tmp/$i.out" 2>&1
     printf '%s\n' "$?" >"$tmp/$i.status"
   done
