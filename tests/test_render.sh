@@ -510,6 +510,119 @@ assert_status 1 "$?" "refused: a symbolic link planted at render.md's temporary 
 assert_eq "gone" "$(gone "$SCRATCH/linked$n")" "  and nothing is written through it"
 assert_eq "gone" "$(gone "$ROOT/widget")" "  nor to the target"
 assert_eq "1" "$(entries "$R/stages/02-render/output/widget" | grep -c '^render\.md\.tmp\.')" "  and the planted link is left"
+# A link to /dev/null, which noclobber alone would open, is in the way too.
+fresh
+confirmed widget
+mkdir -p "$R/stages/02-render/output/widget"
+OUT=$(cd "$R" && sh -c 'ln -s /dev/null "stages/02-render/output/widget/render.md.tmp.$$" && exec bin/render widget' 2>&1)
+assert_status 1 "$?" "refused: a symbolic link to /dev/null planted at render.md's temporary name"
+assert_contains "$OUT" "is in the way" "  and the refusal says so"
+assert_eq "gone" "$(gone "$ROOT/widget")" "  and no target is written"
+assert_eq "gone" "$(gone "$R/stages/02-render/output/widget/render.md")" "  nor render.md"
+assert_eq "1" "$(entries "$R/stages/02-render/output/widget" | grep -c '^render\.md\.tmp\.')" "  and the planted link is left"
+
+# --- what a run owns (decision 226) ------------------------------------------------------------
+# Every temporary file, the libraries' included, lives in render's private
+# directory, so a render, done or refused, leaves none in TMPDIR.
+# in_tmpdir ARGS...: bin/render ARGS with TMPDIR an empty directory of its own.
+in_tmpdir() {
+  mkdir -p "$SCRATCH/tmpdir$n"
+  OUT=$(cd "$R" && TMPDIR="$SCRATCH/tmpdir$n" bin/render "$@" 2>&1)
+  ST=$?
+}
+fresh
+confirmed widget
+in_tmpdir widget
+assert_status 0 "$ST" "a render with a TMPDIR of its own"
+assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  leaves nothing in it"
+fresh
+confirmed widget
+cpstub ': >"$last/extra"'
+OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render the walk refuses, with a TMPDIR of its own"
+assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  leaves nothing in it"
+# waitstub TOOL PATTERN: a TOOL first on PATH that, called with arguments
+# matching PATTERN, says so in $SCRATCH/at$n and waits for $SCRATCH/go$n,
+# then runs the real TOOL. signalled SIGNAL ARGS...: bin/render ARGS as a
+# job of its own, under the stub, sent SIGNAL once the stub waits; ST is its
+# status.
+waitstub() {
+  mkdir -p "$SCRATCH/wstub$n" "$SCRATCH/tmpdir$n"
+  printf '#!/bin/sh\npat='"'"'%s'"'"'\ncase "$*" in\n  $pat) : >"%s"; while [ ! -e "%s" ]; do sleep 1; done ;;\nesac\nexec %s "$@"\n' \
+    "$2" "$SCRATCH/at$n" "$SCRATCH/go$n" "$(command -v "$1")" >"$SCRATCH/wstub$n/$1"
+  chmod +x "$SCRATCH/wstub$n/$1"
+}
+signalled() { # TARGET SIGNAL ARGS...: TARGET is "render" or "group"
+  local to=$1 sig=$2 pid i=0
+  shift 2
+  set -m
+  (cd "$R" && PATH="$SCRATCH/wstub$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" exec bin/render "$@" >"$SCRATCH/out$n" 2>&1) &
+  pid=$!
+  set +m
+  # Render reaches the stub in seconds; one that never does fails the case.
+  while [ ! -e "$SCRATCH/at$n" ] && [ "$i" -lt 120 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 1 && i=$((i + 1))
+  done
+  assert_eq "present" "$(gone "$SCRATCH/at$n")" "  (render reached the stub: $(head -c 200 "$SCRATCH/out$n" 2>/dev/null))"
+  if [ "$to" = group ]; then kill -s "$sig" -- "-$pid"; else kill -s "$sig" "$pid"; fi
+  : >"$SCRATCH/go$n"
+  wait "$pid"
+  ST=$?
+}
+# A signal ignored when the suite began cannot be trapped by any shell it
+# starts (POSIX), as in a background job, which ignores INT and QUIT: such a
+# case is skipped, saying so.
+entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive ]; }
+# Each signal render traps, sent to render alone while it waits on its copy,
+# a direct child, ends render by that signal's status, once the copy is
+# done, with nothing it made left.
+for sig in HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM; do
+  if entry_ignored "$sig"; then
+    assert_pass "skipped: SIG$sig was ignored when the suite began, so render cannot trap it"
+    continue
+  fi
+  fresh
+  confirmed widget
+  waitstub cp '-Rp *'
+  signalled render "$sig" widget
+  assert_status "$((128 + $(kill -l "$sig")))" "$ST" "SIG$sig while render copies ends it by that signal"
+  assert_eq "" "$(left)" "  leaving no target, staging directory, render.md or temporary file"
+  assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  and nothing in TMPDIR"
+done
+# An interrupt to render's whole process group, as ^C sends it, during the
+# fingerprint, which runs in a subshell holding its own temporary
+# repository, leaves nothing in TMPDIR.
+if entry_ignored INT; then
+  assert_pass "skipped: SIGINT was ignored when the suite began, so render cannot trap it"
+else
+  fresh
+  confirmed widget
+  waitstub git '*--literal-pathspecs add *'
+  signalled group INT widget
+  assert_status 130 "$ST" "an interrupt to the process group during the fingerprint ends render with 130"
+  assert_eq "" "$(left)" "  leaving nothing beside the target"
+  assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  and nothing in TMPDIR, the fingerprint's repository included"
+fi
+# A signal while render makes its staging directory is held off until the
+# directory is recorded for cleanup, so it is never left behind.
+fresh
+confirmed widget
+mkdir -p "$SCRATCH/mkstub$n"
+printf '#!/bin/sh\ncase "$*" in *.widget.render.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
+  "$(command -v mkdir)" >"$SCRATCH/mkstub$n/mkdir"
+chmod +x "$SCRATCH/mkstub$n/mkdir"
+OUT=$(cd "$R" && PATH="$SCRATCH/mkstub$n:$PATH" bin/render widget 2>&1)
+ST=$?
+assert_eq "" "$(entries "$ROOT" | grep '^\.widget\.render\.')" "a signal while render makes its staging directory leaves none"
+# Every signal render traps is held off during the renames.
+for sig in HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM; do
+  fresh
+  confirmed widget
+  mvstub "  *.widget.render.*) kill -s $sig \"\$PPID\" ;;"
+  mvstubbed widget
+  assert_status 0 "$ST" "SIG$sig during the renames is held off"
+  assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
+done
 if [ "$(id -u)" != 0 ]; then
   fresh
   confirmed widget
