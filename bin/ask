@@ -147,6 +147,8 @@ assignments() {
 tmps=() dests=()
 cleanup() {
   local t
+  # Held off through cleanup, so a second signal never ends it partway.
+  discard_hold
   for t in ${tmps[@]+"${tmps[@]}"}; do
     rm -f -- "$t"
   done

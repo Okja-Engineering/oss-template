@@ -40,10 +40,18 @@
 #       `.NAME.render.KEEP` (decision 226). Nothing else in ROOT is touched.
 #       Exit 0 when none remains, 1 naming the first that does.
 #
-# What a run owns (decision 226): a run traps DISCARD_SIGNALS, every
-# catchable signal that ends a process by default, so its EXIT trap removes
-# what it made, and holds them off while it creates a path and records it
-# for that cleanup, and while it renames what it wrote into place.
+# What a run owns (decision 226): a run traps DISCARD_SIGNALS, so its EXIT
+# trap removes what it made, holds them off while it creates a path and
+# records it for that cleanup, and while it renames what it wrote into
+# place, and holds them off through that cleanup, so a second signal never
+# ends it partway. DISCARD_SIGNALS is worked out as this library is sourced,
+# from the shell's own `kill -l`: the number of every signal it lists but
+# those whose default action never ends a process, CHLD, CLD, CONT, STOP,
+# TSTP, TTIN, TTOU, URG, WINCH and INFO, and KILL, which no process can
+# catch. So it is every catchable signal that ends a process by default,
+# PROF, XCPU, ABRT, SYS and the rest, and on Linux PWR, STKFLT and the
+# real-time signals, which bash traps by number; and, on macOS, IO, which is
+# ignored there by default and is held too.
 #   discard_traps   each of DISCARD_SIGNALS exits 128 plus its number, so
 #                   the caller's EXIT trap runs
 #   discard_hold    each of DISCARD_SIGNALS ignored, by this shell and the
@@ -51,13 +59,29 @@
 #
 # Source bin/lib/answers.sh first. The caller exports LC_ALL=C.
 
-DISCARD_SIGNALS='HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM'
+DISCARD_SIGNALS=""
+discard__signals() {
+  local w n=""
+  for w in $(kill -l); do
+    case "$w" in
+      *')') n=${w%')'} ;;
+      SIG*)
+        case "${w#SIG}" in
+          CHLD | CLD | CONT | STOP | TSTP | TTIN | TTOU | URG | WINCH | INFO | KILL) ;;
+          *) [ -z "$n" ] || DISCARD_SIGNALS="$DISCARD_SIGNALS $n" ;;
+        esac
+        n=""
+        ;;
+    esac
+  done
+}
+discard__signals
 
 discard_traps() {
   local s
   for s in $DISCARD_SIGNALS; do
     # shellcheck disable=SC2064 # the status is fixed as the trap is set
-    trap "exit $((128 + $(kill -l "$s")))" "$s"
+    trap "exit $((128 + s))" "$s"
   done
 }
 

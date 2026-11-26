@@ -99,6 +99,8 @@ done
 work="" stage="" placed="" tmp=""
 cleanup() {
   local gone
+  # Held off through cleanup, so a second signal never ends it partway.
+  discard_hold
   for gone in "$placed" "$stage"; do
     [ -z "$gone" ] || gone=$(discard_remove "$gone") || printf 'bin/render: %s\n' "$gone" >&2
   done
