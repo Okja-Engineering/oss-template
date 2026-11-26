@@ -654,6 +654,9 @@ cmd_confirm() {
 # Every git it starts, the root rule's and confirm's hash, runs under git.sh's
 # environment, so no caller's GIT_* variable or config reaches one.
 git_hermetic
+# The root rule reads `git worktree list -z`, which needs git 2.36, the
+# floor render holds too.
+fault=$(git_version_ok) || refuse "$fault"
 sub=$1
 shift
 case "$sub" in
