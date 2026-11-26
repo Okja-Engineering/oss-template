@@ -1047,8 +1047,11 @@ failing git 'cat-file blob *:foundation/tool'
 stage_refused "a verbatim file's bytes cannot be read" "cannot read foundation/ at HEAD"
 failing git 'cat-file blob *:foundation/readme-link'
 stage_refused "a link's target cannot be read" "cannot read foundation/ at HEAD"
+# Each needle is its own refusal's words, at the site the stub fires, never
+# a later refusal echoing them (the tests lens's T5 of S2's fourth ship
+# gate).
 failing git '-C * rev-parse --show-toplevel'
-stage_refused "the workspace's working tree cannot be found" "cannot find the workspace's working tree"
+stage_refused "the workspace's working tree cannot be found" "answers.env: cannot find the workspace's working tree"
 # Every argument-less sort, in order: the file list, then the walk's have and
 # want (render p07 and conformance p3 of S2's second ship gate).
 failing sort '' 1
@@ -1093,8 +1096,8 @@ stage_refused "the look up of the selected paths fails" "cannot look up the sele
 # failure is pinned above.
 failing grep '-Fxq -e LICENSE' 2 "" 2
 stage_refused "the look for a selected path's variant fails" "cannot look up the paths rendered"
-failing grep '-Eq \[{]\[{]*' 1 "" 2
-stage_refused "the look for a placeholder left fails" "cannot look for a placeholder left in"
+failing grep '-Eq \[{]\[{]\[A-Z_]+\[}]\[}] */out/*' 1 "" 2
+stage_refused "the look for a placeholder left fails" "cannot look for a placeholder left in GOVERNANCE.md"
 failing awk '*{ found = 1; exit } END { exit !found }*' 1 "" 2
 stage_refused "the walk's look for a directory's listed file fails" "the walk cannot judge the directories"
 # render.md's record, read by the discard, failing: refused, saying so,
