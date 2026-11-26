@@ -898,10 +898,12 @@ assert_eq "" "$(left)" "  with nothing written"
 # (fixture_failing); SETUP, when given and not empty, runs once the run is
 # confirmed. stage_refused DESCRIPTION NEEDLE:
 # the render refused, saying NEEDLE, what could not be done, with nothing of
-# this run left, no target, no render.md.
+# this run left, no target, no render.md, and its output folder as it was,
+# none when render made it (conformance N7 of S2's third ship gate).
 failing() {
   ready
   [ -z "${4:-}" ] || "$4"
+  OUT02=$(gone "$R/stages/02-render/output/widget")
   fixture_failing "$SCRATCH/fail$n" "$1" "$2" "${3:-1}" "${5:-1}"
   OUT=$(cd "$R" && PATH="$SCRATCH/fail$n:$PATH" bin/render widget 2>&1)
   ST=$?
@@ -910,6 +912,8 @@ stage_refused() {
   assert_status 1 "$ST" "refused: $1"
   assert_contains "$OUT" "$2" "  saying: $2"
   assert_eq "" "$(left)" "  with nothing of this run left, no target and no render.md"
+  assert_eq "${OUT02:-gone}" "$(gone "$R/stages/02-render/output/widget")" "  and its output folder as it was"
+  OUT02=""
 }
 failing git '*ls-tree -r -z --full-tree *'
 stage_refused "the listing of HEAD's tree fails" "cannot read foundation/ at HEAD"
