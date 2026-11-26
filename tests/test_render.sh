@@ -1011,6 +1011,16 @@ stage_refused "the render cannot be copied, beside an empty output folder there 
 failing mkdir '*/out'
 stage_refused "the rendered foundation's directory cannot be made" "cannot make a temporary directory"
 assert_eq "bin/render: cannot make a temporary directory" "$OUT" "  and says only that"
+# Each step of the writes that fails is refused, saying what it could not
+# make (the tests lens's T3 of S2's fourth ship gate): a directory, one
+# already there made again for a second file in it, and a link.
+second_in_dir() { twin foundation/.claude/more.json 100644; }
+failing mkdir '-p */out/.claude'
+stage_refused "a rendered directory cannot be made" "cannot make the directory .claude"
+failing mkdir '-p */out/.claude' 2 second_in_dir
+stage_refused "a rendered directory there already, made again, fails" "cannot make the directory .claude"
+failing ln '-s README.md */out/readme-link'
+stage_refused "a rendered link cannot be made" "cannot make the link readme-link"
 for at in "2 cannot read foundation/ at HEAD" "3 the walk refuses the render:" "4 cannot fingerprint the render:"; do
   failing mktemp '-d *render.XXXXXX' "${at%% *}"
   stage_refused "the private directory of mktemp's call ${at%% *} cannot be made" "${at#* }"
