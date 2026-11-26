@@ -140,7 +140,7 @@ assert_contains "$OUT" "HOLDER" "  and the refusal names the given field"
 assert_contains "$OUT" "give HOLDER again" "  and says to give it again"
 # The one reader refuses a file holding a NUL before any value is kept.
 printf 'OWNER=ac\000me\n' >"$R/setup/given.env"
-refused "a setup/given.env holding a NUL" "setup/given.env" setup
+refused "a setup/given.env holding a NUL" "setup/given.env: the file holds a NUL byte" setup
 printf 'OWNER\n' >"$R/setup/given.env"
 refused "a setup/given.env line that is not FIELD=value" "not a FIELD=value line" setup
 
@@ -358,10 +358,10 @@ assert_status 0 "$ST" "a redo beside a given.env holding a field the schema does
 assert_contains "$OUT" "given.env holds STALE, which is no longer a run field; it is dropped" "  drops it, with a note"
 assert_not_contains "$(cat "$OUTD/given.env")" "STALE" "  from given.env too"
 printf 'DESCRIPTION=One\000line\nTITLE=C title\n' >"$OUTD/given.env"
-rrefused "a given.env holding a NUL" "NUL" run widget --redo
+rrefused "a given.env holding a NUL" "stages/01-ask/output/widget/given.env: the file holds a NUL byte" run widget --redo
 printf 'DESCRIPTION=One line\nTITLE=C title\n' >"$OUTD/given.env"
 printf 'OWNER=ac\000me\n' >"$OUTD/setup.override.env"
-rrefused "a setup.override.env holding a NUL" "NUL" run widget --redo
+rrefused "a setup.override.env holding a NUL" "stages/01-ask/output/widget/setup.override.env: the file holds a NUL byte" run widget --redo
 printf 'OWNER=acme\nSTALE=1\n' >"$OUTD/setup.override.env"
 ask run widget --redo
 assert_status 0 "$ST" "a redo beside a setup.override.env holding a field no longer a setup field"
@@ -388,18 +388,18 @@ ask run widget 'TITLE=$(touch made-by-run)' 'DESCRIPTION=`touch made-by-run2`'
 assert_eq "" "$(find "$SCRATCH" -name 'made-by-run*')" "\$(touch x) and backticks in run values create nothing"
 
 ready
-rrefused "an unknown field" "BOGUS" run widget 'TITLE=A' 'DESCRIPTION=B' BOGUS=1
-rrefused "a value its type refuses" "VISIBILITY" run widget 'TITLE=A' 'DESCRIPTION=B' VISIBILITY=secret
+rrefused "an unknown field" "BOGUS: an unknown field" run widget 'TITLE=A' 'DESCRIPTION=B' BOGUS=1
+rrefused "a value its type refuses" "VISIBILITY: the value is not one of public|private" run widget 'TITLE=A' 'DESCRIPTION=B' VISIBILITY=secret
 rrefused "a value holding a newline" "newline" run widget 'TITLE=A
 B' 'DESCRIPTION=B'
-rrefused "a value holding {{" "{{" run widget 'TITLE=A {{NAME}}' 'DESCRIPTION=B'
-rrefused "a rule word in a text field" "never" run widget 'TITLE=It never stops' 'DESCRIPTION=B'
+rrefused "a value holding {{" "TITLE: the value holds {{" run widget 'TITLE=A {{NAME}}' 'DESCRIPTION=B'
+rrefused "a rule word in a text field" "free text holds no rule word, and this holds \"never\"" run widget 'TITLE=It never stops' 'DESCRIPTION=B'
 rrefused "an email address in a text field" "email" run widget 'TITLE=Mail a.person@example.org' 'DESCRIPTION=B'
 rrefused "a missing field" "TITLE" run widget 'DESCRIPTION=B'
-rrefused "a setup field given outside --setup-override" "OWNER" run widget 'TITLE=A' 'DESCRIPTION=B' OWNER=acme
+rrefused "a setup field given outside --setup-override" "OWNER is a setup field: give it after --setup-override" run widget 'TITLE=A' 'DESCRIPTION=B' OWNER=acme
 rrefused "a run field given to --setup-override" "TITLE is a run field, not a setup field" \
   run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override 'TITLE=C'
-rrefused "a select value of two listed values joined" "VISIBILITY" \
+rrefused "a select value of two listed values joined" "VISIBILITY: the value is not one of public|private" \
   run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public|private'
 rrefused "a value holding a C1 control" "C1 control" run widget "$(printf 'TITLE=A\302\205')" 'DESCRIPTION=B'
 rrefused "an override its type refuses" "OWNER: a GitHub login is" run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=-acme
@@ -503,7 +503,7 @@ rendered() {
 }
 
 ready
-rrefused "--redo on a run that does not exist" "widget" run widget --redo 'TITLE=A' 'DESCRIPTION=B'
+rrefused "--redo on a run that does not exist" "there is no run widget to redo" run widget --redo 'TITLE=A' 'DESCRIPTION=B'
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
 ask confirm widget --by 'A Person'
@@ -1279,4 +1279,77 @@ ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
 assert_status 1 "$ST" "refused: a redo with a directory at the run's given.env"
 assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and the target is left"
+# --- each step whose status a guard reads, failing (decision 228) ------------------
+# Every `|| refuse` on a step's status has a case that fails without it (the
+# tests lens's N2 of S2's third ship gate): a rename, a removal and a read
+# that fail, a scope that cannot be read, and an old answers file edited by
+# hand.
+export FAIL_STATUS=1
+fresh
+ask setup OWNER=acme
+before=$(state)
+asked mv '*setup/answers.env.tmp.*' 1 setup OWNER=other
+assert_status 1 "$ST" "refused: setup whose rename into place fails"
+assert_contains "$OUT" "cannot write $R/setup/answers.env" "  and the refusal says so"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+fresh
+ask setup OWNER=acme
+FAIL_STATUS=2 asked awk '*col\[$i] = i*' 1 setup
+assert_status 1 "$ST" "refused: setup whose kept field's scope cannot be read"
+assert_contains "$OUT" "cannot read the scope of OWNER in shared/answers.tsv" "  and the refusal says so, never a field dropped"
+assert_eq "OWNER=acme" "$(cat "$R/setup/given.env" 2>/dev/null)" "  and setup/given.env is as it was"
+fresh
+ask setup
+: >"$R/setup/given.env"
+asked rm '*/setup/given.env' 1 setup
+assert_status 1 "$ST" "refused: setup whose removal of an empty setup/given.env fails"
+assert_contains "$OUT" "could not remove $R/setup/given.env" "  and the refusal names it"
+ready
+asked cat '*/setup/answers.env' 2 run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: run whose read of setup/answers.env fails"
+assert_contains "$OUT" "setup/answers.env: cannot read the file" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+before=$(run_state)
+chmod 000 "$ANS"
+ask run widget --redo 'TITLE=C'
+st=$ST
+chmod 644 "$ANS"
+assert_status 1 "$st" "refused: a redo whose old answers file cannot be read"
+assert_contains "$OUT" "stages/01-ask/output/widget/answers.env: cannot read the file" "  and the refusal says so"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+sed '/^TARGET_ROOT=/d' "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
+rrefused "a redo whose old answers file, edited by hand, holds no TARGET_ROOT" \
+  "stages/01-ask/output/widget/answers.env holds no TARGET_ROOT" run widget --redo 'TITLE=C'
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+before=$(run_state)
+asked git '*worktree list*' 1 run widget --redo 'TITLE=C'
+assert_status 1 "$ST" "refused: a redo whose old target's root cannot be judged"
+assert_contains "$OUT" "stages/01-ask/output/widget/answers.env: cannot list the workspace's worktrees" \
+  "  and the refusal says so, never a root with no target"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+# A redo that gives no run field, nor any override, removes the run's
+# given.env and setup.override.env; one it cannot remove is refused, naming
+# it. Here each run field has a default, so a run need give none.
+ready
+sed -e "s/${T}-${T}What is its title?/${T}A title${T}What is its title?/" \
+  -e "s/${T}-${T}One line about the repository?/${T}One line${T}One line about the repository?/" \
+  "$R/shared/answers.tsv" >"$R/shared/answers.tsv.x" && mv "$R/shared/answers.tsv.x" "$R/shared/answers.tsv"
+ask run widget 'TITLE=A' --setup-override 'HOLDER=Someone'
+assert_status 0 "$ST" "a run giving a field and an override, beside a schema whose run fields have defaults"
+: >"$OUTD/given.env"
+asked rm '*/widget/given.env' 1 run widget --redo --setup-override 'HOLDER=Someone'
+assert_status 1 "$ST" "refused: a redo whose removal of the run's empty given.env fails"
+assert_contains "$OUT" "could not remove $OUTD/given.env" "  and the refusal names it"
+ask run widget --redo 'TITLE=A' --setup-override 'HOLDER=Someone'
+: >"$OUTD/setup.override.env"
+# A new stub, so its count of matching calls starts again.
+rm -f "$SCRATCH/fail$n/rm.count"
+asked rm '*/widget/setup.override.env' 1 run widget --redo 'TITLE=A'
+assert_status 1 "$ST" "refused: a redo whose removal of the run's empty setup.override.env fails"
+assert_contains "$OUT" "could not remove $OUTD/setup.override.env" "  and the refusal names it"
 assert_done

@@ -663,6 +663,21 @@ else
   assert_eq "" "$(left)" "  leaving nothing beside the target"
   assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  and nothing in TMPDIR, the fingerprint's repository included"
 fi
+# A signal outside the hold windows ends render: a TERM while it sweeps a
+# killed render's staging directory, after its private directory is made
+# and the signals let through again (the tests lens's N3 of S2's third).
+if entry_ignored TERM; then
+  assert_pass "skipped: SIGTERM was ignored when the suite began, so render cannot trap it"
+else
+  ready
+  mkdir -p "$ROOT/.widget.render.1/x" "$SCRATCH/swstub$n"
+  printf '#!/bin/sh\ncase "$*" in *.widget.render.1*) kill -s TERM "$(cat "%s")" ;; esac\nexec %s "$@"\n' \
+    "$SCRATCH/swpid$n" "$(command -v rm)" >"$SCRATCH/swstub$n/rm"
+  chmod +x "$SCRATCH/swstub$n/rm"
+  OUT=$(cd "$R" && PATH="$SCRATCH/swstub$n:$PATH" sh -c 'echo "$$" >"$1" && exec bin/render widget' sh "$SCRATCH/swpid$n" 2>&1)
+  assert_status 143 "$?" "a TERM while render sweeps a leftover ends it with 143"
+  assert_eq "gone" "$(gone "$ROOT/widget")" "  and no target is written"
+fi
 # A second signal while cleanup runs is held off, so cleanup finishes:
 # TERM during the copy, then TERM again as cleanup removes the staging
 # directory (render's NIT of S2's third ship gate).
@@ -923,6 +938,18 @@ failing git '*hash-object*'
 stage_refused "the run's answers cannot be hashed" "cannot hash stages/01-ask/output/widget/answers.env"
 failing cp '-Rp *'
 stage_refused "the render cannot be copied into its staging directory" "cannot copy the render into"
+# Each private directory that cannot be made is refused, saying so, never
+# read as a path under / (the tests lens's N13 and N14 of S2's third ship
+# gate): render's own, its rendered foundation's, the walk's and the
+# fingerprint's.
+failing mkdir '*/out'
+stage_refused "the rendered foundation's directory cannot be made" "cannot make a temporary directory"
+assert_eq "bin/render: cannot make a temporary directory" "$OUT" "  and says only that"
+for at in "2 cannot read foundation/ at HEAD" "3 the walk refuses the render:" "4 cannot fingerprint the render:"; do
+  failing mktemp '-d *render.XXXXXX' "${at%% *}"
+  stage_refused "the private directory of mktemp's call ${at%% *} cannot be made" "${at#* }"
+  assert_contains "$OUT" "cannot make a temporary directory" "  and says it cannot make its directory"
+done
 ready
 git -C "$R" update-ref -d refs/heads/main
 render widget

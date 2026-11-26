@@ -144,6 +144,20 @@ fixture_commit "$R" "test: links it does not judge, and the top"
 paths=$(cd "$R" && tree_list worktree | sed 's/^[^	]*	//')
 (cd "$R" && links_judge worktree top.md "$paths")
 assert_status 0 "$?" "links_judge: a link that is not relative is not judged, and . is the top"
+# The anchors are read whole, so a last anchor ending in x keeps it; and an
+# anchor list that cannot be made cannot be judged (the tests lens's N7 of
+# S2's third ship gate).
+fixture_write "$R/ix.md" "See [the index](ixb.md#index)."
+fixture_write "$R/ixb.md" "# B
+
+## Index"
+fixture_commit "$R" "test: a link to a last heading ending in x"
+paths=$(cd "$R" && tree_list worktree | sed 's/^[^	]*	//')
+(cd "$R" && links_judge worktree ix.md "$paths")
+assert_status 0 "$?" "links_judge: a link to a last heading whose anchor ends in x"
+fixture_failing "$SCRATCH/anchorsstub" awk '*function anchor(h,*' 1 2
+(cd "$R" && PATH="$SCRATCH/anchorsstub:$PATH" && links_judge worktree ix.md "$paths" >/dev/null)
+assert_status 2 "$?" "links_judge: anchors that cannot be made cannot be judged"
 
 # --- rules: the words, and what names a check -------------------------------------
 assert_eq "do not" "$(rules_word 'You do not push.')" "trace holds do not"

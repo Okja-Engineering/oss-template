@@ -7,6 +7,10 @@
 set -u
 set -o pipefail
 export LC_ALL=C
+# The suite's verdict is its own: no caller's RUN_ALL_JOBS reaches a run
+# that does not set its own, so the default is what is under test (the
+# tests lens's N1 of S2's third ship gate).
+unset RUN_ALL_JOBS
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 ROOT=$(cd "$TEST_DIR/.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
@@ -61,9 +65,6 @@ cp "$ROOT/foundation/tests/run-all.sh" "$W/foundation/tests/run-all.sh" 2>/dev/n
 write_suite "$W/tests/test_workspace.sh" workspace
 write_suite "$W/foundation/tests/test_product.sh" product
 RUN_ALL="$W/tests/run-all.sh"
-# The default is under test, so no caller's RUN_ALL_JOBS reaches a run that
-# does not set its own.
-unset RUN_ALL_JOBS
 
 out=$(cd "$SCRATCH" && bash "$RUN_ALL" 2>&1)
 status=$?
@@ -135,6 +136,10 @@ suite "$D/test_exits.sh" 'echo "partial"' 'exit 0'
 suite "$D/test_killed.sh" 'assert_eq a a "one"' 'kill -KILL $$'
 write_suite "$D/test_fine.sh" fine
 suite "$D/test_status.sh" "trap 'exit 3' EXIT" 'assert_eq a a "passes, then exits 3"' 'assert_done'
+# The plan is a whole line that counts no failure (the tests lens's N5 and
+# N10): one that counts a failure, or sits after other text, is no plan.
+suite "$D/test_onefailed.sh" "echo '# 1 assertions, 1 failed'" 'exit 0'
+suite "$D/test_midline.sh" "echo 'x # 1 assertions, 0 failed'" 'exit 0'
 out=$(RUN_ALL_JOBS=2 bash "$RUN_ALL" "$D" 2>&1)
 assert_status 1 "$?" "a suite that exits 0 without its plan fails the run"
 assert_contains "$out" "partial
@@ -142,7 +147,21 @@ FAIL $D/test_exits.sh" "  marked FAIL after what it printed"
 assert_contains "$out" "FAIL $D/test_killed.sh" "  and a suite killed before its plan is marked FAIL"
 assert_contains "$out" "# 1 assertions, 0 failed
 FAIL $D/test_status.sh" "  and one exiting 3 after a passing plan is marked FAIL"
-assert_contains "$out" "run-all: 3 of 4 suites failed" "  and the run counts the three"
+assert_contains "$out" "FAIL $D/test_onefailed.sh" "  and one exiting 0 after a plan counting a failure"
+assert_contains "$out" "FAIL $D/test_midline.sh" "  and one exiting 0 after a plan that is not a whole line"
+assert_contains "$out" "run-all: 5 of 6 suites failed" "  and the run counts the five"
+# A run that cannot make its private directory fails, running no suite (the
+# tests lens's N4).
+D="$SCRATCH/nomktemp"
+mkdir -p "$D" "$SCRATCH/mktstub"
+export RAN="$SCRATCH/nomktemp.ran"
+suite "$D/test_runs.sh" ': >"$RAN"' 'assert_done'
+printf '#!/bin/sh\nexit 1\n' >"$SCRATCH/mktstub/mktemp"
+chmod +x "$SCRATCH/mktstub/mktemp"
+out=$(PATH="$SCRATCH/mktstub:$PATH" bash "$RUN_ALL" "$D" 2>&1)
+assert_status 1 "$?" "a run that cannot make its private directory fails"
+assert_contains "$out" "cannot make a private directory" "  and says so"
+assert_eq "no" "$([ -e "$RAN" ] && echo yes || echo no)" "  running no suite"
 if [ "$(id -u)" != 0 ]; then
   D="$SCRATCH/unreadable"
   mkdir -p "$D"
@@ -230,7 +249,8 @@ mkdir -p "$D"
 export SLOW_PID="$SCRATCH/slow.pid"
 suite "$D/test_slow.sh" 'echo $$ >"$SLOW_PID.x" && mv "$SLOW_PID.x" "$SLOW_PID"' 'sleep 30' \
   ': >"$SLOW_PID.finished"' 'assert_done'
-for sig in INT TERM; do
+# Each ends the run with 128 and its number (the tests lens's N6 and N10).
+for sig in HUP INT TERM; do
   rm -f "$SLOW_PID" "$SLOW_PID.finished"
   set -m
   TMPDIR="$SCRATCH/tmp" bash "$RUN_ALL" "$D" >/dev/null 2>&1 &
@@ -240,7 +260,7 @@ for sig in INT TERM; do
   kill -s "$sig" "$pid"
   wait "$pid"
   st=$?
-  assert_eq "yes" "$([ "$st" -ne 0 ] && echo yes)" "SIG$sig ends the run, not zero: $st"
+  assert_eq "$((128 + $(kill -l "$sig")))" "$st" "SIG$sig ends the run with 128 and its number"
   spid=$(cat "$SLOW_PID" 2>/dev/null)
   assert_eq "ended" "$(if [ -n "$spid" ] && kill -0 "$spid" 2>/dev/null; then echo running; else echo ended; fi)" \
     "  the running suite ended"

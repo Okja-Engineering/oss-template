@@ -191,6 +191,13 @@ chmod +x "$SCRATCH/stub$n/rm"
 out=$(PATH="$SCRATCH/stub$n:$PATH" discard_remove "$T")
 assert_status 1 "$?" "refused: a removal that leaves the path"
 assert_eq "could not remove $T; remove it, then run the command again" "$out" "  naming it"
+# A dangling link the removal leaves is left too, never read as gone (the
+# tests lens's N9 of S2's third ship gate).
+n=$((n + 1))
+ln -s "$SCRATCH/nowhere$n" "$SCRATCH/dangling$n"
+out=$(PATH="$SCRATCH/stub$((n - 1)):$PATH" discard_remove "$SCRATCH/dangling$n")
+assert_status 1 "$?" "refused: a removal that leaves a dangling link"
+assert_eq "could not remove $SCRATCH/dangling$n; remove it, then run the command again" "$out" "  naming it"
 
 # --- the signals a run holds and traps (decision 226) -------------------------------------
 # Every signal kill -l lists whose default action ends a process, worked

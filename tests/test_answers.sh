@@ -425,12 +425,17 @@ grep -v '^OWNER=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
 printf 'OWNER=Okja-Engineering' >>"$SETUP"
 answers_validate "$S" "$SETUP" setup >/dev/null
 assert_status 0 "$?" "a last line without a newline is read"
+# The text is read whole, its trailing newlines kept, so a blank line after
+# the last is a line, refused (the tests lens's N8 of S2's third, A072).
+good_setup
+printf '\n' >>"$SETUP"
+vrefused "a blank line after the last" "setup.env:7: not a FIELD=value line"
 # A NUL, which bash's read drops and awk may stop at, so readers would get
 # different values (decision 229).
 good_setup
 grep -v '^OWNER=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
 printf 'OWNER=Okja-Eng\000ineering\n' >>"$SETUP"
-vrefused "a NUL byte in a value" "NUL"
+vrefused "a NUL byte in a value" "setup.env: the file holds a NUL byte"
 good_setup
 grep -v '^PEOPLE=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
 printf 'PEOPLE=B\302\205\n' >>"$SETUP"
@@ -545,6 +550,12 @@ under() {
   OUT=$(PATH="$SCRATCH/fail$k:$PATH" && "$@" 2>&1)
   ST=$?
 }
+# A read that fails after the file-level rule passed is one that cannot be
+# read too, never an empty file (the tests lens's N8, A033 and A034).
+printf 'OWNER=acme\n' >"$SCRATCH/read.env"
+under cat '*/read.env' 1 answers_read "$SCRATCH/read.env" the-label
+assert_status 2 "$ST" "answers_read whose cat fails exits 2"
+assert_eq "the-label: cannot read the file" "$OUT" "  saying so, with no text"
 # A judge's 1 is a refusal; one that cannot judge exits 2, saying what it
 # could not read. answers_check reads a field's type, then its pattern,
 # then its default.
