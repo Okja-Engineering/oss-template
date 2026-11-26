@@ -167,6 +167,12 @@ done
 valid
 fixture_remove "$R/$C2"
 refused "a stage without CONTEXT.md" "stages/02-render"
+# An earlier stage without CONTEXT.md has no Outputs: an input naming its
+# output is refused as not in them, never a check that cannot run (the
+# tests lens's T3 of S2's fourth ship gate).
+valid
+fixture_remove "$R/$C1"
+refused "an input naming the output of a stage without CONTEXT.md" "is not in stages/01-ask/'s Outputs"
 valid
 fixture_remove "$R/stages/01-ask/output/.gitignore"
 refused "a stage without output/.gitignore" "output/.gitignore"
@@ -730,6 +736,11 @@ cannot_run awk '*if (n == 0) { print ""; exit }*' 1 "an input's path"
 cannot_run awk '*!found && substr($0, i + 1)*' 1 "an input's mode"
 cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 4 "whether an input is a directory"
 cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 5 "a stage's references/"
+# An earlier stage's Outputs, read for an input that names its output: the
+# section, then the names in it (the tests lens's T3 of S2's fourth ship
+# gate).
+cannot_run awk '*insec = ($0 == want)*' 4 "an earlier stage's Outputs section"
+cannot_run awk '*while (match(s, *' 2 "the names in an earlier stage's Outputs"
 # A lookup whose 1 is "no", grep failing with a higher status, is a check
 # that cannot run, never a path the tree lacks (decision 228): a stage's
 # CONTEXT.md, the top CONTEXT.md, and the contract whose rules would be
@@ -747,6 +758,7 @@ cannot_look '-Fxq -- CONTEXT.md' 1 "CONTEXT.md"
 cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 2 "a contract"
 cannot_look '-Eq*^\[0-9]\[0-9]-*' 1 "a stage's name"
 cannot_look '-Fxq -- 01-ask' 1 "a routed stage"
+cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 3 "an earlier stage's contract, for its Outputs"
 # The tree reader failing on a file's bytes, at each of its reads, and on a
 # commit that does not exist (the tests lens's F3). PATH is the file's path
 # in the workspace, NTH its read; the stub matches it under the workspace's
