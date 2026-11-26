@@ -31,7 +31,9 @@
 # derives itself from the old answers file's TARGET_ROOT and NAME, after the
 # operator's yes at stage 01's checkpoint (AC9, decisions 123, 134, 149,
 # 203, 227); a present target it would not take is refused, never routed
-# to --remove. --redo clears the
+# to --remove. Before it removes render.md, a redo judges its record
+# through the discard's discard_record, as render does; a first run removes
+# no render.md and judges none. --redo clears the
 # run's 03 and 02 outputs and then its confirmation, so a clear that fails
 # leaves the run confirmed and its files in step, and removes the staging
 # directories a killed render left under the old TARGET_ROOT (decision 226).
@@ -273,7 +275,7 @@ cmd_questionnaire() {
 
 cmd_run() {
   local name redo=0 remove="" have_remove=0 to=run arg fault field fields value
-  local out="" run_pairs override_pairs given_pairs setup_have outd rel render_md recorded="" old_target="" target
+  local out="" run_pairs override_pairs given_pairs setup_have outd rel render_md old_target="" target
   local old_answers="" old_overrides="" old_given="" line
   local answers_text override_text given_text
   local -a run_args=() override_args=()
@@ -390,28 +392,22 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
     refuse "cannot sort the answers"
   fi
 
-  # The old target, and the one render.md records: present, either is
-  # removed only through the discard, which derives the run's target from
-  # the old answers file itself, so the route names it only when the
-  # discard would take it.
-  recorded=$old_target
-  if [ -f "$render_md" ]; then
-    recorded=$(answers_record "$render_md" target)
-    case $? in
-      0) ;;
-      1) refuse "$render_md names no target" ;;
-      *) refuse "cannot read $render_md" ;;
-    esac
-  fi
+  # A redo removes render.md, so it judges render.md's record first, as
+  # render does (discard_record): no removal drops the record of a present
+  # target the discard may not take. A first run removes no render.md. The
+  # old target, present, is removed only through the discard, which derives
+  # the run's target from the old answers file itself, and judges the
+  # record too, so the route names it only when the discard would take it.
   if [ "$have_remove" = 1 ]; then
     fault=$(discard_check "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
-  else
-    for value in "$recorded" "$old_target"; do
-      if [ -z "$value" ] || ! present "$value"; then continue; fi
-      fault=$(discard_check "$value" "$outd/answers.env" "$name" "$render_md") ||
-        refuse "the target $value is present, and a redo may not remove it: $fault; it is left alone"
-      refuse "the target $value is present: with the operator's yes to \"remove $value\", run bin/ask run $name --redo --remove \"$value\" and the answers"
-    done
+  elif [ "$redo" = 1 ]; then
+    fault=$(discard_record "$outd/answers.env" "$name" "$render_md") ||
+      refuse "a redo may not remove render.md: $fault; it is left alone"
+    if present "$old_target"; then
+      fault=$(discard_check "$old_target" "$outd/answers.env" "$name" "$render_md") ||
+        refuse "the target $old_target is present, and a redo may not remove it: $fault; it is left alone"
+      refuse "the target $old_target is present: with the operator's yes to \"remove $old_target\", run bin/ask run $name --redo --remove \"$old_target\" and the answers"
+    fi
   fi
   if present "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
     refuse "the target $target is present, and no --remove names it; it is left alone"

@@ -18,6 +18,14 @@
 #   discard_check PATH ANSWERS NAME RENDER_MD
 #       discard_target's judgement alone, removing nothing, so a caller can
 #       refuse before it changes anything.
+#   discard_record ANSWERS NAME RENDER_MD
+#       the record RENDER_MD keeps, judged before a caller removes it, so no
+#       removal of render.md drops the record of a present target the
+#       discard may not take: when RENDER_MD is a file, it must name a
+#       target and be read whole, and a target it names that is present, a
+#       dangling link included, must be the one the discard derives from
+#       ANSWERS. Print the target it names, nothing when it is not a file;
+#       exit 0, or 1 with the reason out.
 #   discard_remove PATH
 #       the removal helper: when PATH is a directory, and not a symbolic
 #       link, restore the owner's read, write and search permission on it
@@ -85,18 +93,10 @@ discard_check() {
     return 1
   fi
   if [ -f "$render_md" ]; then
-    recorded=$(answers_record "$render_md" target)
-    case $? in
-      0) ;;
-      1)
-        printf 'remove %s: %s names no target\n' "$path" "$render_md"
-        return 1
-        ;;
-      *)
-        printf 'remove %s: cannot read %s\n' "$path" "$render_md"
-        return 1
-        ;;
-    esac
+    if ! recorded=$(discard__recorded "$render_md"); then
+      printf 'remove %s: %s\n' "$path" "$recorded"
+      return 1
+    fi
     if [ "$recorded" != "$target" ]; then
       printf 'remove %s: render.md names %s, not the run'"'"'s target %s\n' "$path" "$recorded" "$target"
       return 1
@@ -111,6 +111,45 @@ discard_check() {
     return 1
   fi
   return 0
+}
+
+discard_record() {
+  local answers=$1 name=$2 render_md=$3 recorded target
+  [ -f "$render_md" ] || return 0
+  recorded=$(discard__recorded "$render_md") || {
+    printf '%s\n' "$recorded"
+    return 1
+  }
+  if [ -e "$recorded" ] || [ -L "$recorded" ]; then
+    if ! target=$(answers_target_check "$answers" "$name"); then
+      printf 'render.md names %s, present, and the run has no target to judge it by: %s\n' "$recorded" "$target"
+      return 1
+    fi
+    if [ "$recorded" != "$target" ]; then
+      printf 'render.md names %s, not the run'"'"'s target %s\n' "$recorded" "$target"
+      return 1
+    fi
+  fi
+  printf '%s\n' "$recorded"
+}
+
+# discard__recorded RENDER_MD: the target RENDER_MD records; exit 1 with the
+# reason out when it names none or cannot be read, a failure never read as
+# none (decision 228).
+discard__recorded() {
+  local recorded
+  recorded=$(answers_record "$1" target)
+  case $? in
+    0) printf '%s\n' "$recorded" ;;
+    1)
+      printf '%s names no target\n' "$1"
+      return 1
+      ;;
+    *)
+      printf 'cannot read %s\n' "$1"
+      return 1
+      ;;
+  esac
 }
 
 discard_remove() {

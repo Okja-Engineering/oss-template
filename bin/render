@@ -18,7 +18,10 @@
 # needs --replace --remove naming it, which discards it through the shared
 # discard, bin/lib/discard.sh, after the operator's yes at stage 02's
 # checkpoint. --replace then clears the run's 03 outputs, so the next
-# verify is a first run (decision 157), and removes the old render.md.
+# verify is a first run (decision 157), and removes the old render.md,
+# whose record it judges first through the discard's discard_record, as a
+# redo does: one that names no target or cannot be read, or names a present
+# target that is not the run's, is refused (decision 227).
 #
 # The write is one transaction (decision 226). Render makes TARGET_ROOT and
 # any missing ancestor, which stay, then a staging directory beside the
@@ -173,11 +176,16 @@ fi
 if [ -f "$render_md" ] && [ "$replace" = 0 ]; then
   refuse "the run $name is rendered already; render it again with --replace, at stage 02's checkpoint"
 fi
-# A present target is removed only through the discard, which derives the
-# run's target itself (decision 227), so the route names it only when the
-# discard would take it.
+# --replace removes render.md, so it judges render.md's record first, as a
+# redo does (discard_record): no removal drops the record of a present
+# target the discard may not take. A present target is removed only
+# through the discard, which derives the run's target itself (decision 227)
+# and judges the record too, so the route names it only when the discard
+# would take it.
 if [ "$have_remove" = 1 ]; then
   fault=$(discard_check "$remove" "$work/answers.env" "$name" "$render_md") || refuse "$fault"
+elif ! fault=$(discard_record "$work/answers.env" "$name" "$render_md"); then
+  refuse "--replace may not remove render.md: $fault; it is left alone"
 elif present "$target" && ! empty_dir "$target"; then
   fault=$(discard_check "$target" "$work/answers.env" "$name" "$render_md") ||
     refuse "the target $target is present, and --replace may not remove it: $fault; it is left alone"
