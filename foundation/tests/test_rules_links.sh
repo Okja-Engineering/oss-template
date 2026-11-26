@@ -79,6 +79,15 @@ assert_status 2 "$?" "rules_claims: a look for the check a line names that fails
 fixture_failing "$SCRATCH/anchorstub" grep '-Fx -e deciders' 1 2
 (cd "$R" && PATH="$SCRATCH/anchorstub:$PATH" && links_judge worktree docs/linked.md "$paths" >/dev/null)
 assert_status 2 "$?" "links_judge: a look for the heading that fails cannot be judged"
+# A link to a file the tree does not hold is one report, not a second for
+# its heading (L069 of S2's fourth ship gate's tests lens).
+fixture_write "$R/docs/gone.md" "See [the plan](missing.md#steps)."
+fixture_commit "$R" "test: a link to a missing file, with an anchor"
+paths=$(cd "$R" && tree_list worktree | sed 's/^[^	]*	//')
+OUT=$(cd "$R" && links_judge worktree docs/gone.md "$paths")
+assert_status 1 "$?" "links_judge: a link to a file the tree does not hold is refused"
+assert_eq "docs/gone.md:1: the link missing.md#steps does not resolve: no docs/missing.md" "$OUT" \
+  "  in one report, with none for its heading"
 
 # --- md_block: the kind of each line, in order --------------------------------
 kinds() { printf '%s\n' "$@" | links_md '{ printf "%s ", md_block($0) }'; }
