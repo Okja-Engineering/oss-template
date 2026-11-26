@@ -25,8 +25,51 @@
 #       no symbolic link and changing no file's mode; then remove PATH with
 #       `rm`, called by name, and assert it gone. Exit 0 when PATH is gone,
 #       1 when it remains, naming it.
+#   discard_leftovers ROOT NAME [KEEP]
+#       remove, through discard_remove, each staging directory a killed
+#       render of the run NAME left in ROOT: a directory, not a symbolic
+#       link, named exactly `.NAME.render.` then digits, but for
+#       `.NAME.render.KEEP` (decision 226). Nothing else in ROOT is touched.
+#       Exit 0 when none remains, 1 naming the first that does.
+#
+# What a run owns (decision 226): a run traps DISCARD_SIGNALS, every
+# catchable signal that ends a process by default, so its EXIT trap removes
+# what it made, and holds them off while it creates a path and records it
+# for that cleanup, and while it renames what it wrote into place.
+#   discard_traps   each of DISCARD_SIGNALS exits 128 plus its number, so
+#                   the caller's EXIT trap runs
+#   discard_hold    each of DISCARD_SIGNALS ignored, by this shell and the
+#                   commands it starts, until discard_traps
 #
 # Source bin/lib/answers.sh first. The caller exports LC_ALL=C.
+
+DISCARD_SIGNALS='HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM'
+
+discard_traps() {
+  local s
+  for s in $DISCARD_SIGNALS; do
+    # shellcheck disable=SC2064 # the status is fixed as the trap is set
+    trap "exit $((128 + $(kill -l "$s")))" "$s"
+  done
+}
+
+discard_hold() {
+  # shellcheck disable=SC2086 # the list, split into its signals
+  trap '' $DISCARD_SIGNALS
+}
+
+discard_leftovers() {
+  local root=$1 name=$2 keep=${3:-} left
+  for left in "$root/.$name.render."*; do
+    case "${left##*/}" in
+      ".$name.render."*[!0-9]* | ".$name.render." | ".$name.render.$keep") continue ;;
+    esac
+    if [ -d "$left" ] && [ ! -L "$left" ]; then
+      discard_remove "$left" || return 1
+    fi
+  done
+  return 0
+}
 
 discard_target() {
   discard_check "$@" || return 1

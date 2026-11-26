@@ -26,12 +26,15 @@
 # fingerprints it there, its git tree id built in a private repository,
 # and writes render.md's text to a temporary file beside it: the target,
 # the workspace SHA, the answers blob id, the fingerprint and the file
-# list. Then, with interrupts held off, it removes an empty target with
-# rmdir and renames the staging directory to the target and the temporary
-# file to render.md. A failure or an interrupt removes only what this run
-# made: the staging directory, the temporary file, and the target when this
-# run's rename put it there. A kill no trap sees (SIGKILL) leaves its
-# staging directory, which the run's next render removes before it writes.
+# list. Then, with signals held off, it removes an empty target with rmdir
+# and renames the staging directory to the target and the temporary file to
+# render.md; an empty target so removed is not put back if a rename then
+# fails. A failure or a signal removes only what this run made: its private
+# directory, which holds every temporary file, the staging directory, the
+# temporary file, and the target when this run's rename put it there. A
+# kill no trap sees (SIGKILL) leaves its staging directory, which the run's
+# next render, or its next --redo, removes, and its private directory and
+# render.md's temporary file, which nothing reads.
 # Exit 0 when done, 1 on a refusal, 2 on a usage error.
 set -u
 set -o pipefail
@@ -86,7 +89,10 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$have_remove" = 0 ] || [ "$replace" = 1 ] || usage "--remove goes with --replace"
 
-# What this run made, all that a failure or an interrupt removes.
+# What this run made, all that a failure or an interrupt removes: its
+# private directory, which holds every temporary file, the libraries'
+# included, and the staging directory, render.md's temporary file and the
+# target, each recorded with signals held off as it is made (decision 226).
 work="" stage="" placed="" tmp=""
 cleanup() {
   local gone
@@ -97,14 +103,16 @@ cleanup() {
   [ -z "$work" ] || rm -rf -- "$work"
 }
 trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+discard_traps
 
+discard_hold
+work=$(mktemp -d) || refuse "cannot make a temporary directory"
+discard_traps
+TMPDIR=$work
+export TMPDIR
 git_hermetic
 fault=$(git_version_ok) || refuse "$fault"
 cd "$ws" || refuse "cannot enter the workspace $ws"
-work=$(mktemp -d) || refuse "cannot make a temporary directory"
 
 # The answers, confirmed, against the schema at HEAD.
 head=$(git rev-parse -q --verify 'HEAD^{commit}') || refuse "the workspace has no commit at HEAD"
@@ -168,23 +176,22 @@ esac
 # helper (decision 226); nothing else beside the target is touched. One at
 # this process's own name is not a leftover to remove: the exclusive mkdir
 # below refuses it.
-for left in "$root/.$name.render."*; do
-  case "${left##*/}" in
-    ".$name.render."*[!0-9]* | ".$name.render." | ".$name.render.$$") continue ;;
-  esac
-  if [ -d "$left" ] && [ ! -L "$left" ]; then
-    fault=$(discard_remove "$left") || refuse "$fault"
-  fi
-done
+fault=$(discard_leftovers "$root" "$name" "$$") || refuse "$fault"
 
-# The places this run writes, each made exclusively, so cleanup removes
-# nothing it did not make.
+# The places this run writes, each made exclusively where nothing, not even
+# a symbolic link, is in the way, and recorded with signals held off, so
+# cleanup removes all it made and nothing it did not.
 mkdir -p "${render_md%/*}" || refuse "cannot make ${render_md%/*}"
-(set -C && : >"$render_md.tmp.$$") 2>/dev/null || refuse "cannot write beside $render_md: $render_md.tmp.$$"
-tmp=$render_md.tmp.$$
+! present "$render_md.tmp.$$" || refuse "cannot write beside $render_md: $render_md.tmp.$$ is in the way"
+discard_hold
+(set -C && : >"$render_md.tmp.$$") 2>/dev/null && tmp=$render_md.tmp.$$
+discard_traps
+[ -n "$tmp" ] || refuse "cannot write beside $render_md: $render_md.tmp.$$"
 mkdir -p "$root" || refuse "cannot make TARGET_ROOT $root"
-mkdir "$root/.$name.render.$$" 2>/dev/null || refuse "cannot make the staging directory $root/.$name.render.$$"
-stage=$root/.$name.render.$$
+discard_hold
+mkdir "$root/.$name.render.$$" 2>/dev/null && stage=$root/.$name.render.$$
+discard_traps
+[ -n "$stage" ] || refuse "cannot make the staging directory $root/.$name.render.$$"
 
 # Remove what the operator's yes names: the old target, then the run's 03
 # outputs, then its render.md, so a failure leaves a render.md asking for
@@ -204,7 +211,9 @@ fp=$(render_fingerprint "$stage" "$RENDER_LIST") || refuse "cannot fingerprint t
 # render.md's text in one write, so its one status is the write's.
 printf '%s\n' "# Render of $name" '' "target: $target" "workspace: $head" "answers: $blob" \
   "fingerprint: $fp" '' '## Files' '' "$RENDER_LIST" >"$tmp" || refuse "cannot write $tmp"
-trap '' HUP INT TERM
+# The renames, with signals held off to the end: an empty target this run
+# removes is not put back if a rename then fails (decision 226).
+discard_hold
 if [ -d "$target" ] && [ ! -L "$target" ]; then
   rmdir -- "$target" 2>/dev/null || refuse "the target $target is no longer an empty directory; it is left alone"
 fi
