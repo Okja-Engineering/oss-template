@@ -678,6 +678,12 @@ assert_status 0 "$ST" "a target beside the workspace, under its parent, is a tar
 assert_eq "$PW/other" "$OUT" "  and is printed"
 tjudge "$PW/t" absent
 assert_status 0 "$ST" "a target beside a linked worktree is a target${OUT:+ ($OUT)}"
+# The rule makes no file, so a signal leaves none behind in TMPDIR
+# (conformance N-B of S2's fourth ship gate): it judges with no TMPDIR to
+# write in.
+OUT=$(TMPDIR="$SCRATCH/no-such-dir" && ANSWERS_WS="$PW/ws" answers_target_for "$PW/t" widget 2>&1)
+assert_status 1 "$?" "the root rule judges with no TMPDIR to write in"
+assert_contains "$OUT" "a working tree of this workspace" "  and refuses for its own reason"
 under git '*worktree list*' 1 answers_target_for /srv/targets widget
 assert_status 2 "$ST" "a TARGET_ROOT whose workspace's worktrees cannot be listed is not judged"
 assert_contains "$OUT" "cannot list the workspace's worktrees" "  and says so"
