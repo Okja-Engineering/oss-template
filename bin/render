@@ -6,9 +6,11 @@
 #
 # usage: bin/render NAME [--replace [--remove PATH]]
 #
-# It reads the run's answers.env, which confirmed.md must name by its blob
-# id, the schema and `foundation/` at the workspace's committed HEAD, and
-# nothing else (AC11). Everything is judged before anything is removed or
+# It reads the run's answers.env and confirmed.md, which must name it by its
+# blob id; the schema and `foundation/` at the workspace's committed HEAD;
+# HOME, to expand TARGET_ROOT's ~; TMPDIR, under which it makes its private
+# directory; what is at the target and beside it; and, under --replace,
+# render.md's record; and nothing else (AC11). Everything is judged before anything is removed or
 # written: the answers against HEAD's schema; TARGET, still TARGET_ROOT
 # with its ~ expanded under this HOME, then /NAME (decision 227);
 # TARGET_ROOT outside every working tree of the workspace; the target
@@ -35,9 +37,9 @@
 # fails. A failure or a signal removes only what this run made: its private
 # directory, made under TMPDIR, absolute, which holds every temporary file
 # but render.md's, the libraries' included; the staging directory; the
-# temporary file beside render.md; and the target when this run's rename
-# put it there. A
-# kill no trap sees (SIGKILL) leaves its staging directory, which the run's
+# temporary file beside render.md; the run's output folder,
+# stages/02-render/output/NAME/, when this run made it and it holds nothing;
+# and the target when this run's rename put it there. A kill no trap sees (SIGKILL) leaves its staging directory, which the run's
 # next render, or its next --redo, removes, and its private directory and
 # render.md's temporary file, which nothing reads.
 # Exit 0 when done, a last line that cannot be written included, 1 on a
@@ -99,7 +101,7 @@ done
 # private directory, which holds every temporary file, the libraries'
 # included, and the staging directory, render.md's temporary file and the
 # target, each recorded with signals held off as it is made (decision 226).
-work="" stage="" placed="" tmp=""
+work="" stage="" placed="" tmp="" outd_made=""
 cleanup() {
   local gone
   # Held off through cleanup, so a second signal never ends it partway.
@@ -108,6 +110,8 @@ cleanup() {
     [ -z "$gone" ] || gone=$(discard_remove "$gone") || printf 'bin/render: %s\n' "$gone" >&2
   done
   [ -z "$tmp" ] || rm -f -- "$tmp"
+  # The output folder this run made, only while it holds nothing.
+  [ -z "$outd_made" ] || rmdir -- "$outd_made" 2>/dev/null || true
   [ -z "$work" ] || rm -rf -- "$work"
 }
 trap cleanup EXIT
@@ -227,7 +231,12 @@ fault=$(discard_leftovers "$root" "$name" "$$") || refuse "$fault"
 # The places this run writes, each made exclusively where nothing, not even
 # a symbolic link, is in the way, and recorded with signals held off, so
 # cleanup removes all it made and nothing it did not.
-mkdir -p "${render_md%/*}" || refuse "cannot make ${render_md%/*}"
+if [ ! -d "${render_md%/*}" ]; then
+  discard_hold
+  mkdir -p "${render_md%/*}" && outd_made=${render_md%/*}
+  discard_traps
+  [ -n "$outd_made" ] || refuse "cannot make ${render_md%/*}"
+fi
 ! present "$render_md.tmp.$$" || refuse "cannot write beside $render_md: $render_md.tmp.$$ is in the way"
 discard_hold
 (set -C && : >"$render_md.tmp.$$") 2>/dev/null && tmp=$render_md.tmp.$$
@@ -270,7 +279,7 @@ if [ -e "$target/${stage##*/}" ]; then
 fi
 placed=$target stage=""
 mv -f -- "$tmp" "$render_md" || refuse "cannot write $render_md"
-placed="" tmp=""
+placed="" tmp="" outd_made=""
 # The render is done: a line that cannot be written does not make it a
 # refusal.
 printf 'bin/render: rendered %s into %s, fingerprint %s\n' "$name" "$target" "$fp" || true
