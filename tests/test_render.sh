@@ -1021,6 +1021,8 @@ failing mkdir '-p */out/.claude' 2 second_in_dir
 stage_refused "a rendered directory there already, made again, fails" "cannot make the directory .claude"
 failing ln '-s README.md */out/readme-link'
 stage_refused "a rendered link cannot be made" "cannot make the link readme-link"
+failing git 'init -q --bare *'
+stage_refused "the fingerprint's private repository cannot be made" "cannot make a private repository to fingerprint"
 for at in "2 cannot read foundation/ at HEAD" "3 the walk refuses the render:" "4 cannot fingerprint the render:"; do
   failing mktemp '-d *render.XXXXXX' "${at%% *}"
   stage_refused "the private directory of mktemp's call ${at%% *} cannot be made" "${at#* }"
