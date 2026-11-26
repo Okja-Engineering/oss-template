@@ -120,8 +120,8 @@ cleanup() {
     rm -f -- "$t"
   done
 }
+# The signals are trapped from the first temporary file on.
 trap cleanup EXIT
-discard_traps
 
 # stage FILE COMMAND [ARG...]: COMMAND's output in a temporary file beside
 # FILE, made exclusively where nothing, not even a symbolic link, is in the

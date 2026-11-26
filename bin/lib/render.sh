@@ -89,7 +89,7 @@ render_tree() {
     printf '%s\n' "$twins"
     return 1
   fi
-  tmp=$(mktemp -d) || return 2
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || return 2
   render__fields "$schema" "$answers" >"$tmp/fields" || {
     rm -rf "$tmp"
     printf 'cannot read the render fields\n'
@@ -299,7 +299,7 @@ render__substitute() {
 
 render_walk() {
   local target=$1 list=$2 p refused=0 tmp
-  tmp=$(mktemp -d) || return 1
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || return 1
   if ! render__entries "$target" G -name .git >"$tmp/git" ||
     ! render__entries "$target" F ! -type d >"$tmp/found" ||
     ! render__entries "$target" D -type d >"$tmp/dirs"; then
@@ -379,7 +379,7 @@ render__entries() (
 
 render_fingerprint() {
   local target=$1 list=$2 g st tree
-  g=$(mktemp -d) || return 1
+  g=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || return 1
   if ! git init -q --bare --template= --object-format=sha1 "$g/repo" >/dev/null 2>&1; then
     rm -rf "$g"
     printf 'cannot make a private repository to fingerprint the target\n'
@@ -422,7 +422,7 @@ render_root_ok() {
     return 1
   }
   tops+=("$path")
-  list=$(mktemp) || {
+  list=$(mktemp "${TMPDIR:-/tmp}/render.XXXXXX") || {
     printf 'cannot make a temporary file\n'
     return 1
   }

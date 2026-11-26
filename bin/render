@@ -103,10 +103,8 @@ cleanup() {
   [ -z "$work" ] || rm -rf -- "$work"
 }
 trap cleanup EXIT
-discard_traps
-
 discard_hold
-work=$(mktemp -d) || refuse "cannot make a temporary directory"
+work=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || refuse "cannot make a temporary directory"
 discard_traps
 TMPDIR=$work
 export TMPDIR
