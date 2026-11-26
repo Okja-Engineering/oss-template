@@ -10,6 +10,8 @@
 #        ws_real_check DIR NAME   (the workspace's own bin/checks/NAME)
 #        ws_copy FROM DIR         (a built fixture, copied)
 #        entry_ignored SIGNAL     (SIGNAL was ignored when the suite began)
+#        reader_gone FIFO CMD...  (CMD's status, writing to a pipe whose
+#                                 reader has gone)
 
 WS_ROOT=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/tests/lib/fixture.sh
@@ -46,6 +48,24 @@ ws_fixture() {
 # case that sends it is skipped then, saying so (the tests lens's T2 of S2's
 # fourth ship gate).
 entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive ]; }
+
+# reader_gone FIFO CMD...: CMD's status, run with standard output a pipe
+# whose reader has gone, so its first write raises SIGPIPE, or fails with
+# EPIPE where that is ignored. The pipe is FIFO, made here, its only reader
+# closed before CMD starts, so no race decides it (render R7 of S2's fourth
+# ship gate: a closed descriptor is reopened as /dev/null by some env).
+reader_gone() {
+  local fifo=$1 st
+  shift
+  mkfifo "$fifo" || return 125
+  exec 8<>"$fifo" 9>"$fifo"
+  exec 8<&-
+  "$@" >&9
+  st=$?
+  exec 9>&-
+  rm -f "$fifo"
+  return "$st"
+}
 
 # ws_copy FROM DIR: a copy of the fixture workspace FROM, and of its bare
 # remote, at DIR and DIR-origin.git, DIR's origin being its own copy. A suite

@@ -653,6 +653,20 @@ ln -s "$ROOT/real" "$ROOT/widget"
 rrefused "a target that is a symbolic link" "symbolic link" run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ROOT/widget")" "  with the link not removed"
 assert_eq "present" "$(gone "$ROOT/real/sub/file")" "  nor what it points to"
+# Without --remove, a redo whose old target the discard would not take, a
+# symbolic link, routes to moving it by hand, never to --remove (removal's
+# N6 v40 of S2's fourth ship gate).
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$ROOT/real/sub"
+printf 'x\n' >"$ROOT/real/sub/file"
+ln -s "$ROOT/real" "$ROOT/widget"
+rrefused "a redo whose old target is a symbolic link" "a redo may not remove it" \
+  run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_contains "$OUT" "the operator may move it away by hand" "  naming the way out"
+assert_not_contains "$OUT" "--remove" "  and no --remove"
+assert_eq "present" "$(gone "$ROOT/widget")" "  with the link not removed"
+assert_eq "present" "$(gone "$ROOT/real/sub/file")" "  nor what it points to"
 rendered "$SCRATCH/outside/widget"
 mkdir -p "$SCRATCH/outside/widget"
 rrefused "a path outside TARGET_ROOT, which render.md names but the run's TARGET is not" \
@@ -915,6 +929,37 @@ else
   assert_contains "$(cat "$OUTD/given.env")" "TITLE=C" "  as given.env is"
   assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
 fi
+# A second signal while cleanup runs is held off, so cleanup finishes: a
+# first run whose first rename fails, then a TERM as cleanup removes the
+# first of its two temporary files (answers' R9 M19 and removal's N6 v59 of
+# S2's fourth ship gate).
+if entry_ignored TERM; then
+  assert_pass "skipped: SIGTERM was ignored when the suite began, so the hold cannot be told"
+else
+  ready
+  mkdir -p "$SCRATCH/clstub$n"
+  printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) exit 1 ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" >"$SCRATCH/clstub$n/mv"
+  printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
+    "$(command -v rm)" >"$SCRATCH/clstub$n/rm"
+  chmod +x "$SCRATCH/clstub$n/mv" "$SCRATCH/clstub$n/rm"
+  OUT=$(cd "$R" && PATH="$SCRATCH/clstub$n:$PATH" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' 2>&1)
+  assert_status 1 "$?" "a TERM while cleanup removes a refused run's temporary files is held off"
+  assert_eq "gone" "$(gone "$OUTD")" "  so cleanup finishes: no temporary file, and no folder it made"
+fi
+# The signals are let through again once the files are placed: a run whose
+# last line meets a pipe whose reader has gone ends by SIGPIPE, its files
+# written (the tests lens's NIT 5 of S2's fourth ship gate).
+if entry_ignored PIPE; then
+  assert_pass "skipped: SIGPIPE was ignored when the suite began, so ask cannot trap it"
+else
+  ready
+  ask_out() { (cd "$R" && exec bin/ask "$@" 2>"$SCRATCH/err$n"); }
+  reader_gone "$SCRATCH/fifo$n" ask_out run widget 'TITLE=A' 'DESCRIPTION=B'
+  assert_status 141 "$?" "a run whose last line meets a pipe with no reader ends by SIGPIPE"
+  assert_eq "TITLE=A" "$(grep '^TITLE=' "$ANS")" "  once its answers are written"
+  assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
+fi
 # git's version gate, as render has it: the root rule's `git worktree list
 # -z` needs git 2.36 (answers' NIT 3 of S2's fourth ship gate).
 ready
@@ -1057,6 +1102,24 @@ before=$(state)
 asked awk '*ENVIRON\["S"] == ""*' 1 setup OWNER=acme
 assert_status 1 "$ST" "refused: setup whose setup fields cannot be read"
 assert_contains "$OUT" "cannot read the setup fields" "  and the refusal says so"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+# The look, for each field setup/given.env gave, at whether it is given
+# again: setup's first answers_get (answers' R9's M20 of S2's fourth ship
+# gate). One that fails keeps nothing it cannot tell.
+ready
+before=$(state)
+FAIL_STATUS=2 asked awk '*!found && i > 1*' 1 setup OWNER=acme
+assert_status 1 "$ST" "refused: setup that cannot tell whether a field given before is given again"
+assert_contains "$OUT" "cannot read the answers given" "  and the refusal says so"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+# Setup's root rule, which cannot list the workspace's working trees, cannot
+# judge TARGET_ROOT, and writes nothing (removal's N6 v57 of S2's fourth
+# ship gate).
+ready
+before=$(state)
+asked git '*worktree list*' 1 setup "TARGET_ROOT=$SCRATCH/elsewhere$n"
+assert_status 1 "$ST" "refused: setup whose TARGET_ROOT cannot be judged"
+assert_contains "$OUT" "cannot judge TARGET_ROOT" "  and the refusal says so"
 assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
 # A default that cannot be worked out is refused, never written empty: in
 # setup, the first schema cell read is OWNER's default; in run, the 54th is

@@ -707,6 +707,22 @@ chmod +x "$SCRATCH/mkstub$n/mkdir"
 OUT=$(cd "$R" && PATH="$SCRATCH/mkstub$n:$PATH" bin/render widget 2>&1)
 ST=$?
 assert_eq "" "$(entries "$ROOT" | grep '^\.widget\.render\.')" "a signal while render makes its staging directory leaves none"
+# The signals are let through again once render.md's temporary file is
+# recorded: a TERM while render makes TARGET_ROOT, between that hold and the
+# staging directory's, ends it (the tests lens's NIT 5, N020, of S2's fourth
+# ship gate).
+if entry_ignored TERM; then
+  assert_pass "skipped: SIGTERM was ignored when the suite began, so render cannot trap it"
+else
+  ready
+  mkdir -p "$SCRATCH/rtstub$n"
+  printf '#!/bin/sh\n[ "$*" != "-p %s" ] || kill -s TERM "$PPID"\nexec %s "$@"\n' \
+    "$ROOT" "$(command -v mkdir)" >"$SCRATCH/rtstub$n/mkdir"
+  chmod +x "$SCRATCH/rtstub$n/mkdir"
+  OUT=$(cd "$R" && PATH="$SCRATCH/rtstub$n:$PATH" bin/render widget 2>&1)
+  assert_status 143 "$?" "a TERM while render makes TARGET_ROOT ends it with 143"
+  assert_eq "" "$(left)" "  leaving no target, staging directory, render.md or temporary file"
+fi
 # Every signal render traps is held off during the renames: each sent in
 # turn, in one render, any not held would end it.
 ready
@@ -983,6 +999,11 @@ failing git '*hash-object*'
 stage_refused "the run's answers cannot be hashed" "cannot hash stages/01-ask/output/widget/answers.env"
 failing cp '-Rp *'
 stage_refused "the render cannot be copied into its staging directory" "cannot copy the render into"
+# An empty output folder there before is not one render made: a refusal
+# leaves it (removal's N6 v89 of S2's fourth ship gate).
+out02() { mkdir -p "$R/stages/02-render/output/widget"; }
+failing cp '-Rp *' 1 out02
+stage_refused "the render cannot be copied, beside an empty output folder there before" "cannot copy the render into"
 # Each private directory that cannot be made is refused, saying so, never
 # read as a path under / (the tests lens's N13 and N14 of S2's third ship
 # gate): render's own, its rendered foundation's, the walk's and the
@@ -1100,6 +1121,18 @@ failing grep '-Eq \[{]\[{]\[A-Z_]+\[}]\[}] */out/*' 1 "" 2
 stage_refused "the look for a placeholder left fails" "cannot look for a placeholder left in GOVERNANCE.md"
 failing awk '*{ found = 1; exit } END { exit !found }*' 1 "" 2
 stage_refused "the walk's look for a directory's listed file fails" "the walk cannot judge the directories"
+# Each judge whose 1 is a refusal reads a higher status as a judgement it
+# could not make, never a pass, nor a refusal whose route would not help
+# (render R6 of S2's fourth ship gate): the schema's check, the answers'
+# check, whose first value check is NAME's, and the target's root rule.
+failing awk '*function bad(why)*' 1 "" 2
+stage_refused "the schema's check cannot judge" "cannot read shared/answers.tsv at HEAD"
+failing grep '-Eq -e ^((\[*' 2 "" 2
+stage_refused "the answers' check cannot judge" "cannot judge the answers under shared/answers.tsv at HEAD"
+failing git '*worktree list*' 1 "" 128
+stage_refused "the target's root rule cannot judge" \
+  "stages/01-ask/output/widget/answers.env: cannot list the workspace's worktrees"
+assert_not_contains "$OUT" "--redo" "  and names no redo, which would not help"
 # render.md's record, read by the discard, failing: refused, saying so,
 # with the target and render.md left.
 ready
@@ -1301,6 +1334,14 @@ ready
 (cd "$R" && exec bin/render widget >&- 2>/dev/null)
 assert_status 0 "$?" "render with standard output closed, once the render is done"
 assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
+# And with standard output a pipe whose reader has gone, which no env
+# reopens (render R7 of S2's fourth ship gate): the write fails, SIGPIPE held
+# off with the renames, and render exits 0.
+ready
+render_out() { (cd "$R" && exec bin/render "$@" 2>/dev/null); }
+reader_gone "$SCRATCH/fifo$n" render_out widget
+assert_status 0 "$?" "render whose last line meets a pipe with no reader, once the render is done"
+assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
 # render.md's text, written to its temporary file, is checked: a write that
 # fails refuses, so no partial render.md is recorded (render N6's v03).
 ready
@@ -1337,6 +1378,13 @@ ready
 mkdir -p "$R/stages/02-render/output/widget"
 ln -s "$SCRATCH/nowhere$n" "$R/stages/02-render/output/widget/render.md"
 refused "a dangling symbolic link at render.md" "render.md is not a file" widget
+# A dangling symbolic link at the target is present: refused with the
+# --remove route, and left (render R5 of S2's fourth ship gate).
+ready
+mkdir -p "$ROOT"
+ln -s "$SCRATCH/nowhere$n" "$ROOT/widget"
+refused "a dangling symbolic link at the target" "the target $ROOT/widget is present" widget
+assert_eq "$SCRATCH/nowhere$n" "$(readlink "$ROOT/widget")" "  and the link is left"
 
 # --- TARGET_ROOT outside every working tree of the workspace ----------------------------------
 # The root rule is the one target rule's (decision 227): bin/ask run
