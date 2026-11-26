@@ -231,6 +231,68 @@ fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
 - `Read(**/secrets/**)`'
 fixture_commit "$R" "test: a fence in the guards section"
 passes "a deny entry listed after a fence in § Agent guards"
+# § Agent guards is read as the one Markdown subset reads it (conformance F3
+# of S2's second ship gate): a heading in a ~~~ fence is not one, and a
+# setext heading is.
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_append "$R/CONTRIBUTING.md" '
+~~~
+## Agent guards
+- `Read(**/secrets/**)`
+~~~'
+fixture_commit "$R" "test: the heading in a tilde fence"
+refused "a deny entry listed under an Agent guards heading inside a ~~~ fence" "Read(**/secrets/**)"
+valid
+fixture_replace "$R/CONTRIBUTING.md" '## Agent guards' 'Agent guards
+------------'
+fixture_commit "$R" "test: a setext Agent guards heading"
+passes "deny entries listed under a setext § Agent guards"
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
+
+Another section
+---------------
+
+- `Read(**/secrets/**)`'
+fixture_commit "$R" "test: a setext heading ending the section"
+refused "a deny entry listed after a setext heading that ends § Agent guards" "Read(**/secrets/**)"
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
+
+### A subsection
+
+- `Read(**/secrets/**)`'
+fixture_commit "$R" "test: a subsection of the section"
+passes "a deny entry listed in a subsection of § Agent guards"
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
+
+Agents are also denied `Read(**/secrets/**)`,
+which a paragraph lists.'
+fixture_commit "$R" "test: a deny entry in a paragraph of the section"
+passes "a deny entry listed in a paragraph of § Agent guards"
+# One frontmatter rule: YAML frontmatter is no setext heading, so it makes
+# no anchor.
+valid
+put docs/front.md '---' 'title: Front matter' '---' '' '# Body'
+line CONTEXT.md 'See [it](docs/front.md#title-front-matter).'
+refused "an anchor YAML frontmatter would make as a setext heading" "docs/front.md#title-front-matter"
+valid
+put docs/front.md '---' 'title: Front matter' '---' '' '# Body'
+line CONTEXT.md 'See [it](docs/front.md#body).'
+passes "an anchor of a heading after frontmatter"
+valid
+put AGENTS.md '---' 'see: "[it](docs/absent.md)"' '---' '' '# A fixture workspace' '' 'Start from [CONTEXT.md](CONTEXT.md).'
+fixture_commit "$R" "test: a link in frontmatter"
+passes "a link in frontmatter, which is not a link"
 
 # Read through the tree reader.
 valid
@@ -256,7 +318,7 @@ cannot_run awk '*$1 == ENVIRON\["N"]*' 1 "a rule line's links"
 cannot_run awk '*print "OK" s*' 1 "where a rule line's link leads"
 cannot_run awk '*print "OK" s*' 2 "where a link leads"
 cannot_run git '*:(literal)CONTRIBUTING.md' 1 "CONTRIBUTING.md"
-cannot_run awk '*insec = ($0 == "## Agent guards")*' 1 "§ Agent guards"
+cannot_run awk '*insec = (t == "Agent guards")*' 1 "§ Agent guards"
 cannot_run awk '*s = substr(s, i + 6)*' 1 "the deny entries"
 
 assert_done

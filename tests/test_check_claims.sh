@@ -156,6 +156,24 @@ fresh
 put README.md '---' 'title: never' '---' '' '# A fixture'
 fixture_commit "$R" "test: frontmatter"
 passes "a rule word in frontmatter"
+fresh
+put README.md '---' 'title: never' '...' '' '# A fixture'
+fixture_commit "$R" "test: frontmatter closed by ..."
+passes "a rule word in frontmatter closed by ..."
+fresh
+put README.md '# A fixture' '' '---' '' 'Force pushes to main are refused.' '' '---'
+fixture_commit "$R" "test: a break, not frontmatter"
+refused "a rule word between thematic breaks, not on the first line" "README.md:5"
+# Indented code is code, as fenced code is (conformance F3 of S2's second
+# ship gate); an indented line continuing a paragraph is not.
+fresh
+put README.md '# A fixture' '' '    git push --force is refused' '' '	never, after a tab'
+fixture_commit "$R" "test: indented code"
+passes "rule words in indented code"
+fresh
+put README.md '# A fixture' '' 'A paragraph whose next line,' '    never indented code, is part of it.'
+fixture_commit "$R" "test: an indented paragraph line"
+refused "a rule word on an indented line continuing a paragraph" "README.md:4"
 
 # What is not judged (AC4).
 for d in foundation docs/adr docs/work tests/fixtures; do
