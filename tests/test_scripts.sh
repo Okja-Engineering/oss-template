@@ -8,6 +8,10 @@ export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
+# Git here reads the workspace alone, not a GIT_DIR or configuration of the
+# caller's.
+# shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/fixture.sh
+. "$TEST_DIR/../foundation/tests/lib/fixture.sh"
 WS=$(CDPATH='' cd -- "$TEST_DIR/.." && pwd)
 
 scripts=$(cd "$WS" && git ls-files -z -- . ':!foundation/' ':!tests/fixtures/' | tr '\0' '\n') || {

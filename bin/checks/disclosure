@@ -229,7 +229,10 @@ EOF
 if has_path CONTEXT.md; then
   count=$(lines_of CONTEXT.md) || exit 2
   [ "$count" -le 60 ] || refuse "CONTEXT.md: $count lines, over 60"
-  if tree_cat "$src" CONTEXT.md | grep -x '## Routing' >/dev/null; then
+  # Read whole, its status read: a CONTEXT.md that cannot be read is a check
+  # that cannot run, not one with no routing table.
+  routing=$(tree_cat "$src" CONTEXT.md | awk '$0 == "## Routing" { n++ } END { print n + 0 }') || exit 2
+  if [ "$routing" -gt 0 ]; then
     # Each row counts a stage once, however often it mentions it.
     routed=$(section CONTEXT.md Routing | body_rows | awk '{
       split("", seen)
