@@ -1692,6 +1692,10 @@ for lic in apache-2.0 none; do
   if [ "$lic" = none ]; then want=LICENSE; else want=""; fi
   assert_eq "$want" "$(changed "$SCRATCH/base" "$SCRATCH/v")" \
     "LICENSE=$lic: OWNER, not a render field, changes only what HOLDER's default reaches: ${want:-nothing}"
+  # With HOLDER given, OWNER reaches no render field, and changes nothing
+  # (conformance N-H of S2's fourth ship gate).
+  variant "$lic" --setup-override OWNER=acme HOLDER=Okja-Engineering
+  assert_eq "" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "LICENSE=$lic: OWNER, with HOLDER given, changes nothing"
   variant "$lic" VISIBILITY=private
   assert_eq "" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "LICENSE=$lic: VISIBILITY, not a render field, changes nothing"
   variant "$lic" --setup-override "TARGET_ROOT=$SCRATCH/elsewhere$n"

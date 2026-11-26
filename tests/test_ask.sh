@@ -915,6 +915,20 @@ else
   assert_contains "$(cat "$OUTD/given.env")" "TITLE=C" "  as given.env is"
   assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
 fi
+# git's version gate, as render has it: the root rule's `git worktree list
+# -z` needs git 2.36 (answers' NIT 3 of S2's fourth ship gate).
+ready
+mkdir -p "$SCRATCH/oldgit$n"
+printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.35.9"; exit 0; fi\nexec %s "$@"\n' "$(command -v git)" >"$SCRATCH/oldgit$n/git"
+chmod +x "$SCRATCH/oldgit$n/git"
+for args in "setup OWNER=acme" "run widget TITLE=A DESCRIPTION=B"; do
+  before=$(state)
+  # shellcheck disable=SC2086 # the arguments, split
+  OUT=$(cd "$R" && PATH="$SCRATCH/oldgit$n:$PATH" bin/ask $args 2>&1)
+  assert_status 1 "$?" "refused: ${args%% *} under git older than 2.36"
+  assert_contains "$OUT" "older than 2.36" "  and the refusal names the floor"
+  assert_eq "$before gone" "$(state) $(gone "$OUTD")" "  and nothing is written"
+done
 # A given file names each field once.
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
