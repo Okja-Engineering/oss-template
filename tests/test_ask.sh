@@ -1028,4 +1028,72 @@ rendered
 mkdir -p "$ROOT/other"
 rrefused "--remove naming another path, the target present" "remove $ROOT/other: it is not the run's target $ROOT/widget" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
+
+# --- each file bin/ask writes is absent or a regular file (decision 230) ------------------
+# A directory, a link to a directory or a dangling link where bin/ask would
+# write a file is refused before anything is staged or removed, and left as
+# it was, with nothing written into it or through it.
+in_way() { # KIND PATH: a directory, a link to one, or a dangling link at PATH
+  rm -rf "$2"
+  mkdir -p "${2%/*}" "$SCRATCH/away$n"
+  case "$1" in
+    dir) mkdir "$2" ;;
+    dirlink) ln -s "$SCRATCH/away$n" "$2" ;;
+    dangling) ln -s "$SCRATCH/nowhere$n" "$2" ;;
+  esac
+}
+kind_of() { # PATH: dir, dirlink, dangling, file or gone
+  if [ -L "$1" ]; then
+    if [ -d "$1" ]; then echo dirlink; else echo dangling; fi
+  elif [ -d "$1" ]; then echo dir
+  elif [ -e "$1" ]; then echo file
+  else echo gone
+  fi
+}
+in_way_refused() { # KIND PATH LABEL ARG...: bin/ask ARG... refused, PATH left
+  local kind=$1 path=$2 label=$3
+  shift 3
+  ask "$@"
+  assert_status 1 "$ST" "refused: a $kind at $label"
+  assert_contains "$OUT" "$label is not a file" "  and the refusal says so"
+  assert_eq "$kind" "$(kind_of "$path")" "  and the $kind is left"
+  assert_eq "" "$(ls -A "$SCRATCH/away$n")" "  with nothing written through it"
+  assert_eq "" "$(find "$R/setup" "$R/stages/01-ask/output" -name '*.tmp.*' 2>/dev/null)" "  and no temporary file left"
+}
+for kind in dir dirlink dangling; do
+  fresh
+  in_way "$kind" "$R/setup/answers.env"
+  in_way_refused "$kind" "$R/setup/answers.env" setup/answers.env setup OWNER=acme
+  fresh
+  ask setup OWNER=acme
+  in_way "$kind" "$R/setup/given.env"
+  in_way_refused "$kind" "$R/setup/given.env" setup/given.env setup OWNER=other
+  # Given nothing, setup would remove setup/given.env: it is refused first.
+  in_way_refused "$kind" "$R/setup/given.env" setup/given.env setup
+  fresh
+  in_way "$kind" "$R/setup/questionnaire.md"
+  in_way_refused "$kind" "$R/setup/questionnaire.md" setup/questionnaire.md questionnaire
+  ready
+  in_way "$kind" "$OUTD/answers.env"
+  in_way_refused "$kind" "$OUTD/answers.env" stages/01-ask/output/widget/answers.env run widget 'TITLE=A' 'DESCRIPTION=B'
+  ready
+  in_way "$kind" "$OUTD/given.env"
+  in_way_refused "$kind" "$OUTD/given.env" stages/01-ask/output/widget/given.env run widget 'TITLE=A' 'DESCRIPTION=B'
+  ready
+  in_way "$kind" "$OUTD/setup.override.env"
+  in_way_refused "$kind" "$OUTD/setup.override.env" stages/01-ask/output/widget/setup.override.env \
+    run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override 'HOLDER=Someone'
+  ready
+  ask run widget 'TITLE=A' 'DESCRIPTION=B'
+  in_way "$kind" "$OUTD/confirmed.md"
+  in_way_refused "$kind" "$OUTD/confirmed.md" stages/01-ask/output/widget/confirmed.md confirm widget --by 'A Person'
+done
+# A redo is refused alike, with the run's files and target as they were.
+rendered
+in_way dir "$OUTD/given.env"
+before=$(run_state)
+ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+assert_status 1 "$ST" "refused: a redo with a directory at the run's given.env"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and the target is left"
 assert_done
