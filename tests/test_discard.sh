@@ -286,5 +286,68 @@ fixture_failing "$SCRATCH/rec$n" awk '*ENVIRON\["K"]*' 1 2
 OUT=$(PATH="$SCRATCH/rec$n:$PATH" && discard_record "$A" widget "$M")
 assert_status 1 "$?" "refused: a render.md whose record cannot be read"
 assert_contains "$OUT" "cannot read $M" "  and the refusal says so"
+# A record names a target only when its value is an absolute TARGET under
+# the path rule (removal N3 of S2's fourth ship gate), the target gone.
+for value in '' nowhere "$SCRATCH/x/../widget"; do
+  target
+  printf '%s\n' '# Render of widget' '' "target: $value" >"$M"
+  rm -rf "$T"
+  recjudge
+  assert_status 1 "$ST" "refused: a render.md whose target is \"$value\""
+  assert_contains "$OUT" "$M names no target" "  and the refusal says so"
+  OUT=$(discard_check "$T" "$A" widget "$M")
+  assert_status 1 "$?" "  and the discard refuses it too"
+done
+
+# --- present, absent, and cannot tell (removal N2 of S2's fourth ship gate) -------------------
+# discard_there PATH: 0 when something is there, 1 when nothing is, 2 when
+# a directory above it cannot be searched; a failure never read as absent.
+there() { discard_there "$1"; echo $?; }
+target
+ln -s "$SCRATCH/nowhere" "$ROOT/dangling"
+printf 'x\n' >"$ROOT/file"
+assert_eq "0 0 1 1 1" "$(there "$T") $(there "$ROOT/dangling") $(there "$ROOT/absent") $(there "$ROOT/absent/deeper") $(there "$ROOT/file/under")" \
+  "discard_there: a directory and a dangling link are there; a path under nothing, or under a file, is not"
+if [ "$(id -u)" != 0 ]; then
+  chmod 000 "$ROOT"
+  assert_eq "2 2" "$(there "$T") $(there "$ROOT/absent")" "  and under a directory that cannot be searched, cannot be told"
+  # The record judge: a render.md, or the target it names, that cannot be
+  # told there, is refused, never judged absent.
+  target
+  recorded "$T"
+  chmod 000 "$ROOT"
+  recjudge
+  chmod 755 "$ROOT"
+  assert_status 1 "$ST" "refused: a render.md naming a target that cannot be told there"
+  assert_contains "$OUT" "cannot tell whether $T is there" "  and the refusal says so"
+  target
+  mkdir -p "$SCRATCH/md$n"
+  M="$SCRATCH/md$n/render.md"
+  recorded "$T"
+  chmod 000 "$SCRATCH/md$n"
+  recjudge
+  OUT2=$(discard_check "$T" "$A" widget "$M")
+  ST2=$?
+  chmod 755 "$SCRATCH/md$n"
+  assert_status 1 "$ST" "refused: a render.md that cannot be told there"
+  assert_contains "$OUT" "cannot tell whether $M is there" "  and the refusal says so"
+  assert_status 1 "$ST2" "  and the discard refuses it too"
+  assert_contains "$OUT2" "cannot tell whether $M is there" "  saying so"
+  assert_eq "present" "$(gone "$T/sub/file")" "  with nothing removed"
+  # The sweep: a root it cannot list is refused, never read as holding no
+  # leftover (render R4 of S2's fourth ship gate).
+  target
+  mkdir -p "$ROOT/.widget.render.4242"
+  chmod 300 "$ROOT"
+  OUT=$(discard_leftovers "$ROOT" widget)
+  ST=$?
+  chmod 755 "$ROOT"
+  assert_status 1 "$ST" "refused: a sweep of a root it cannot list"
+  assert_contains "$OUT" "cannot list $ROOT" "  and the refusal says so"
+  assert_eq "present" "$(gone "$ROOT/.widget.render.4242")" "  and the leftover is left"
+fi
+target
+OUT=$(discard_leftovers "$SCRATCH/no-such-root$n" widget)
+assert_status 0 "$?" "a sweep of a root that is not there finds nothing to remove${OUT:+ ($OUT)}"
 
 assert_done

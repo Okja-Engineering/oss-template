@@ -925,6 +925,19 @@ assert_status 1 "$?" "refused: a leftover staging directory that cannot be remov
 assert_contains "$OUT" "could not remove $ROOT/.widget.render.4242" "  and the refusal names it"
 assert_eq "gone gone" "$(gone "$ROOT/widget") $(gone "$R/stages/02-render/output/widget/render.md")" \
   "  with nothing written"
+# p24: a TARGET_ROOT the sweep cannot list is refused, never read as
+# holding no leftover (render R4 of S2's fourth ship gate).
+if [ "$(id -u)" != 0 ]; then
+  ready
+  mkdir -p "$ROOT/.widget.render.4242"
+  chmod 300 "$ROOT"
+  render widget
+  chmod 755 "$ROOT"
+  assert_status 1 "$ST" "refused: a TARGET_ROOT the sweep cannot list"
+  assert_contains "$OUT" "cannot list $ROOT" "  and the refusal says so"
+  assert_eq "present gone" "$(gone "$ROOT/.widget.render.4242") $(gone "$ROOT/widget")" \
+    "  with the leftover left and nothing written"
+fi
 # The worktree list's exit status is read.
 ready
 mkdir -p "$SCRATCH/gstub$n"

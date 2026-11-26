@@ -1221,6 +1221,48 @@ mv "$SCRATCH/home$n/a/targets/widget" "$SCRATCH/away$n"
 OUT=$(cd "$R" && HOME="$SCRATCH/home$n/b" bin/ask run widget --redo 'TITLE=C' 2>&1)
 assert_status 0 "$?" "  and, once it is moved away by hand, the redo goes on"
 assert_eq "TARGET=$SCRATCH/home$n/b/targets/widget" "$(grep '^TARGET=' "$ANS")" "  under this HOME"
+# r08: the old target is the old answers' verified target, never the old
+# TARGET_ROOT expanded under this HOME (removal N5 of S2's fourth ship
+# gate): under another HOME a redo neither refuses on, nor sweeps under,
+# a root the run never used.
+fresh
+mkdir -p "$SCRATCH/home$n/a" "$SCRATCH/home$n/b/targets/widget" "$SCRATCH/home$n/b/targets/.widget.render.222"
+printf 'unrelated\n' >"$SCRATCH/home$n/b/targets/widget/f"
+ask setup 'TARGET_ROOT=~/targets'
+OUTD="$R/stages/01-ask/output/widget"
+ANS="$OUTD/answers.env"
+(cd "$R" && HOME="$SCRATCH/home$n/a" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' >/dev/null 2>&1)
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/b" bin/ask run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/elsewhere$n" 2>&1)
+assert_status 0 "$?" "a redo under another HOME, its old target unverified, judges none there${OUT:+ ($OUT)}"
+assert_eq "present present" "$(gone "$SCRATCH/home$n/b/targets/widget/f") $(gone "$SCRATCH/home$n/b/targets/.widget.render.222")" \
+  "  and leaves that root's directories alone"
+if [ "$(id -u)" != 0 ]; then
+  # r03: the old TARGET_ROOT cannot be searched, so whether render.md's
+  # target is there cannot be told: the redo is refused, never judging it
+  # gone and dropping its record.
+  rendered
+  chmod 000 "$ROOT"
+  rrefused "a redo whose recorded target cannot be told there" "cannot tell whether $ROOT/widget is there" \
+    run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+  chmod 755 "$ROOT"
+  # r03b: the run's 02 output folder cannot be searched, so whether
+  # render.md is there cannot be told.
+  rendered
+  chmod 000 "$R/stages/02-render/output/widget"
+  rrefused "a redo whose render.md cannot be told there" "cannot tell whether stages/02-render/output/widget/render.md is there" \
+    run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+  chmod 755 "$R/stages/02-render/output/widget"
+  # The sweep under the old TARGET_ROOT: a root it cannot list is refused.
+  rendered
+  rm -rf "$ROOT/widget"
+  mkdir -p "$ROOT/.widget.render.4242"
+  rm -f "$R/stages/02-render/output/widget/render.md"
+  chmod 300 "$ROOT"
+  rrefused "a redo whose old TARGET_ROOT cannot be listed for leftovers" "cannot list $ROOT" \
+    run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+  chmod 755 "$ROOT"
+  assert_eq "present" "$(gone "$ROOT/.widget.render.4242")" "  and the leftover is left"
+fi
 # NIT4: a record file the reader refuses names the way out, which works.
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
