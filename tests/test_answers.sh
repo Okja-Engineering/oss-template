@@ -678,6 +678,13 @@ assert_status 0 "$ST" "a target beside the workspace, under its parent, is a tar
 assert_eq "$PW/other" "$OUT" "  and is printed"
 tjudge "$PW/t" absent
 assert_status 0 "$ST" "a target beside a linked worktree is a target${OUT:+ ($OUT)}"
+if [ "$(id -u)" != 0 ]; then
+  chmod 000 "$PW/t/held"
+  tjudge "$PW/t" held
+  chmod 755 "$PW/t/held"
+  assert_status 1 "$ST" "refused: a target holding a working tree that cannot be entered, never one judged to hold none"
+  assert_contains "$OUT" "TARGET $PW/t/held is at or above" "  and the refusal says so"
+fi
 # The rule makes no file, so a signal leaves none behind in TMPDIR
 # (conformance N-B of S2's fourth ship gate): it judges with no TMPDIR to
 # write in.
