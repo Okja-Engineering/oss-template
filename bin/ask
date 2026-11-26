@@ -206,8 +206,17 @@ write() {
 # sorted TEXT: TEXT's lines, sorted; a failed sort fails.
 sorted() { printf '%s' "$1" | sort; }
 
-# present PATH: something, a dangling symbolic link included, is at PATH.
-present() { [ -e "$1" ] || [ -L "$1" ]; }
+# present PATH: something, a dangling symbolic link included, is at PATH;
+# when that cannot be told, a directory above it unsearchable, the command
+# refuses, never reading it as absent (decision 228).
+present() {
+  discard_there "$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) refuse "cannot tell whether ${1#"$ws/"} is there: a directory above it cannot be searched; give its owner search permission, then run the command again" ;;
+  esac
+}
 # files FILE...: each FILE this command may write, rename over or remove is
 # absent, or a regular file and not a symbolic link, so a rename replaces
 # that file and nothing else, and lands nothing in a directory or through a
@@ -369,12 +378,12 @@ cmd_run() {
       1) refuse "$rel/answers.env holds no TARGET, so the run is not redone; the operator may remove the run's folder $rel by hand and run it again" ;;
       *) refuse "cannot read TARGET from $rel/answers.env" ;;
     esac
-    # The old target, as the discard derives it: the old TARGET_ROOT, from
-    # this answers file before it is replaced, then /NAME (decision 227).
-    # One that gives no target is none to remove; the new TARGET_ROOT is
-    # worked out below, and a target render.md records is judged from it.
-    pick "$old_answers" TARGET_ROOT "$rel/answers.env"
-    old_target=$(answers_target_for "$PICKED" "$name")
+    # The old target: the old answers file's TARGET, verified as the
+    # discard verifies it, TARGET_ROOT under this HOME, then /NAME (decision
+    # 227). Answers that give none verified, edited by hand, holding no
+    # TARGET_ROOT or written under another HOME, give no old target to
+    # remove; a target render.md records is judged from that record.
+    old_target=$(answers_target_check "$outd/answers.env" "$name")
     case $? in
       0) ;;
       1) old_target="" ;;
@@ -484,7 +493,14 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
   [ -z "$given_pairs" ] || stage "$outd/given.env" printf '%s\n' "$given_text"
   stage "$outd/answers.env" printf '%s\n' "$answers_text"
 
-  # Remove, then place.
+  # Remove, then place. A killed render's staging directories under the old
+  # TARGET_ROOT, which a moved TARGET_ROOT would otherwise strand, go first,
+  # so a sweep that refuses, as of a root it cannot list, leaves the run's
+  # files as they were (decision 226). An old target none verifies has no
+  # root to sweep.
+  if [ "$redo" = 1 ] && [ -n "$old_target" ]; then
+    fault=$(discard_leftovers "${old_target%/*}" "$name") || refuse "$fault"
+  fi
   if [ "$have_remove" = 1 ]; then
     fault=$(discard_target "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
   fi
@@ -494,13 +510,6 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
     for value in "$ws/stages/03-verify/output/$name" "$ws/stages/02-render/output/$name" "$outd/confirmed.md"; do
       fault=$(discard_remove "$value") || refuse "$fault"
     done
-    # A killed render's staging directories under the old TARGET_ROOT, which
-    # a moved TARGET_ROOT would otherwise strand (decision 226).
-    # An old TARGET_ROOT that gives no target has no staging directory of
-    # this run's to remove.
-    if [ -n "$old_target" ]; then
-      fault=$(discard_leftovers "${old_target%/*}" "$name") || refuse "$fault"
-    fi
   fi
   if [ -z "$override_pairs" ] && present "$outd/setup.override.env"; then
     fault=$(discard_remove "$outd/setup.override.env") || refuse "$fault"

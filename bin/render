@@ -78,8 +78,17 @@ refuse() {
   exit 1
 }
 
-# present PATH: something, a dangling symbolic link included, is at PATH.
-present() { [ -e "$1" ] || [ -L "$1" ]; }
+# present PATH: something, a dangling symbolic link included, is at PATH;
+# when that cannot be told, a directory above it unsearchable, render
+# refuses, never reading it as absent (decision 228).
+present() {
+  discard_there "$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) refuse "cannot tell whether $1 is there: a directory above it cannot be searched; give its owner search permission, then run bin/render again" ;;
+  esac
+}
 # empty_dir PATH: PATH is a directory, not a symbolic link, that ls lists
 # whole as holding nothing.
 empty_dir() {

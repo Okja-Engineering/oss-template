@@ -26,6 +26,11 @@
 #       dangling link included, must be the one the discard derives from
 #       ANSWERS. Print the target it names, nothing when it is not a file;
 #       exit 0, or 1 with the reason out.
+#   discard_there PATH
+#       exit 0 when something is at PATH, a dangling link included, 1 when
+#       nothing is, and 2 when that cannot be told: a directory above PATH
+#       that cannot be searched. Each judge reads its three answers apart,
+#       and cannot-tell refuses (decision 228).
 #   discard_remove PATH
 #       the removal helper: when PATH is a directory, and not a symbolic
 #       link, restore the owner's read, write and search permission on it
@@ -103,6 +108,21 @@ discard_hold() {
 
 discard_leftovers() {
   local root=$1 name=$2 keep=${3:-} left
+  # A root that is not there holds none; one that cannot be listed is
+  # refused, as a glob of it would give nothing (decision 228).
+  discard_there "$root"
+  case $? in
+    0) ;;
+    1) return 0 ;;
+    *)
+      printf 'cannot tell whether %s is there, so it cannot be swept of a killed render'"'"'s staging directories\n' "$root"
+      return 1
+      ;;
+  esac
+  if [ -d "$root" ] && { [ ! -r "$root" ] || [ ! -x "$root" ]; }; then
+    printf 'cannot list %s, so it cannot be swept of a killed render'"'"'s staging directories; give its owner read and search permission on it\n' "$root"
+    return 1
+  fi
   for left in "$root/.$name.render."*; do
     case "${left##*/}" in
       ".$name.render."*[!0-9]* | ".$name.render." | ".$name.render.$keep") continue ;;
@@ -127,6 +147,7 @@ discard_check() {
     printf 'remove %s: %s\n' "$path" "$target"
     return 1
   fi
+  discard__file "$render_md" || return 1
   if [ -f "$render_md" ]; then
     if ! recorded=$(discard__recorded "$render_md"); then
       printf 'remove %s: %s\n' "$path" "$recorded"
@@ -149,13 +170,20 @@ discard_check() {
 }
 
 discard_record() {
-  local answers=$1 name=$2 render_md=$3 recorded target
+  local answers=$1 name=$2 render_md=$3 recorded target st
+  discard__file "$render_md" || return 1
   [ -f "$render_md" ] || return 0
   recorded=$(discard__recorded "$render_md") || {
     printf '%s\n' "$recorded"
     return 1
   }
-  if [ -e "$recorded" ] || [ -L "$recorded" ]; then
+  discard_there "$recorded"
+  st=$?
+  if [ "$st" -gt 1 ]; then
+    printf 'cannot tell whether %s is there, the target render.md names: a directory above it cannot be searched\n' "$recorded"
+    return 1
+  fi
+  if [ "$st" = 0 ]; then
     if ! target=$(answers_target_check "$answers" "$name"); then
       printf 'render.md names %s, present, which the discard cannot judge: %s\n' "$recorded" "$target"
       return 1
@@ -172,10 +200,24 @@ discard_record() {
 # reason out when it names none or cannot be read, a failure never read as
 # none (decision 228).
 discard__recorded() {
-  local recorded
+  local recorded fault
   recorded=$(answers_record "$1" target)
   case $? in
-    0) printf '%s\n' "$recorded" ;;
+    0)
+      # Only an absolute TARGET under the path rule names a target.
+      fault=$(answers_target "$recorded")
+      case $? in
+        0) printf '%s\n' "$recorded" ;;
+        1)
+          printf '%s names no target: %s\n' "$1" "$fault"
+          return 1
+          ;;
+        *)
+          printf 'cannot judge the target %s names: %s\n' "$1" "$fault"
+          return 1
+          ;;
+      esac
+      ;;
     1)
       printf '%s names no target\n' "$1"
       return 1
@@ -185,6 +227,41 @@ discard__recorded() {
       return 1
       ;;
   esac
+}
+
+# discard_there PATH: exit 0 when something is at PATH, a dangling symbolic
+# link included; 1 when nothing is, the directory above it searched, or
+# none there, or a file; 2 when that cannot be told, as a directory above
+# it cannot be searched. A failure is never read as absent (decision 228).
+discard_there() {
+  local up
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    return 0
+  fi
+  case "$1" in
+    */*) up=${1%/*} ;;
+    *) up=. ;;
+  esac
+  [ -n "$up" ] || up=/
+  if [ -d "$up" ]; then
+    [ -x "$up" ] || return 2
+    return 1
+  fi
+  if [ -e "$up" ] || [ -L "$up" ]; then
+    return 1
+  fi
+  discard_there "$up"
+  [ "$?" -le 1 ] || return 2
+  return 1
+}
+
+# discard__file RENDER_MD: RENDER_MD can be told there or not; else the
+# reason out, exit 1.
+discard__file() {
+  discard_there "$1"
+  [ "$?" -le 1 ] && return 0
+  printf 'cannot tell whether %s is there: a directory above it cannot be searched\n' "$1"
+  return 1
 }
 
 discard_remove() {

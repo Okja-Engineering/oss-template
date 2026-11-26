@@ -110,10 +110,10 @@
 #                                    the `worktree` entries of `git worktree
 #                                    list --porcelain -z` not marked `bare`
 #                                    or `prunable`, read through a pipe, so
-#                                    it makes no file; one that cannot be
-#                                    entered is refused. Exit 0, or 1 with
+#                                    it makes no file. Exit 0, or 1 with
 #                                    the reason out, or 2 when git cannot
-#                                    say. Run git_hermetic first
+#                                    say or a directory on the way cannot
+#                                    be entered. Run git_hermetic first
 #   answers_target_for TARGET_ROOT NAME
 #                                    a run's TARGET, exactly TARGET_ROOT with
 #                                    its `~` expanded, then `/NAME`, under
@@ -123,9 +123,9 @@
 #                                    of those working trees: no working
 #                                    tree, resolved physically, nor any of
 #                                    its physical parents, is the same file
-#                                    as the target, one that cannot be
-#                                    entered refused; else the reason out,
-#                                    exit 1, or 2 when it cannot be judged
+#                                    as the target; else the reason out,
+#                                    exit 1, or 2 when it cannot be judged,
+#                                    a directory on the way not entered
 #   answers_target_check FILE NAME   the run answers FILE's TARGET is still
 #                                    answers_target_for its TARGET_ROOT and
 #                                    NAME, under this HOME: that TARGET out,
@@ -425,8 +425,8 @@ answers__judge() {
   done
   (
     CDPATH='' cd -P -- "$dir" 2>/dev/null || {
-      printf 'TARGET_ROOT %s: its existing ancestor %s cannot be entered\n' "$root" "$dir"
-      exit 1
+      printf 'TARGET_ROOT %s: its existing ancestor %s cannot be entered, so it cannot be judged\n' "$root" "$dir"
+      exit 2
     }
     while :; do
       for path in "${tops[@]}"; do
@@ -437,8 +437,8 @@ answers__judge() {
       done
       [ ! . -ef / ] || exit 0
       cd -P .. 2>/dev/null || {
-        printf 'TARGET_ROOT %s: the parent of %s cannot be entered\n' "$root" "$(pwd -P)"
-        exit 1
+        printf 'TARGET_ROOT %s: the parent of %s cannot be entered, so it cannot be judged\n' "$root" "$(pwd -P)"
+        exit 2
       }
     done
   ) || return
@@ -456,7 +456,7 @@ answers__judge() {
     (
       CDPATH='' cd -P -- "$path" 2>/dev/null || {
         printf 'TARGET %s: the working tree %s of this workspace cannot be entered, so whether the target holds it cannot be told\n' "$target" "$path"
-        exit 1
+        exit 2
       }
       while :; do
         if [ . -ef "$target" ]; then
@@ -466,7 +466,7 @@ answers__judge() {
         [ ! . -ef / ] || exit 0
         cd -P .. 2>/dev/null || {
           printf 'TARGET %s: the parent of %s cannot be entered, so whether the target holds it cannot be told\n' "$target" "$(pwd -P)"
-          exit 1
+          exit 2
         }
       done
     ) || return
