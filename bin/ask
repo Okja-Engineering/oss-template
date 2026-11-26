@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Stage 01's script (AC7): it writes the answers, from the field schema
 # shared/answers.tsv, through bin/lib/answers.sh. A refusal writes nothing,
-# and removes nothing unless a removal itself is what failed.
+# a folder it made for its files removed again, and removes nothing unless
+# a removal itself is what failed, or a rename after a redo's removals,
+# which names what they removed and the route: the redo again.
 #
 # usage:
 #   bin/ask setup [FIELD=value...]
@@ -153,15 +155,24 @@ assignments() {
 }
 
 # What this run made, all that a failure or a signal removes: the temporary
-# files beside the files it writes, each recorded, with signals held off, as
-# it is made, until it is renamed into place (decision 230).
-tmps=() dests=()
+# files beside the files it writes, and the directories it made for them,
+# each recorded, with signals held off, as it is made, until it is renamed
+# into place (decision 230). A directory goes only while it holds nothing.
+tmps=() dests=() made_deep=() made_top=()
+# What it removed, named by a refusal after its removals (decision 230).
+removed="" route=""
 cleanup() {
-  local t
+  local t i d
   # Held off through cleanup, so a second signal never ends it partway.
   discard_hold
   for t in ${tmps[@]+"${tmps[@]}"}; do
     rm -f -- "$t"
+  done
+  for i in ${made_deep[@]+"${!made_deep[@]}"}; do
+    d=${made_deep[$i]}
+    while rmdir -- "$d" 2>/dev/null && [ "$d" != "${made_top[$i]}" ]; do
+      d=${d%/*}
+    done
   done
 }
 # The signals are trapped from the first temporary file on.
@@ -172,9 +183,24 @@ trap cleanup EXIT
 # way. COMMAND runs here, in this shell, never at the end of a pipeline
 # (decision 228): when it or the write fails, the command refuses.
 stage() {
-  local file=$1 tmp=$1.tmp.$$ made=0
+  local file=$1 tmp=$1.tmp.$$ made=0 dir=${1%/*} top="" up
   shift
-  mkdir -p "${file%/*}" || refuse "cannot make the directory of $file"
+  up=$dir
+  while ! present "$up"; do
+    top=$up
+    up=${up%/*}
+  done
+  discard_hold
+  if mkdir -p "$dir"; then
+    made=1
+    if [ -n "$top" ]; then
+      made_deep+=("$dir")
+      made_top+=("$top")
+    fi
+  fi
+  discard_traps
+  [ "$made" = 1 ] || refuse "cannot make the directory of $file"
+  made=0
   ! present "$tmp" || refuse "cannot write beside $file: $tmp is in the way"
   discard_hold
   if (set -C && : >"$tmp") 2>/dev/null; then
@@ -187,15 +213,28 @@ stage() {
   "$@" >"$tmp" || refuse "cannot write $file"
 }
 # place: each staged file renamed over its FILE, in the order staged, with
-# signals held off, so each FILE is either as it was or whole.
+# signals held off, so each FILE is either as it was or whole. A rename that
+# fails after the command's removals names what they removed and the route.
 place() {
   local i
   discard_hold
   for i in ${tmps[@]+"${!tmps[@]}"}; do
-    mv -f -- "${tmps[$i]}" "${dests[$i]}" || refuse "cannot write ${dests[$i]}"
+    if ! mv -f -- "${tmps[$i]}" "${dests[$i]}"; then
+      [ -n "$removed" ] || refuse "cannot write ${dests[$i]}"
+      refuse "cannot write ${dests[$i]}, having removed $removed; $route"
+    fi
   done
-  tmps=() dests=()
+  tmps=() dests=() made_deep=() made_top=()
   discard_traps
+}
+# gone_by PATH: remove PATH through the removal helper, or refuse; a PATH
+# that was there is noted among what this command removed.
+gone_by() {
+  local fault
+  if present "$1"; then
+    removed="$removed${removed:+, }${1#"$ws/"}"
+  fi
+  fault=$(discard_remove "$1") || refuse "$fault"
 }
 # write FILE COMMAND [ARG...]: stage, then place.
 write() {
@@ -501,21 +540,23 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
   if [ "$redo" = 1 ] && [ -n "$old_target" ]; then
     fault=$(discard_leftovers "${old_target%/*}" "$name") || refuse "$fault"
   fi
+  route="run bin/ask run $name --redo again, with the answers, to write them"
   if [ "$have_remove" = 1 ]; then
+    present "$remove" && removed=$remove
     fault=$(discard_target "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
   fi
   if [ "$redo" = 1 ]; then
     # What derives from the confirmation goes first, so a clear that fails
     # leaves the run confirmed and rendered, and the redo is asked for again.
     for value in "$ws/stages/03-verify/output/$name" "$ws/stages/02-render/output/$name" "$outd/confirmed.md"; do
-      fault=$(discard_remove "$value") || refuse "$fault"
+      gone_by "$value"
     done
   fi
   if [ -z "$override_pairs" ] && present "$outd/setup.override.env"; then
-    fault=$(discard_remove "$outd/setup.override.env") || refuse "$fault"
+    gone_by "$outd/setup.override.env"
   fi
   if [ -z "$given_pairs" ] && present "$outd/given.env"; then
-    fault=$(discard_remove "$outd/given.env") || refuse "$fault"
+    gone_by "$outd/given.env"
   fi
   place
   printf 'bin/ask: wrote stages/01-ask/output/%s/answers.env\n' "$name"
