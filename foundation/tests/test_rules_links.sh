@@ -91,6 +91,15 @@ assert_eq "docs/gone.md:1: the link missing.md#steps does not resolve: no docs/m
 
 # --- md_block: the kind of each line, in order --------------------------------
 kinds() { printf '%s\n' "$@" | links_md '{ printf "%s ", md_block($0) }'; }
+# A text it cannot read, or whose frontmatter it cannot find, is no text:
+# 2, never read as one with no lines or no frontmatter (the tests lens's T3
+# of S2's fourth ship gate).
+fixture_failing "$SCRATCH/mdcat" cat '' 1
+(printf 'x\n' | PATH="$SCRATCH/mdcat:$PATH" links_md '{ print }' >/dev/null)
+assert_status 2 "$?" "links_md: a text that cannot be read is 2"
+fixture_failing "$SCRATCH/mdfm" awk '*NR == 1 && $0 != *' 1 2
+(printf 'x\n' | PATH="$SCRATCH/mdfm:$PATH" links_md '{ print }' >/dev/null)
+assert_status 2 "$?" "links_md: a look for frontmatter that fails is 2"
 assert_eq "fence fence fence " "$(kinds '   ```' 'x' '   ```')" "a fence indented by three spaces is a fence"
 assert_eq "text atx " "$(kinds '#hashtag' '#')" "a # with no space after is text; a # alone is a heading"
 assert_eq "break blank break " "$(kinds '* * *' '' '___')" "a line of three *, _ or - marks is a thematic break"
