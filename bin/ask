@@ -626,6 +626,15 @@ cmd_confirm() {
   outd=$ws/stages/01-ask/output/$name
   files "$outd/confirmed.md" "$outd/answers.env"
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
+  # Read through the one reader first, so a file it refuses, holding a NUL,
+  # is refused as such, with a redo's way out, never as a read that failed
+  # (decision 229).
+  fault=$(answers_read "$outd/answers.env" "stages/01-ask/output/$name/answers.env")
+  case $? in
+    0) ;;
+    1) refuse "$fault; the operator may correct it by hand, or remove the run's folder stages/01-ask/output/$name by hand and run it again" ;;
+    *) refuse "$fault" ;;
+  esac
   fault=$(answers_target_check "$outd/answers.env" "$name")
   case $? in
     0) ;;
