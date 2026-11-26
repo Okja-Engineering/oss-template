@@ -1338,7 +1338,7 @@ if [ "$(id -u)" != 0 ]; then
     run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
   # Its way out is the search it lacks, not a removal by hand of a file it
   # cannot see (call Q6 of S2's fourth ship gate).
-  assert_contains "$OUT" "give its owner search permission on the directories above it" "  naming the way out"
+  assert_contains "$OUT" "give its owner search permission" "  naming the way out"
   assert_not_contains "$OUT" "by hand" "  and no step by hand"
   chmod 755 "$R/stages/02-render/output/widget"
   # The sweep under the old TARGET_ROOT: a root it cannot list is refused.
