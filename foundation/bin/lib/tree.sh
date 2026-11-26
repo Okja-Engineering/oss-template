@@ -89,14 +89,12 @@ tree_cat() {
       ;;
     index | commit:*)
       tree=$(tree__tree "$src") || return 2
-      # cat-file fails alike for a path the tree lacks and for a failed
-      # read; rev-parse tells them apart: its 1 is "no such path", and any
-      # other failure is a read that failed, never "not held".
-      if ! type=$(git cat-file -t "$tree:$path" 2>/dev/null); then
-        git rev-parse -q --verify "$tree:$path" >/dev/null
-        [ "$?" = 1 ] && return 1
-        return 2
-      fi
+      # The path's entry, read through each tree on the way to it: none,
+      # those trees read whole, is a path the tree lacks; a tree it cannot
+      # read fails the read, never "not held". cat-file and rev-parse fail
+      # alike for both.
+      type=$(git --literal-pathspecs ls-tree --format='%(objecttype)' "$tree" -- "$path") || return 2
+      [ -n "$type" ] || return 1
       [ "$type" = blob ] || return 1
       git cat-file blob "$tree:$path" || return 2
       ;;
