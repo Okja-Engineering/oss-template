@@ -1382,6 +1382,13 @@ ask run widget --redo 'TITLE=A' 'DESCRIPTION=D'
 assert_status 0 "$ST" "  and, once it is removed, the redo giving its fields goes on"
 printf 'TITLE=A\000\n' >>"$ANS"
 rrefused "a redo of an answers file holding a NUL" "remove the run's folder" run widget --redo 'DESCRIPTION=D'
+# confirm refuses the file, for its NUL, with the same way out, never
+# reporting a TARGET it cannot read (answers' NIT 2 of S2's fourth ship
+# gate).
+rrefused "confirm of an answers file holding a NUL" "stages/01-ask/output/widget/answers.env: the file holds a NUL byte" \
+  confirm widget --by 'A Person'
+assert_contains "$OUT" "remove the run's folder" "  naming the way out"
+assert_not_contains "$OUT" "cannot read TARGET" "  and no read it did not fail"
 rm -rf "$OUTD"
 ask run widget 'TITLE=A' 'DESCRIPTION=D'
 assert_status 0 "$ST" "  and, once it is removed, the run goes on"
