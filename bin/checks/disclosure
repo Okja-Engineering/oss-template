@@ -26,6 +26,8 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 . "$here/../../foundation/bin/lib/tree.sh"
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/agents.sh
 . "$here/../../foundation/bin/lib/agents.sh"
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/links.sh
+. "$here/../../foundation/bin/lib/links.sh"
 
 src=$(tree_source)
 listing=$(tree_list "$src") || exit 2
@@ -76,18 +78,19 @@ mode_of() {
 }
 lines_of() { tree_cat "$src" "$1" | awk 'END { print NR }'; }
 
-# section FILE NAME: the lines of FILE's `## NAME` section, outside fences.
+# Markdown is read through links.sh's subset, its md_block (decision 231):
+# a `## ` line in a fence, of backticks or tildes, or in frontmatter, is no
+# heading.
+# section FILE NAME: the lines of FILE's `## NAME` section.
 section() {
-  tree_cat "$src" "$1" | awk -v want="## $2" '
-    /^```/ { fence = !fence }
-    !fence && /^## / { insec = ($0 == want); next }
+  tree_cat "$src" "$1" | links_md -v want="## $2" '
+    md_block($0) == "atx" && /^## / { insec = ($0 == want); next }
     insec { print }'
 }
 # h2s FILE: FILE's level-2 headings, in order, on one line.
 h2s() {
-  tree_cat "$src" "$1" | awk '
-    /^```/ { fence = !fence }
-    !fence && /^## / { printf "%s%s", sep, substr($0, 4); sep = " " }'
+  tree_cat "$src" "$1" | links_md '
+    md_block($0) == "atx" && /^## / { printf "%s%s", sep, substr($0, 4); sep = " " }'
 }
 # body_rows: a Markdown table's rows after its header and separator.
 body_rows() { awk '/^\|/ { n++; if (n > 2) print }'; }
@@ -260,7 +263,8 @@ if has_path CONTEXT.md; then
   [ "$count" -le 60 ] || refuse "CONTEXT.md: $count lines, over 60"
   # Read whole, its status read: a CONTEXT.md that cannot be read is a check
   # that cannot run, not one with no routing table.
-  routing=$(tree_cat "$src" CONTEXT.md | awk '$0 == "## Routing" { n++ } END { print n + 0 }') || exit 2
+  routing=$(tree_cat "$src" CONTEXT.md | links_md 'md_block($0) == "atx" && $0 == "## Routing" { n++ } END { print n + 0 }') ||
+    exit 2
   if [ "$routing" -gt 0 ]; then
     # Each row counts a stage once, however often it mentions it.
     routed=$(section CONTEXT.md Routing | body_rows | awk '{

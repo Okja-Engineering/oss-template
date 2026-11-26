@@ -49,7 +49,7 @@ rules__scan() {
     words="$words|$RULES_TRACE_WORDS"
     caps=STOP
   fi
-  awk -v W="$words" -v CAPS="$caps" -v LIST="$1" -v MODE="$2" "$LINKS_MD_AWK"'
+  links_md -v W="$words" -v CAPS="$caps" -v LIST="$1" -v MODE="$2" '
     # word S: the first rule word S holds, or "".
     function word(s,   l, w) {
       l = tolower(s)

@@ -44,6 +44,14 @@
 #                            Markdown file's headings. One line out per
 #                            refusal; exit 0 when none, 1 on a refusal, 2
 #                            when SRC cannot be read.
+#   links_md [OPTION...] PROGRAM
+#                            Markdown in; awk's PROGRAM, LINKS_MD_AWK
+#                            prefixed, and each OPTION before it, run over
+#                            it, with md_fm the number of lines its
+#                            frontmatter holds, which needs the whole text
+#                            first. Every reader of Markdown runs through
+#                            it. Exit awk's status; 2 when the text cannot
+#                            be read.
 #
 # Source tree.sh first; the caller exports LC_ALL=C.
 # Each status a guard reads is its own, never the caller's pipefail.
@@ -52,9 +60,13 @@
 # Markdown:
 #   md_block(LINE)  the kind of LINE, read in order from a file's first:
 #                   "front" for YAML frontmatter, a first line `---` through
-#                   the next `---` or `...`, the one frontmatter rule;
-#                   "fence" for a fence line
-#                   or one inside a fence, "blank", "atx", "under" (a line
+#                   the next `---` or `...`, the one frontmatter rule, so a
+#                   `---` no such line closes is no frontmatter (md_fm,
+#                   which links_md sets, counts its lines); "fence" for a
+#                   fence line or one inside a fence, which a line of the
+#                   opening fence's character, at least as many, closes,
+#                   with nothing after it but blanks (CommonMark 4.5);
+#                   "blank", "atx", "under" (a line
 #                   of `=` or of `-`: a setext underline after "text", else
 #                   a thematic break), "break", "item" (a list item or a
 #                   block quote), "lazy" (a line continuing an item), "code"
@@ -65,11 +77,18 @@
 #   md_plain(S)     S with its markup removed, as links_anchors describes.
 # shellcheck disable=SC2016 # awk code, its $ kept for awk
 LINKS_MD_AWK='
-function md_block(l,   k) {
-  if (!md_seen++ && l == "---") { md_front = 1; k = "front" }
-  else if (md_front) { if (l == "---" || l == "...") md_front = 0; k = "front" }
-  else if (l ~ /^ ? ? ?(```|~~~)/) { md_fence = !md_fence; k = "fence" }
-  else if (md_fence) k = "fence"
+function md_block(l,   k, s) {
+  s = l
+  sub(/^ ? ? ?/, "", s)
+  if (++md_n <= md_fm) k = "front"
+  else if (md_fence) {
+    k = "fence"
+    if (s ~ (md_fc == "`" ? "^`+[ \t]*$" : "^~+[ \t]*$")) {
+      match(s, /^(`+|~+)/)
+      if (RLENGTH >= md_fl) md_fence = 0
+    }
+  }
+  else if (match(s, /^(```+|~~~+)/)) { md_fence = 1; md_fc = substr(s, 1, 1); md_fl = RLENGTH; k = "fence" }
   else if (l ~ /^[ \t]*$/) k = "blank"
   else if (l ~ /^ ? ? ?#+([ \t]|$)/) k = "atx"
   else if (l ~ /^ ? ? ?(=+|-+)[ \t]*$/) k = "under"
@@ -159,8 +178,23 @@ function md_marks(s,   i, n, p, q, m, k, open, out) {
 function md_word(c) { return c ~ /[A-Za-z0-9]/ || c > "~" }
 '
 
+links_md() {
+  local text fm
+  # Read whole, its trailing newlines kept, so frontmatter's closing line
+  # can be looked for before the first line is judged.
+  text=$(cat && printf x) || return 2
+  text=${text%x}
+  fm=$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && ($0 == "---" || $0 == "...") { print NR; exit }' <<<"$text") ||
+    return 2
+  # awk's status is the pipeline's, never the caller's pipefail's.
+  (
+    set +o pipefail
+    printf '%s' "$text" | awk -v md_fm="${fm:-0}" "${@:1:$#-1}" "$LINKS_MD_AWK${!#}"
+  )
+}
+
 links_targets() {
-  awk "$LINKS_MD_AWK"'
+  links_md '
     # label L: a reference label, its case and spacing folded.
     function label(l) {
       l = tolower(l)
@@ -272,7 +306,7 @@ links_resolve() {
 }
 
 links_anchors() {
-  awk "$LINKS_MD_AWK"'
+  links_md '
     # anchor H: the anchor of the heading text H, out.
     function anchor(h,   t, a, c, i, k) {
       # A link keeps its text: inline, and by reference.

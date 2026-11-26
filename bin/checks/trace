@@ -89,7 +89,7 @@ case $? in
 esac
 # § Agent guards, read through links.sh's Markdown subset: from a level-1 or
 # level-2 heading, ATX or setext, "Agent guards", to the next such heading.
-guards=$(printf '%s\n' "$contributing" | awk "$LINKS_MD_AWK"'
+guards=$(links_md <<<"$contributing" '
   function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
   # heading T LEVEL: a heading of level 2 or less opens the section or
   # closes it; a deeper one is part of it.
