@@ -23,7 +23,17 @@ put() {
   shift
   mkdir -p "$(dirname "$f")" && printf '%s\n' "$@" >"$f"
 }
-run() { OUT=$(cd "$R" && bin/check "$@" trace 2>&1); ST=$?; }
+# run [MODE...]: the check on R, its tree mode called directly, as bin/check
+# would call it there (bin/check's own dispatch is test_check_cli's), and
+# any other mode through bin/check.
+run() {
+  if [ "$#" = 0 ]; then
+    OUT=$(cd "$R" && bin/checks/trace 2>&1)
+  else
+    OUT=$(cd "$R" && bin/check "$@" trace 2>&1)
+  fi
+  ST=$?
+}
 refused() { # DESCRIPTION NEEDLE
   run
   assert_status 1 "$ST" "refused: $1"

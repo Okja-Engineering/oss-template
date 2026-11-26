@@ -9,6 +9,8 @@ export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
+# shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/fixture.sh
+. "$TEST_DIR/../foundation/tests/lib/fixture.sh"
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/answers.sh
 . "$TEST_DIR/../bin/lib/answers.sh"
 
@@ -152,6 +154,8 @@ no LICENSE 'apache-2.0|none' "apache-2.0|none"
 ok TITLE "$(printf 'B\303\251 \342\202\254 \360\237\230\200 \302\240 \357\277\275')"
 no TITLE "$(printf 'a\377\376b')" "not valid UTF-8"
 no TITLE "$(printf 'a\300\257b')" "not valid UTF-8"
+no TITLE "$(printf 'a\340\200\257b')" "not valid UTF-8"
+no TITLE "$(printf 'a\360\200\200\257b')" "not valid UTF-8"
 no TITLE "$(printf 'a\355\240\200b')" "not valid UTF-8"
 no TITLE "$(printf 'a\364\220\200\200b')" "not valid UTF-8"
 no TITLE "$(printf 'a\303')" "not valid UTF-8"
@@ -250,6 +254,8 @@ no TITLE 'Write to a.person@example.org' "email"
 no DESCRIPTION 'Write to a.person@example.org' "email"
 no PEOPLE 'A Person, a.person@example.org' "email"
 ok CONTACT 'conduct@example.org'
+ok CONTACT 'conduct@example.io'
+no TITLE 'Write to a.person@example.io' "email"
 ok TARGET_ROOT '/srv/a.person@example.org/targets'
 
 # A rule word in free text (AC7, decision 73), from either of rules.sh's lists.
@@ -473,6 +479,16 @@ assert_status 1 "$?" "refused: a TARGET ending in another name"
 printf '%s\n' 'NAME=widget' 'TARGET_ROOT=/srv/targets' >"$SCRATCH/target.env"
 out=$(answers_target_check "$SCRATCH/target.env" widget 2>&1)
 assert_status 1 "$?" "refused: no TARGET"
+assert_eq "the answers hold no TARGET" "$out" "  and the refusal says so, and nothing else"
+printf '%s\n' 'NAME=widget' 'TARGET=/srv/targets/widget' >"$SCRATCH/target.env"
+out=$(answers_target_check "$SCRATCH/target.env" widget 2>&1)
+assert_status 1 "$?" "refused: no TARGET_ROOT"
+assert_eq "the answers hold no TARGET_ROOT" "$out" "  and the refusal says so, and nothing else"
+target_file '~/t' /home/someone/t/widget
+out=$( (unset HOME && answers_target_check "$SCRATCH/target.env" widget) 2>&1)
+assert_status 1 "$?" "refused: a TARGET_ROOT under ~ with HOME unset"
+assert_eq "TARGET_ROOT ~/t gives no target: it starts with ~, and HOME is not set" "$out" \
+  "  and the refusal is why, and nothing else"
 answers_validate "$S" "$SETUP" setup >/dev/null
 printf 'TARGET=/srv/targets/widget\n' >>"$SETUP"
 answers_validate "$S" "$SETUP" setup >/dev/null 2>&1
@@ -524,5 +540,27 @@ assert_contains "$OUT" "cannot read the file" "  and the refusal says so"
 under wc '-c' 1 answers_validate "$S" "$SETUP" setup
 assert_status 1 "$ST" "refused: a file holding a NUL byte, whose bytes cannot be counted"
 assert_contains "$OUT" "cannot read the file" "  and the refusal says so"
+
+# A type the validator does not know is refused, even in a schema the
+# schema check has not read.
+{ head -n 1 "$S"; row X run bogus no - - - 'X?'; } >"$SCRATCH/bogus.tsv"
+OUT=$(answers_check "$SCRATCH/bogus.tsv" X value 2>&1)
+assert_status 1 "$?" "refused: a value of a type the validator does not know"
+assert_contains "$OUT" "the type bogus is not one this validator knows" "  and the refusal says so"
+# A default of - is none, in the questionnaire as in the validator.
+assert_contains "$(answers_questionnaire "$S")" "(\`PEOPLE\`, list; no default)" "the questionnaire says a - default is none"
+# A select's value is one of its values, compared as a string, never as a
+# pattern, so a value holding a pattern's characters is still one of them.
+{ head -n 1 "$S"; row LANG run select no - 'c++|c' c 'Which language?'; } >"$SCRATCH/select.tsv"
+OUT=$(answers_check "$SCRATCH/select.tsv" LANG 'c++' 2>&1)
+assert_status 0 "$?" "a select value holding + is one of its values${OUT:+ ($OUT)}"
+# The blob id confirm records is of the file's bytes, whatever the
+# repository's attributes would make of them.
+mkdir -p "$SCRATCH/attr"
+git -C "$SCRATCH/attr" init -q
+printf '* ident\n' >"$SCRATCH/attr/.gitattributes"
+printf 'TITLE=$Id: kept $\n' >"$SCRATCH/attr/answers.env"
+assert_eq "$(printf 'TITLE=$Id: kept $\n' | git hash-object -t blob --no-filters --stdin)" \
+  "$(cd "$SCRATCH/attr" && answers_blob answers.env)" "answers_blob is the id of the bytes, under an ident attribute"
 
 assert_done

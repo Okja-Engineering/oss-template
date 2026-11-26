@@ -35,20 +35,28 @@ put() { # FILE LINE...: under the workspace R
 
 # fresh: a fixture workspace holding bin/ask, bin/render, a schema with a
 # field of each kind render uses, and a foundation of templates, variants
-# and verbatim files; its setup sends targets to ROOT, this case's own.
-# Built once, by build_fresh, and copied for each case, the copy's setup
-# given its ROOT: the line bin/ask setup writes, with this ROOT.
-fresh() {
+# and verbatim files; its setup sends targets to ROOT, emptied for each
+# case. ready: the same, holding a confirmed run of widget. Each is built
+# once, by build_fresh and build_ready, and copied for each case.
+ROOT="$SCRATCH/targets"
+fresh() { copy fresh; }
+ready() { copy ready; }
+copy() { # KIND
   [ -d "$SCRATCH/fresh" ] || {
-    R="$SCRATCH/fresh" ROOT="$SCRATCH/targets"
+    R="$SCRATCH/fresh"
     build_fresh
+  }
+  [ -d "$SCRATCH/$1" ] || {
+    R="$SCRATCH/$1"
+    ws_copy "$SCRATCH/fresh" "$R" && confirmed widget
   }
   n=$((n + 1))
   R="$SCRATCH/ws$n"
-  ROOT="$SCRATCH/targets$n"
-  ws_copy "$SCRATCH/fresh" "$R"
-  sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$ROOT|" "$SCRATCH/fresh/setup/answers.env" >"$R/setup/answers.env"
-  fixture_commit "$R" "test: this case's TARGET_ROOT"
+  ws_copy "$SCRATCH/$1" "$R"
+  if [ -e "$ROOT" ] || [ -L "$ROOT" ]; then
+    chmod -R u+rwx "$ROOT" 2>/dev/null
+    rm -rf "$ROOT"
+  fi
 }
 build_fresh() {
   ws_fixture "$R"
@@ -109,8 +117,7 @@ refused() { # DESCRIPTION NEEDLE ARGS...: refused, with nothing written to the t
 }
 
 # --- a render ------------------------------------------------------------------------
-fresh
-confirmed widget
+ready
 render widget
 assert_status 0 "$ST" "bin/render renders a confirmed run"
 assert_eq "# widget
@@ -151,8 +158,7 @@ assert_eq "Copyright Okja-Engineering. All rights reserved." "$(cat "$ROOT/widge
 assert_eq "$(printf 'Copyright Okja-Engineering. All rights reserved.' | cksum)" "$(cksum <"$ROOT/widget/LICENSE")" \
   "  a template's last line kept without a newline"
 
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT/widget"
 render widget
 assert_status 0 "$ST" "an empty target is rendered into"
@@ -161,21 +167,34 @@ assert_status 0 "$ST" "an empty target is rendered into"
 fresh
 ask run widget 'DESCRIPTION=One line'
 refused "answers without a confirmed.md" "has no confirmed.md" widget
-fresh
-confirmed widget
+ready
 printf 'VISIBILITY=private\n' >>"$R/stages/01-ask/output/widget/answers.env"
 refused "answers whose blob id confirmed.md does not name" "is not the answers confirmed.md names" widget
 fresh
-refused "a run that does not exist" "widget" widget
+refused "a run that does not exist" "there is no run widget" widget
+# Each usage error (F9 of the tests lens).
+render
+assert_status 2 "$ST" "render with no NAME is a usage error"
+assert_contains "$OUT" "NAME is required" "  and says so"
+render widget --replace --remove
+assert_status 2 "$ST" "--remove with no PATH is a usage error"
+assert_contains "$OUT" "--remove needs PATH" "  and says so"
+render widget --bogus
+assert_status 2 "$ST" "an unknown argument is a usage error"
+assert_contains "$OUT" "unknown argument: --bogus" "  and names it"
+ready
+mkdir -p "$SCRATCH/mkt$n"
+fixture_failing "$SCRATCH/mkt$n" mktemp '-d *render.XXXXXX' 1
+OUT=$(cd "$R" && PATH="$SCRATCH/mkt$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render that cannot make its private directory"
+assert_contains "$OUT" "cannot make a temporary directory" "  and the refusal says so"
 # The schema render judges is HEAD's, whatever the disk holds: absent there,
 # or not parsing there (T2's rest in the tests lens).
-fresh
-confirmed widget
+ready
 git -C "$R" rm -q --cached shared/answers.tsv
 git -C "$R" commit -q -m "test: no schema at HEAD"
 refused "a HEAD that holds no shared/answers.tsv" "HEAD holds no shared/answers.tsv" widget
-fresh
-confirmed widget
+ready
 cp "$R/shared/answers.tsv" "$SCRATCH/schema$n"
 printf 'BROKEN\tsetup\tno-such-type\tno\t-\t-\t-\tQ?\n' >>"$R/shared/answers.tsv"
 fixture_commit "$R" "test: a schema at HEAD that does not parse"
@@ -226,17 +245,14 @@ git -C "$R" update-index --add --cacheinfo "160000,$(git -C "$R" rev-parse HEAD)
 git -C "$R" commit -q -m "test: a submodule in the foundation"
 confirmed widget
 refused "a submodule in the foundation" "foundation/sub: a submodule" widget
-fresh
-confirmed widget
+ready
 refused "a NAME the schema refuses" "NAME" 'Bad Name'
-fresh
-confirmed widget
+ready
 sed 's/^NAME=widget$/NAME=gadget/' "$R/stages/01-ask/output/widget/answers.env" >"$SCRATCH/a$n" &&
   mv "$SCRATCH/a$n" "$R/stages/01-ask/output/widget/answers.env"
 ask confirm widget --by 'A Person'
 refused "answers naming another run, confirmed again" "names another run" widget
-fresh
-confirmed widget
+ready
 sed "s|^TARGET=.*|TARGET=$ROOT/gadget|" "$R/stages/01-ask/output/widget/answers.env" >"$SCRATCH/a$n" &&
   mv "$SCRATCH/a$n" "$R/stages/01-ask/output/widget/answers.env"
 ask confirm widget --by 'A Person'
@@ -261,8 +277,7 @@ assert_contains "$OUT" "$SCRATCH/home$n/b/targets/widget" "  and the refusal nam
 assert_eq "gone" "$(gone "$SCRATCH/home$n/b/targets")" "  and nothing is written under this HOME"
 OUT=$(cd "$R" && HOME="$SCRATCH/home$n/a" bin/render widget 2>&1)
 assert_status 0 "$?" "  and it renders under the HOME it was written under"
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/oldgit$n"
 printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.35.9"; exit 0; fi\nexec %s "$@"\n' "$(command -v git)" >"$SCRATCH/oldgit$n/git"
 chmod +x "$SCRATCH/oldgit$n/git"
@@ -276,13 +291,11 @@ render widget
 assert_status 0 "$ST" "render reads foundation/ at HEAD"
 assert_not_contains "$(cat "$ROOT/widget/README.md")" "uncommitted" "  not the working tree"
 
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT/widget/kept"
 refused "a present target without --remove" "$ROOT/widget" widget
 assert_eq "present" "$(gone "$ROOT/widget/kept")" "  and it is left alone"
-fresh
-confirmed widget
+ready
 render widget
 refused "a second render without --replace" "rendered already" widget
 refused "--replace without --remove while the target is present" "--remove" widget --replace
@@ -305,23 +318,19 @@ refused "--replace --remove naming a path render.md names, not the run's TARGET"
 assert_eq "present" "$(gone "$ROOT/other")" "  with it not removed"
 render widget --remove "$ROOT/widget"
 assert_status 2 "$ST" "--remove without --replace is a usage error"
-fresh
-confirmed widget
+ready
 refused "--replace with nothing rendered" "--replace" widget --replace
-fresh
-confirmed widget
+ready
 printf 'BOGUS\tsetup\ttext\tno\t-\t-\tx\tA new field?\n' >>"$R/shared/answers.tsv"
 fixture_commit "$R" "test: the schema gains a field"
 refused "answers the schema at HEAD rejects" "BOGUS" widget
-fresh
-confirmed widget
+ready
 printf 'BOGUS\tsetup\ttext\tno\t-\t-\tx\tA new field?\n' >>"$R/shared/answers.tsv"
 render widget
 assert_status 0 "$ST" "render judges the answers by the schema at HEAD, not the working tree's"
 
 # --- --replace clears 03 -----------------------------------------------------------------
-fresh
-confirmed widget
+ready
 render widget
 mkdir -p "$R/stages/03-verify/output/widget/judge/locked/deeper"
 printf 'pass\n' >"$R/stages/03-verify/output/widget/verify.md"
@@ -329,8 +338,7 @@ chmod 000 "$R/stages/03-verify/output/widget/judge/locked/deeper" "$R/stages/03-
 render widget --replace --remove "$ROOT/widget"
 assert_status 0 "$ST" "--replace with 03 outputs holding a chmod 000 judge/ directory"
 assert_eq "gone" "$(gone "$R/stages/03-verify/output/widget")" "  leaves no verify record"
-fresh
-confirmed widget
+ready
 render widget
 mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n"
 # mktemp: a stub in DIR that is mktemp, noting each path it makes, so a test
@@ -357,7 +365,7 @@ rmstub() {
 rmstub "$ROOT/widget"
 OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
 assert_status 1 "$?" "refused: --replace whose removal fails under a stub rm"
-assert_contains "$OUT" "could not remove $ROOT/widget" "  and the refusal names the path"
+assert_contains "$OUT" "could not remove $ROOT/widget; remove it" "  and the refusal names the path"
 assert_eq "yes" "$([ -s "$SCRATCH/made$n" ] && echo yes)" "  having made temporary files"
 assert_eq "" "$(leftover)" "  and leaves none of them"
 # The clear of the 03 outputs, reached once the target is gone (decision
@@ -370,8 +378,7 @@ assert_contains "$OUT" "could not remove stages/03-verify/output/widget" "  and 
 assert_eq "present" "$(gone "$R/stages/02-render/output/widget/render.md")" "  and render.md stays, asking for --replace"
 # The removal of render.md, reached once the 03 outputs are gone: refused
 # naming it, not overwritten by the new one (removal N4's r02).
-fresh
-confirmed widget
+ready
 render widget
 mkdir -p "$SCRATCH/stub$n"
 rmstub 'rf?--?stages/02-render/output/widget/render.md'
@@ -395,8 +402,7 @@ entries() { (cd "$1" 2>/dev/null && find . -mindepth 1 -maxdepth 1 | sed 's|^\./
 left() {
   { entries "$ROOT"; entries "$R/stages/02-render/output/widget" | sed 's|^|02/|'; } | tr '\n' ' '
 }
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT/widget"
 gitstub 'exit 1'
 stubbed widget
@@ -406,8 +412,7 @@ assert_eq "present" "$(gone "$ROOT/widget")" "  and the empty target it found is
 assert_eq "" "$(entries "$ROOT/widget")" "  holding nothing"
 assert_eq "widget " "$(left)" "  and nothing else is left, no render.md, no staging directory"
 # An interrupt during the fingerprint removes all this run made.
-fresh
-confirmed widget
+ready
 gitstub ": >\"$SCRATCH/at$n\"; while [ ! -e \"$SCRATCH/go$n\" ]; do sleep 1; done; exit 1"
 set -m
 (cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" exec bin/render widget >"$SCRATCH/out$n" 2>&1) &
@@ -423,8 +428,7 @@ assert_eq "gone" "$(gone "$ROOT/widget")" "  and leaves no target"
 assert_eq "" "$(left)" "  nor a staging directory, render.md or temporary file"
 # --replace whose write then fails leaves the run unrendered, not a record
 # naming a target that is gone.
-fresh
-confirmed widget
+ready
 render widget
 mkdir -p "$R/stages/03-verify/output/widget"
 gitstub 'exit 1'
@@ -436,8 +440,7 @@ assert_eq "" "$(left)" "  and nothing else is left"
 render widget
 assert_status 0 "$ST" "  and the run renders again without --replace"
 # A target a killed render left, with no render.md: named, with its route.
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT/widget/half"
 refused "a target present with no render.md" "bin/render widget --replace --remove \"$ROOT/widget\"" widget
 assert_eq "present" "$(gone "$ROOT/widget/half")" "  and it is left alone"
@@ -445,16 +448,14 @@ render widget --replace --remove "$ROOT/widget"
 assert_status 0 "$ST" "  and --replace --remove naming it renders"
 assert_eq "gone" "$(gone "$ROOT/widget/half")" "  having removed it"
 # A target that appears while render runs is left alone.
-fresh
-confirmed widget
+ready
 gitstub "    mkdir -p \"$ROOT/widget/late\""
 stubbed widget
 assert_status 1 "$ST" "refused: a target that appears while render runs"
 assert_contains "$OUT" "no longer an empty directory" "  and the refusal says so"
 assert_eq "present" "$(gone "$ROOT/widget/late")" "  and it is left alone"
 assert_eq "widget " "$(left)" "  with nothing of this run's left"
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/elsewhere$n"
 gitstub "    ln -s \"$SCRATCH/elsewhere$n\" \"$ROOT/widget\""
 stubbed widget
@@ -462,8 +463,7 @@ assert_status 1 "$ST" "refused: a symbolic link to a directory that appears at t
 assert_contains "$OUT" "appeared while render ran" "  and the refusal says so"
 assert_eq "" "$(entries "$SCRATCH/elsewhere$n")" "  and nothing is left in the directory it names"
 assert_eq "widget " "$(left)" "  nor beside it"
-fresh
-confirmed widget
+ready
 gitstub "    printf x >\"$ROOT/widget\""
 stubbed widget
 assert_status 1 "$ST" "refused: a file that appears at the target"
@@ -478,22 +478,19 @@ mvstub() {
   chmod +x "$SCRATCH/mstub$n/mv"
 }
 mvstubbed() { OUT=$(cd "$R" && PATH="$SCRATCH/mstub$n:$PATH" bin/render "$@" 2>&1); ST=$?; }
-fresh
-confirmed widget
+ready
 mvstub '  *.widget.render.*) kill -INT "$PPID" ;;'
 mvstubbed widget
 assert_status 0 "$ST" "an interrupt during the renames is held off"
 assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
-fresh
-confirmed widget
+ready
 mvstub '  *render.md.tmp.*) exit 1 ;;'
 mvstubbed widget
 assert_status 1 "$ST" "refused: render.md's rename fails"
 assert_contains "$OUT" "cannot write stages/02-render/output/widget/render.md" "  and the refusal says so"
 assert_eq "" "$(left)" "  and the target this run put in place is removed, with nothing else left"
 # A render.md that is not a file is refused, not written into.
-fresh
-confirmed widget
+ready
 mkdir -p "$R/stages/02-render/output/widget/render.md/sub"
 refused "a render.md that is a directory" "render.md is not a file" widget
 assert_eq "present" "$(gone "$R/stages/02-render/output/widget/render.md/sub")" "  and it is left alone"
@@ -506,15 +503,13 @@ cpstub() { # CODE: a cp first on PATH that copies, then runs CODE with $last
     >"$SCRATCH/cpstub$n/cp"
   chmod +x "$SCRATCH/cpstub$n/cp"
 }
-fresh
-confirmed widget
+ready
 cpstub ': >"$last/extra"'
 OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" bin/render widget 2>&1)
 assert_status 1 "$?" "refused: a render whose copy brings a file the list does not hold"
 assert_contains "$OUT" "the target holds a file render did not write: extra" "  and the walk says so"
 assert_eq "" "$(left)" "  with nothing written"
-fresh
-confirmed widget
+ready
 cpstub 'mkdir "$last/a
 b"'
 OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" bin/render widget 2>&1)
@@ -523,15 +518,13 @@ assert_contains "$OUT" "a name with a newline" "  and the walk says so"
 assert_eq "" "$(left)" "  with nothing written"
 # What render makes, it makes exclusively: a staging directory or a
 # temporary render.md planted at its name is refused and left.
-fresh
-confirmed widget
+ready
 OUT=$(cd "$R" && sh -c 'mkdir -p "$1/.widget.render.$$" && exec bin/render widget' sh "$ROOT" 2>&1)
 assert_status 1 "$?" "refused: a staging directory planted at render's name"
 assert_contains "$OUT" "cannot make the staging directory" "  and the refusal says so"
 assert_eq "gone" "$(gone "$ROOT/widget")" "  and no target is written"
 assert_eq "1" "$(entries "$ROOT" | grep -c '^\.widget\.render\.')" "  and the planted directory is left"
-fresh
-confirmed widget
+ready
 mkdir -p "$R/stages/02-render/output/widget"
 OUT=$(cd "$R" && sh -c 'ln -s "$1" "stages/02-render/output/widget/render.md.tmp.$$" && exec bin/render widget' \
   sh "$SCRATCH/linked$n" 2>&1)
@@ -540,8 +533,7 @@ assert_eq "gone" "$(gone "$SCRATCH/linked$n")" "  and nothing is written through
 assert_eq "gone" "$(gone "$ROOT/widget")" "  nor to the target"
 assert_eq "1" "$(entries "$R/stages/02-render/output/widget" | grep -c '^render\.md\.tmp\.')" "  and the planted link is left"
 # A link to /dev/null, which noclobber alone would open, is in the way too.
-fresh
-confirmed widget
+ready
 mkdir -p "$R/stages/02-render/output/widget"
 OUT=$(cd "$R" && sh -c 'ln -s /dev/null "stages/02-render/output/widget/render.md.tmp.$$" && exec bin/render widget' 2>&1)
 assert_status 1 "$?" "refused: a symbolic link to /dev/null planted at render.md's temporary name"
@@ -559,13 +551,11 @@ in_tmpdir() {
   OUT=$(cd "$R" && TMPDIR="$SCRATCH/tmpdir$n" bin/render "$@" 2>&1)
   ST=$?
 }
-fresh
-confirmed widget
+ready
 in_tmpdir widget
 assert_status 0 "$ST" "a render with a TMPDIR of its own"
 assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  leaves nothing in it"
-fresh
-confirmed widget
+ready
 cpstub ': >"$last/extra"'
 OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" bin/render widget 2>&1)
 assert_status 1 "$?" "refused: a render the walk refuses, with a TMPDIR of its own"
@@ -573,8 +563,7 @@ assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  leaves nothing in it"
 # Each temporary file is made in render's private directory, the first,
 # made under TMPDIR, on every platform: macOS's mktemp, given no template,
 # ignores TMPDIR.
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/mkt$n" "$SCRATCH/tmpdir$n"
 mkstub "$SCRATCH/mkt$n"
 OUT=$(cd "$R" && PATH="$SCRATCH/mkt$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" bin/render widget 2>&1)
@@ -585,8 +574,7 @@ assert_eq "" "$(sed 1d "$SCRATCH/made$n" | grep -v -F "$work/")" "  and every ot
 assert_eq "yes" "$([ "$(wc -l <"$SCRATCH/made$n")" -ge 4 ] && echo yes)" "  the libraries' among them"
 # A signal while render makes its private directory is held off until the
 # directory is recorded for cleanup, so it is never left behind.
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/mkt$n" "$SCRATCH/tmpdir$n"
 printf '#!/bin/sh\n%s "$@" && kill -s TERM "$PPID"\n' "$(command -v mktemp)" >"$SCRATCH/mkt$n/mktemp"
 chmod +x "$SCRATCH/mkt$n/mktemp"
@@ -624,16 +612,17 @@ signalled() { # TARGET SIGNAL ARGS...: TARGET is "render" or "group"
 # starts (POSIX), as in a background job, which ignores INT and QUIT: such a
 # case is skipped, saying so.
 entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive ]; }
-# Each signal render traps, sent to render alone while it waits on its copy,
+# A signal render traps, sent to render alone while it waits on its copy,
 # a direct child, ends render by that signal's status, once the copy is
-# done, with nothing it made left.
-for sig in HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM; do
+# done, with nothing it made left. One trap serves every signal of
+# DISCARD_SIGNALS, each of which the renames case below sends, so three
+# stand for them: INT, which a background job ignores, and two others.
+for sig in HUP INT TERM; do
   if entry_ignored "$sig"; then
     assert_pass "skipped: SIG$sig was ignored when the suite began, so render cannot trap it"
     continue
   fi
-  fresh
-  confirmed widget
+  ready
   waitstub cp '-Rp *'
   signalled render "$sig" widget
   assert_status "$((128 + $(kill -l "$sig")))" "$ST" "SIG$sig while render copies ends it by that signal"
@@ -646,8 +635,7 @@ done
 if entry_ignored INT; then
   assert_pass "skipped: SIGINT was ignored when the suite began, so render cannot trap it"
 else
-  fresh
-  confirmed widget
+  ready
   waitstub git '*--literal-pathspecs add *'
   signalled group INT widget
   assert_status 130 "$ST" "an interrupt to the process group during the fingerprint ends render with 130"
@@ -656,8 +644,7 @@ else
 fi
 # A signal while render makes its staging directory is held off until the
 # directory is recorded for cleanup, so it is never left behind.
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/mkstub$n"
 printf '#!/bin/sh\ncase "$*" in *.widget.render.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
   "$(command -v mkdir)" >"$SCRATCH/mkstub$n/mkdir"
@@ -665,25 +652,23 @@ chmod +x "$SCRATCH/mkstub$n/mkdir"
 OUT=$(cd "$R" && PATH="$SCRATCH/mkstub$n:$PATH" bin/render widget 2>&1)
 ST=$?
 assert_eq "" "$(entries "$ROOT" | grep '^\.widget\.render\.')" "a signal while render makes its staging directory leaves none"
-# Every signal render traps is held off during the renames.
-for sig in HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM; do
-  fresh
-  confirmed widget
-  mvstub "  *.widget.render.*) kill -s $sig \"\$PPID\" ;;"
-  mvstubbed widget
-  assert_status 0 "$ST" "SIG$sig during the renames is held off"
-  assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
-done
+# Every signal render traps is held off during the renames: each sent in
+# turn, in one render, any not held would end it.
+ready
+kills=""
+for sig in HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM; do kills="$kills kill -s $sig \"\$PPID\";"; done
+mvstub "  *.widget.render.*)$kills ;;"
+mvstubbed widget
+assert_status 0 "$ST" "every signal render traps, sent during the renames, is held off"
+assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
 if [ "$(id -u)" != 0 ]; then
-  fresh
-  confirmed widget
+  ready
   mkdir -p "$ROOT/widget"
   chmod 555 "$ROOT/widget"
   render widget
   assert_status 0 "$ST" "an empty target render cannot write into is replaced"
   assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  by the render"
-  fresh
-  confirmed widget
+  ready
   mkdir -p "$ROOT"
   chmod 555 "$ROOT"
   render widget
@@ -691,8 +676,7 @@ if [ "$(id -u)" != 0 ]; then
   assert_status 1 "$ST" "refused: a TARGET_ROOT render cannot write into"
   assert_contains "$OUT" "cannot make the staging directory" "  and the refusal says why"
   assert_eq "" "$(left)" "  with nothing written"
-  fresh
-  confirmed widget
+  ready
   render widget
   mkdir -p "$R/stages/03-verify/output/widget"
   chmod 555 "$R/stages/02-render/output/widget"
@@ -807,8 +791,7 @@ assert_eq "$(printf 'Line\n\n' | od -An -tx1)" "$(od -An -tx1 <"$ROOT/widget/bla
   "  and one ending in a blank line keeps it"
 # A render that fails partway, exit 2 in render_tree, leaves no temporary
 # directory.
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/gstub$n"
 printf '#!/bin/sh\ncase "$*" in *"cat-file blob"*foundation/*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v git)" \
   >"$SCRATCH/gstub$n/git"
@@ -822,8 +805,7 @@ assert_eq "" "$(leftover)" "  and leaves none of them"
 # A staging directory a killed render left, by its own staging name for this
 # run, is removed before staging, also when it holds a chmod 000 directory;
 # nothing else beside the target is touched (decision 226).
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT/.widget.render.4242/a/b" "$ROOT/.widget.render.17" "$ROOT/.widget.render.x1" \
   "$ROOT/.other.render.5" "$ROOT/.widget.render.6.extra"
 printf 'half\n' >"$ROOT/.widget.render.4242/a/b/README.md"
@@ -843,8 +825,7 @@ assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  nor anything through the lin
 assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  and renders"
 # A leftover the removal helper cannot remove is refused, naming it, before
 # anything is written.
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT/.widget.render.4242" "$SCRATCH/stub$n"
 rmstub .widget.render.4242
 OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget 2>&1)
@@ -853,8 +834,7 @@ assert_contains "$OUT" "could not remove $ROOT/.widget.render.4242" "  and the r
 assert_eq "gone gone" "$(gone "$ROOT/widget") $(gone "$R/stages/02-render/output/widget/render.md")" \
   "  with nothing written"
 # The worktree list's exit status is read.
-fresh
-confirmed widget
+ready
 mkdir -p "$SCRATCH/gstub$n"
 printf '#!/bin/sh\ncase "$*" in *"worktree list"*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v git)" >"$SCRATCH/gstub$n/git"
 chmod +x "$SCRATCH/gstub$n/git"
@@ -871,8 +851,7 @@ assert_eq "" "$(left)" "  with nothing written"
 # the render refused, saying NEEDLE, what could not be done, with nothing of
 # this run left, no target, no render.md.
 failing() {
-  fresh
-  confirmed widget
+  ready
   [ -z "${4:-}" ] || "$4"
   fixture_failing "$SCRATCH/fail$n" "$1" "$2" "${3:-1}" "${5:-1}"
   OUT=$(cd "$R" && PATH="$SCRATCH/fail$n:$PATH" bin/render widget 2>&1)
@@ -885,6 +864,16 @@ stage_refused() {
 }
 failing git '*ls-tree -r -z --full-tree *'
 stage_refused "the listing of HEAD's tree fails" "cannot read foundation/ at HEAD"
+failing cp '*/answers.env *'
+stage_refused "the run's answers cannot be read" "cannot read stages/01-ask/output/widget/answers.env"
+failing git '*hash-object*'
+stage_refused "the run's answers cannot be hashed" "cannot hash stages/01-ask/output/widget/answers.env"
+failing cp '-Rp *'
+stage_refused "the render cannot be copied into its staging directory" "cannot copy the render into"
+ready
+git -C "$R" update-ref -d refs/heads/main
+render widget
+stage_refused "a workspace with no commit at HEAD" "the workspace has no commit at HEAD"
 failing awk '*$5 != "" { print $1*'
 stage_refused "the selecting fields' awk fails" "cannot read the selecting fields"
 failing awk '*p !~ /^\[A-Za-z0-9*'
@@ -950,24 +939,21 @@ assert_eq "present" "$(gone "$ROOT/widget/kept")" "  and it is left alone"
 
 # --- each refusal reached, and each path rendered as it must be (T3, T6) ---------------------
 # A render.md that names no target.
-fresh
-confirmed widget
+ready
 render widget
 printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$R/stages/02-render/output/widget/render.md"
 refused "--replace when render.md names no target" "render.md names no target" widget --replace
 # A present target that only looks empty: unreadable, or a link to an empty
 # directory. Each is refused with the route, and left.
 if [ "$(id -u)" != 0 ]; then
-  fresh
-  confirmed widget
+  ready
   mkdir -p "$ROOT/widget/kept"
   chmod 000 "$ROOT/widget"
   refused "an unreadable target holding a directory" "--replace --remove" widget
   chmod 755 "$ROOT/widget"
   assert_eq "present" "$(gone "$ROOT/widget/kept")" "  and it is left whole"
 fi
-fresh
-confirmed widget
+ready
 mkdir -p "$ROOT" "$SCRATCH/emptydir$n"
 ln -s "$SCRATCH/emptydir$n" "$ROOT/widget"
 refused "a symbolic link to an empty directory at the target" "it is a symbolic link, not the rendered target" widget
@@ -1139,8 +1125,7 @@ assert_contains "$OUT" "git add exited" "  and says so"
 # --- AC10's planted cases, against render's fingerprint ----------------------------------------
 # planted DESCRIPTION ENV...: render with ENV planted, giving the baseline
 # fingerprint, and the workspace's .git as it was.
-fresh
-confirmed widget
+ready
 render widget
 BASE=$(record widget fingerprint)
 # objects: every entry of the workspace's .git, by name, and every file's

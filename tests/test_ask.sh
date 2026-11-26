@@ -915,4 +915,81 @@ asked date '-u *' 1 confirm widget --by 'A Person'
 assert_status 1 "$ST" "refused: confirm whose time cannot be read"
 assert_contains "$OUT" "cannot read the time" "  and the refusal says so"
 assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
+ready
+asked sort '' 1 run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: run whose answers cannot be sorted"
+assert_contains "$OUT" "cannot sort the answers" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+asked mkdir '-p *' 1 run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: run whose output directory cannot be made"
+assert_contains "$OUT" "cannot make the directory of" "  and the refusal says so"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+asked git '*hash-object*' 1 confirm widget --by 'A Person'
+assert_status 1 "$ST" "refused: confirm whose answers cannot be hashed"
+assert_contains "$OUT" "cannot hash" "  and the refusal says so"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
+
+# A setup.override.env left holding only a field the schema no longer
+# lists as a setup field is removed by a redo; a removal that fails refuses.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+printf 'TITLE=Z\n' >"$OUTD/setup.override.env"
+asked rm '*setup.override.env' 1 run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_status 1 "$ST" "refused: a redo whose stale setup.override.env cannot be removed"
+assert_contains "$OUT" "/stages/01-ask/output/widget/setup.override.env; remove it" "  and the refusal names it"
+
+# --- each argument and guard reached (F9 of the tests lens) ----------------------------
+ready
+ask run
+assert_status 2 "$ST" "run with no NAME is a usage error"
+assert_contains "$OUT" "run needs NAME" "  and says so"
+ask run widget --redo --remove
+assert_status 2 "$ST" "--remove with no PATH is a usage error"
+assert_contains "$OUT" "--remove needs PATH" "  and says so"
+ask run widget --bogus
+assert_status 2 "$ST" "an unknown option is a usage error"
+assert_contains "$OUT" "unknown option: --bogus" "  and names it"
+ask confirm gadget --by 'A Person'
+assert_status 1 "$ST" "refused: confirm of a run that does not exist"
+assert_contains "$OUT" "there is no run gadget" "  and the refusal says so"
+rm "$R/setup/answers.env"
+rrefused "run with no setup/answers.env" "setup/answers.env is missing; run bin/ask setup" run widget 'TITLE=A' 'DESCRIPTION=B'
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+printf 'BROKEN\tsetup\tno-such-type\tno\t-\t-\t-\tQ?\n' >>"$R/shared/answers.tsv"
+ask confirm widget --by 'A Person'
+assert_status 1 "$ST" "refused: confirm under a schema that does not parse"
+assert_contains "$OUT" "shared/answers.tsv does not parse:" "  and the refusal says so"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
+# A target that is a dangling symbolic link is present.
+ready
+mkdir -p "$ROOT"
+ln -s "$SCRATCH/nowhere$n" "$ROOT/widget"
+rrefused "a target that is a dangling symbolic link" "the target $ROOT/widget is present" \
+  run widget 'TITLE=A' 'DESCRIPTION=B'
+# After --setup-override, --redo and --remove return the next arguments to
+# the run.
+rendered
+ask run widget --redo --setup-override 'HOLDER=Someone' --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+assert_status 0 "$ST" "run fields after --setup-override then --remove"
+assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  are the run's"
+ask run widget --setup-override 'HOLDER=Other' --redo 'TITLE=E' 'DESCRIPTION=F'
+assert_status 0 "$ST" "run fields after --setup-override then --redo"
+assert_eq "TITLE=E" "$(grep '^TITLE=' "$ANS")" "  are the run's"
+# --remove names the old target; a new target, under a moved TARGET_ROOT,
+# that is present is refused, not taken as named.
+rendered
+mkdir -p "$SCRATCH/moved$n/widget"
+rrefused "a redo whose new target is present, --remove naming the old one" \
+  "the target $SCRATCH/moved$n/widget is present, and no --remove names it" \
+  run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with the old target left alone"
+# --remove naming another path, the target present: the discard refuses it
+# first, naming the path.
+rendered
+mkdir -p "$ROOT/other"
+rrefused "--remove naming another path, the target present" "remove $ROOT/other: it is not the run's target $ROOT/widget" \
+  run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
 assert_done

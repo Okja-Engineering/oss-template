@@ -86,6 +86,7 @@ anchors() { printf '%s\n' "$@" | links_anchors | tr '\n' ' '; }
 assert_eq "see-the-docs " "$(anchors '## See [the docs](x.md)')" "a heading's inline link keeps its text"
 assert_eq "see-the-docs " "$(anchors '## See [the docs][d]')" "a heading's reference link keeps its text"
 assert_eq "a-b-c " "$(anchors '## A <b>b</b> *c*')" "HTML tags and * go"
+assert_eq "a_x_ " "$(anchors '## a*_x_')" "a * goes before the _ runs are read, so an _ after a letter stays"
 assert_eq "café " "$(anchors '## Café')" "a byte above 0x7f is kept, as a letter"
 assert_eq "café_x_ " "$(anchors '## Café_x_')" "an _ after such a byte is inside a word, and stays"
 assert_eq "title " "$(anchors '## Title ##')" "closing #s go"

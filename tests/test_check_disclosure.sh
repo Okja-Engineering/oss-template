@@ -29,7 +29,17 @@ pad_to() { # FILE LINES: append filler lines until FILE has LINES lines
     have=$((have + 1))
   done
 }
-run() { OUT=$(cd "$R" && bin/check "$@" disclosure 2>&1); ST=$?; }
+# run [MODE...]: the check on R, its tree mode called directly, as bin/check
+# would call it there (bin/check's own dispatch is test_check_cli's), and
+# any other mode through bin/check.
+run() {
+  if [ "$#" = 0 ]; then
+    OUT=$(cd "$R" && bin/checks/disclosure 2>&1)
+  else
+    OUT=$(cd "$R" && bin/check "$@" disclosure 2>&1)
+  fi
+  ST=$?
+}
 refused() { # DESCRIPTION NEEDLE
   run
   assert_status 1 "$ST" "refused: $1"
