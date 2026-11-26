@@ -1089,8 +1089,8 @@ failing awk '*ENVIRON\["K"]*confirmed.md' 1 "" 2
 stage_refused "confirmed.md's blob id cannot be read" "cannot read stages/01-ask/output/widget/confirmed.md"
 failing grep '-Fxq -e README.md' 1 "" 2
 stage_refused "the look up of the selected paths fails" "cannot look up the selected paths"
-failing grep '-Fxq -e README.md' 2 "" 2
-stage_refused "the look for a second source fails" "cannot look up the paths rendered so far"
+# A second source is judged with the final names, by the judgement whose
+# failure is pinned above.
 failing grep '-Fxq -e LICENSE' 2 "" 2
 stage_refused "the look for a selected path's variant fails" "cannot look up the paths rendered"
 failing grep '-Eq \[{]\[{]*' 1 "" 2
