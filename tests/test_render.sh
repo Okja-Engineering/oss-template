@@ -1003,10 +1003,14 @@ failing awk '*$5 != "" { print $1*'
 stage_refused "the selecting fields' awk fails" "cannot read the selecting fields"
 failing awk '*p !~ /^\[A-Za-z0-9*'
 stage_refused "the portability check fails" "cannot judge the foundation paths"
-failing awk '*substr(p, 12)*'
-stage_refused "the twin check's list of foundation paths fails" "cannot compare the paths for case twins"
+# The judgement of the final names, then the twin check over them (render
+# R2 of S2's fourth ship gate).
 failing cut '-f 2'
-stage_refused "the twin check's list of selected paths fails" "cannot compare the paths for case twins"
+stage_refused "the list of selected paths fails" "cannot read the selecting fields"
+failing cut '-f 3,4'
+stage_refused "the list of the names it renders fails" "cannot judge the names it renders"
+failing awk '*rel\[++n]*'
+stage_refused "the judgement of the names it renders fails" "cannot judge the names it renders"
 failing awk '*for (i = 2; i <= NF*'
 stage_refused "the twin check's directories fail" "cannot compare the paths for case twins"
 failing awk '*{ l = tolower($0) } (l in seen)*'
@@ -1079,7 +1083,7 @@ stage_refused "the walk's look for a name with a newline fails" "the walk cannot
 # the paths rendered so far, a placeholder left, and the walk's directories.
 failing git 'rev-parse -q --verify HEAD^{commit}' 1 "" 128
 stage_refused "HEAD cannot be read" "cannot read the workspace's HEAD"
-failing git 'cat-file -t *:shared/answers.tsv' 1 "" 128
+failing git '--literal-pathspecs ls-tree * -- shared/answers.tsv' 1 "" 128
 stage_refused "HEAD's schema cannot be read" "cannot read shared/answers.tsv at HEAD"
 failing awk '*ENVIRON\["K"]*confirmed.md' 1 "" 2
 stage_refused "confirmed.md's blob id cannot be read" "cannot read stages/01-ask/output/widget/confirmed.md"
@@ -1106,7 +1110,8 @@ assert_eq "present present" "$(gone "$ROOT/widget/README.md") $(gone "$R/stages/
 # Without --remove, the record that cannot be read routes to the step that
 # works, removing render.md by hand, not moving away a target it does not
 # name (render's p25 c, NIT 1 of S2's fourth ship gate).
-OUT=$(cd "$R" && PATH="$SCRATCH/rec$n:$PATH" bin/render widget --replace 2>&1)
+fixture_failing "$SCRATCH/rec2$n" awk '*ENVIRON\["K"]*render.md' 1 2
+OUT=$(cd "$R" && PATH="$SCRATCH/rec2$n:$PATH" bin/render widget --replace 2>&1)
 assert_status 1 "$?" "refused: --replace whose render.md cannot be read"
 assert_contains "$OUT" "the operator may remove render.md by hand" "  naming the step that works"
 assert_not_contains "$OUT" "move that target away" "  and no step that does not"
@@ -1140,6 +1145,7 @@ if [ "$(id -u)" != 0 ]; then
   assert_status 1 "$ST" "refused: --replace when render.md names a target that cannot be told there"
   assert_contains "$OUT" "give its owner search permission on the directories above it" "  naming the way out"
   assert_not_contains "$OUT" "by hand" "  and no step by hand"
+  printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$R/stages/02-render/output/widget/render.md"
 fi
 # The record judged before render.md is removed, whatever the target's
 # state: one naming no target, its target moved away (removal M1 of S2's
