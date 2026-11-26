@@ -17,15 +17,17 @@
 #       template, or one that is a symbolic link; a variant whose field
 #       selects nothing (no value of the field is VALUE); a selecting field
 #       with no variant for its value; a selected PATH from anything but
-#       its variants, as a plain PATH or PATH.tmpl; two sources for one
-#       path; a submodule; a name it would produce that is not a final
-#       component, as foundation/.tmpl and foundation/sub/.tmpl give, or
-#       holds a .git component in any case, as foundation/.GIT.tmpl gives;
-#       and, before anything is written, a path holding anything but ASCII
-#       letters, digits, ., _, -, / and space (decision 224), and two paths
-#       or directories that differ only in ASCII case, which a disk that
-#       folds case holds as one, so each name it produces, a foundation path
-#       less its .tmpl or a selected path, passes both. One line out per
+#       its variants, as a plain PATH or PATH.tmpl; a submodule; a
+#       foundation path holding anything but ASCII letters, digits, ., _,
+#       -, / and space (decision 224); and, judged once over the final set
+#       of names it would produce, .tmpl off and the variant resolved: two
+#       sources for one name; a name with no final component, as
+#       foundation/.tmpl gives, or with an empty, . or .. component, as
+#       foundation/..tmpl gives, or a .git component in any case, as
+#       foundation/.GIT.tmpl or a selected .GIT gives; a name that is a
+#       directory above another; and two names or directories that differ
+#       only in ASCII case, which a disk that folds case holds as one. Each
+#       of those refuses before anything is written. One line out per
 #       refusal; exit 0, 1 on a refusal, 2 when COMMIT cannot be read or OUT
 #       written. Sets RENDER_LIST to the produced paths, sorted, one a line.
 #   render_walk TARGET LIST
@@ -50,7 +52,7 @@
 
 render_tree() {
   local commit=$1 schema=$2 answers=$3 out=$4 entries line refused=0
-  local mode rel name tmpl sel selected field path values value v src produced="" tmp twins unportable
+  local mode rel name tmpl sel selected field path values value v src produced="" plan="" tmp twins names unportable
   entries=$(tree_list "commit:$commit") || return 2
   # The selecting fields: "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE". Every
   # command a value comes from has its status read (decision 228).
@@ -70,38 +72,14 @@ render_tree() {
     printf '%s\n' "$unportable"
     return 1
   fi
-  # Paths, or directories, that differ only in case, refused before anything
-  # is written: on a disk that folds case, one would be written through the
-  # other. Each foundation path, without .tmpl, and each selected path.
-  twins=$(
-    set -o pipefail
-    {
-      awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ { p = substr(p, 12); print p; if (sub(/\.tmpl$/, "", p)) print p }' <<<"$entries" &&
-        cut -f 2 <<<"$sel"
-    } | awk -F / 'NF { p = $1; print p; for (i = 2; i <= NF; i++) { p = p "/" $i; print p } }' | sort -u |
-      awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }'
-  ) || {
-    printf 'cannot compare the paths for case twins\n'
-    return 2
-  }
-  if [ -n "$twins" ]; then
-    printf '%s\n' "$twins"
-    return 1
-  fi
   # The paths a field selects, one a line.
   selected=$(cut -f 2 <<<"$sel") || {
     printf 'cannot read the selecting fields\n'
     return 2
   }
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || {
-    printf 'cannot make a temporary directory\n'
-    return 2
-  }
-  render__fields "$schema" "$answers" >"$tmp/fields" || {
-    rm -rf "$tmp"
-    printf 'cannot read the render fields\n'
-    return 2
-  }
+  # The plan: what each foundation path renders, "MODE<TAB>TMPL<TAB>REL<TAB>
+  # NAME" a line, its name worked out, .tmpl off and the variant resolved,
+  # before anything is written.
   while IFS= read -r line <&3; do
     rel=${line#*	}
     case "$rel" in
@@ -115,28 +93,6 @@ render_tree() {
       *.tmpl)
         name=${name%.tmpl}
         tmpl=1
-        ;;
-    esac
-    # Every name it produces is a final component that is not empty, and
-    # none of its components is .git in any case, which a disk that folds
-    # case would open as one (decision 224).
-    case "$name" in
-      '' | */)
-        printf 'foundation/%s: renders no name, an empty final component\n' "$rel"
-        refused=1
-        continue
-        ;;
-    esac
-    v=$(tr '[:upper:]' '[:lower:]' <<<"$name") || {
-      printf 'cannot fold the case of %s\n' "$name"
-      refused=2
-      break
-    }
-    case "/$v/" in
-      */.git/*)
-        printf 'foundation/%s: renders %s, an entry named .git\n' "$rel" "$name"
-        refused=1
-        continue
         ;;
     esac
     # A variant: PATH.VALUE, for a PATH a field selects.
@@ -181,8 +137,7 @@ EOF
         1) ;;
         *)
           printf 'cannot look up the selected paths\n'
-          refused=2
-          break
+          return 2
           ;;
       esac
     fi
@@ -203,22 +158,106 @@ EOF
       refused=1
       continue
     fi
-    render__holds "$produced" "$name"
-    case $? in
-      0)
-        printf 'foundation/%s: a second source for %s\n' "$rel" "$name"
-        refused=1
-        continue
-        ;;
-      1) ;;
-      *)
-        printf 'cannot look up the paths rendered so far\n'
-        refused=2
-        break
-        ;;
-    esac
     produced="$produced$name
 "
+    plan="$plan$mode	$tmpl	$rel	$name
+"
+  done 3<<EOF
+$entries
+EOF
+  # A selecting field whose value no variant matches.
+  while IFS='	' read -r field path values value; do
+    [ -n "$field" ] || continue
+    render__holds "$produced" "$path"
+    case $? in
+      0) ;;
+      1)
+        printf '%s=%s selects foundation/%s.%s, which the foundation does not hold\n' "$field" "$value" "$path" "$value"
+        refused=1
+        ;;
+      *)
+        printf 'cannot look up the paths rendered\n'
+        return 2
+        ;;
+    esac
+  done <<EOF
+$sel
+EOF
+  # One judgement of the final set of names, before anything is written
+  # (decision 224): no name twice, from a second source; each component of
+  # each name not empty, not . or .., and not .git in any case, which a disk
+  # that folds case would open as one; no name a directory above another;
+  # and no two names, or directories, that differ only in case, which such a
+  # disk holds as one, so one would be written through the other.
+  names=$(
+    set -o pipefail
+    cut -f 3,4 <<<"$plan" | awk -F '\t' '
+      NF { rel[++n] = $1; name[n] = $2 }
+      END {
+        for (i = 1; i <= n; i++) {
+          if (name[i] in is) {
+            print "foundation/" rel[i] ": a second source for " name[i]
+            dup[i] = 1
+          }
+          is[name[i]] = 1
+        }
+        for (i = 1; i <= n; i++) {
+          if (i in dup) continue
+          k = split(name[i], c, "/")
+          if (name[i] == "" || c[k] == "") {
+            print "foundation/" rel[i] ": renders no name, an empty final component"
+            continue
+          }
+          bad = ""
+          for (j = 1; j <= k; j++) {
+            if (c[j] == "") bad = "an empty component"
+            else if (bad == "" && (c[j] == "." || c[j] == "..")) bad = "a . or .. component"
+            else if (bad == "" && tolower(c[j]) == ".git") bad = "an entry named .git"
+          }
+          if (bad != "") {
+            print "foundation/" rel[i] ": renders " name[i] ", " bad
+            continue
+          }
+          p = c[1]
+          for (j = 2; j <= k; j++) {
+            if (p in is) print "foundation renders " p " as a file and as a directory, above " name[i]
+            p = p "/" c[j]
+          }
+        }
+      }'
+  ) || {
+    printf 'cannot judge the names it renders\n'
+    return 2
+  }
+  if [ -n "$names" ]; then
+    printf '%s\n' "$names"
+    refused=1
+  fi
+  twins=$(
+    set -o pipefail
+    printf '%s' "$produced" | awk -F / 'NF { p = $1; print p; for (i = 2; i <= NF; i++) { p = p "/" $i; print p } }' | sort -u |
+      awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }'
+  ) || {
+    printf 'cannot compare the paths for case twins\n'
+    return 2
+  }
+  if [ -n "$twins" ]; then
+    printf '%s\n' "$twins"
+    refused=1
+  fi
+  [ "$refused" = 0 ] || return 1
+  # The writes, each name judged.
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || {
+    printf 'cannot make a temporary directory\n'
+    return 2
+  }
+  render__fields "$schema" "$answers" >"$tmp/fields" || {
+    rm -rf "$tmp"
+    printf 'cannot read the render fields\n'
+    return 2
+  }
+  while IFS='	' read -r mode tmpl rel name <&3; do
+    [ -n "$mode" ] || continue
     case "$name" in
       */*) mkdir -p "$out/${name%/*}" || { refused=2; break; } ;;
     esac
@@ -255,29 +294,11 @@ EOF
     fi
     if [ "$mode" = 100755 ]; then chmod 755 "$out/$name"; else chmod 644 "$out/$name"; fi
   done 3<<EOF
-$entries
+$plan
 EOF
   # One clean-up, also for a read or write that failed inside the loop.
   rm -rf "$tmp"
   [ "$refused" != 2 ] || return 2
-  # A selecting field whose value no variant matches.
-  while IFS='	' read -r field path values value; do
-    [ -n "$field" ] || continue
-    render__holds "$produced" "$path"
-    case $? in
-      0) ;;
-      1)
-        printf '%s=%s selects foundation/%s.%s, which the foundation does not hold\n' "$field" "$value" "$path" "$value"
-        refused=1
-        ;;
-      *)
-        printf 'cannot look up the paths rendered\n'
-        return 2
-        ;;
-    esac
-  done <<EOF
-$sel
-EOF
   # shellcheck disable=SC2034 # RENDER_LIST is read by the caller
   RENDER_LIST=$(
     set -o pipefail
