@@ -38,10 +38,13 @@ block() {
     on && ($0 == "PASS " s || $0 == "FAIL " s) { exit }'
 }
 # wait_for FILE [TENTHS]: until FILE exists, for TENTHS of a second at most,
-# ten seconds by default.
+# a minute by default; exit 1 when it never does. A case that orders
+# suites run side by side does it by such a handshake, each wait bounded
+# and failing loudly, never by a sleep.
 wait_for() {
   local i=0
-  while [ ! -e "$1" ] && [ "$i" -lt "${2:-100}" ]; do
+  while [ ! -e "$1" ]; do
+    [ "$i" -lt "${2:-600}" ] || return 1
     sleep 0.1
     i=$((i + 1))
   done
@@ -103,12 +106,17 @@ assert_contains "$out" "PASS $D/test_c.sh" "  and the one after"
 assert_contains "$out" "run-all: 1 of 3 suites failed: $D/test_b.sh" "  and the run names it"
 
 # --- the suites' order, though they finish out of order -----------------------------------
-# test_a finishes only once test_b has: run side by side, b ends first.
+# Run side by side, b ends first: by a handshake, test_b starts its work
+# only once test_a has started, and test_a ends only once test_b has; a
+# wait that times out fails its suite, saying so.
 D="$SCRATCH/order"
 mkdir -p "$D"
 export ORDER_LOG="$SCRATCH/order.log"
-suite "$D/test_a.sh" 'wait_for "$ORDER_LOG.b"' 'echo a >>"$ORDER_LOG"' 'assert_eq a a "a ends after b"' 'assert_done'
-suite "$D/test_b.sh" 'echo b >>"$ORDER_LOG"' ': >"$ORDER_LOG.b"' 'assert_eq b b "b ends first"' 'assert_done'
+suite "$D/test_a.sh" ': >"$ORDER_LOG.a"' \
+  'wait_for "$ORDER_LOG.b" || assert_fail "a waited a minute for b to end"' \
+  'echo a >>"$ORDER_LOG"' 'assert_eq a a "a ends after b"' 'assert_done'
+suite "$D/test_b.sh" 'wait_for "$ORDER_LOG.a" || assert_fail "b waited a minute for a to start"' \
+  'echo b >>"$ORDER_LOG"' ': >"$ORDER_LOG.b"' 'assert_eq b b "b ends first"' 'assert_done'
 out=$(RUN_ALL_JOBS=2 bash "$RUN_ALL" "$D" 2>&1)
 assert_status 0 "$?" "suites that finish out of order pass"
 assert_eq "b
@@ -187,11 +195,12 @@ mkdir -p "$D"
 export TWO="$SCRATCH/two-"
 for s in a b; do
   o=$([ "$s" = a ] && echo b || echo a)
-  suite "$D/test_$s.sh" ": >\"\${TWO}$s\"" "wait_for \"\${TWO}$o\"" \
+  suite "$D/test_$s.sh" ": >\"\${TWO}$s\"" "wait_for \"\${TWO}$o\" || assert_fail '$s waited a minute for $o'" \
     "assert_eq yes \"\$([ -e \"\${TWO}$o\" ] && echo yes)\" '$s runs beside $o'" \
     'wait_for "${TWO}c" 20' \
     "assert_eq no \"\$([ -e \"\${TWO}c\" ] && echo yes || echo no)\" 'c does not start beside a and b'" \
-    ": >\"\${TWO}$s.looked\"" "wait_for \"\${TWO}$o.looked\"" 'assert_done'
+    ": >\"\${TWO}$s.looked\"" "wait_for \"\${TWO}$o.looked\" || assert_fail '$s waited a minute for $o to look'" \
+    'assert_done'
 done
 suite "$D/test_c.sh" ': >"${TWO}c"' 'assert_eq c c "c runs"' 'assert_done'
 printf '#!/bin/sh\necho undefined\n' >"$SCRATCH/stub/getconf"
@@ -227,7 +236,7 @@ for sig in INT TERM; do
   TMPDIR="$SCRATCH/tmp" bash "$RUN_ALL" "$D" >/dev/null 2>&1 &
   pid=$!
   set +m
-  wait_for "$SLOW_PID"
+  wait_for "$SLOW_PID" || assert_fail "the slow suite did not start within a minute"
   kill -s "$sig" "$pid"
   wait "$pid"
   st=$?
