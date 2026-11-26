@@ -548,6 +548,36 @@ sed "s|^TARGET=.*|TARGET=$ROOT/other|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
 rrefused "a TARGET edited by hand to another name" "is not TARGET_ROOT $ROOT, expanded here, then /widget" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ROOT/other")" "  with nothing removed"
+# The record judged before the redo removes render.md, the run's target
+# gone: one naming a present path that is not the run's target is refused,
+# with no --remove too, and one naming a path that is gone is dropped
+# (removal M2 and M6's a03 of S2's third ship gate).
+rendered
+rm -rf "$ROOT/widget"
+mkdir -p "$ROOT/other"
+printf '%s\n' '# Render of widget' '' "target: $ROOT/other" >"$R/stages/02-render/output/widget/render.md"
+rrefused "a redo whose render.md names a present path that is not the run's target" \
+  "render.md names $ROOT/other, not the run's target $ROOT/widget" run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_eq "present" "$(gone "$ROOT/other")" "  with it left"
+rm -rf "$ROOT/other"
+ask run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_status 0 "$ST" "a redo whose render.md names a path that is gone"
+assert_eq "gone" "$(gone "$R/stages/02-render/output/widget/render.md")" "  removes render.md"
+# A first run beside a render.md left from a run removed by hand removes no
+# render.md, so it judges none: no refusal of a redo, and nothing on stderr
+# but its own line (removal's q02 NIT).
+ready
+mkdir -p "$R/stages/02-render/output/widget"
+printf '%s\n' '# Render of widget' '' "target: $ROOT/widget" >"$R/stages/02-render/output/widget/render.md"
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 0 "$ST" "a first run beside a stale render.md"
+assert_eq "bin/ask: wrote stages/01-ask/output/widget/answers.env" "$OUT" "  says only that it wrote the answers"
+ready
+mkdir -p "$R/stages/02-render/output/widget" "$ROOT/widget"
+printf '%s\n' '# Render of widget' '' "target: $ROOT/widget" >"$R/stages/02-render/output/widget/render.md"
+rrefused "a first run beside a stale render.md, its target present" \
+  "the target $ROOT/widget is present" run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_eq "1" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" "  in one line"
 rendered
 mkdir -p "$SCRATCH/moved$n"
 rrefused "a redo moving TARGET_ROOT while the rendered target is present" "remove $ROOT/widget" \

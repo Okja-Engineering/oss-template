@@ -1002,6 +1002,32 @@ ready
 render widget
 printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$R/stages/02-render/output/widget/render.md"
 refused "--replace when render.md names no target" "render.md names no target" widget --replace
+# The record judged before render.md is removed, whatever the target's
+# state: one naming no target, its target moved away (removal M1 of S2's
+# third ship gate); one naming a present target that is not the run's,
+# TARGET_ROOT and TARGET edited by hand and confirmed (its M2). Each is
+# refused, with render.md and the target it names left.
+mv "$ROOT/widget" "$ROOT/moved"
+render widget --replace
+assert_status 1 "$ST" "refused: --replace when render.md names no target, its target gone"
+assert_contains "$OUT" "render.md names no target" "  and the refusal says so"
+assert_eq "present" "$(gone "$R/stages/02-render/output/widget/render.md")" "  and render.md is left"
+ready
+render widget
+sed -e "s|^TARGET_ROOT=.*|TARGET_ROOT=$ROOT/b|" -e "s|^TARGET=.*|TARGET=$ROOT/b/widget|" \
+  "$R/stages/01-ask/output/widget/answers.env" >"$SCRATCH/edited$n"
+mv "$SCRATCH/edited$n" "$R/stages/01-ask/output/widget/answers.env"
+ask confirm widget --by 'A Person'
+render widget --replace
+assert_status 1 "$ST" "refused: --replace when render.md names a present target that is not the run's"
+assert_contains "$OUT" "render.md names $ROOT/widget, not the run's target $ROOT/b/widget" "  with the discard's reason"
+assert_eq "present present gone" \
+  "$(gone "$ROOT/widget/README.md") $(gone "$R/stages/02-render/output/widget/render.md") $(gone "$ROOT/b/widget")" \
+  "  and the target it names, and render.md, are left, and nothing is rendered"
+mv "$ROOT/widget" "$ROOT/moved"
+render widget --replace
+assert_status 0 "$ST" "--replace when render.md names a target that is gone, which no removal orphans"
+assert_eq "$ROOT/b/widget" "$(record widget target)" "  records the new target"
 # A present target that only looks empty: unreadable, or a link to an empty
 # directory. Each is refused with the route, and left.
 if [ "$(id -u)" != 0 ]; then

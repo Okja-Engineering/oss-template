@@ -14,6 +14,8 @@ export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
+# shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/failing.sh
+. "$TEST_DIR/../foundation/tests/lib/failing.sh"
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/answers.sh
 . "$TEST_DIR/../bin/lib/answers.sh"
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/discard.sh
@@ -189,5 +191,50 @@ chmod +x "$SCRATCH/stub$n/rm"
 out=$(PATH="$SCRATCH/stub$n:$PATH" discard_remove "$T")
 assert_status 1 "$?" "refused: a removal that leaves the path"
 assert_eq "could not remove $T; remove it, then run the command again" "$out" "  naming it"
+
+# --- discard_record: render.md's record, judged before anything removes it -----------------
+# recjudge: discard_record of the run widget, with the answers A and
+# render.md M, its output and status in OUT and ST.
+recjudge() { OUT=$(discard_record "$A" widget "$M"); ST=$?; }
+target
+recjudge
+assert_status 0 "$ST" "no render.md is no record to judge"
+assert_eq "" "$OUT" "  and names no target"
+recorded "$T"
+recjudge
+assert_status 0 "$ST" "a render.md naming the run's target, present"
+assert_eq "$T" "$OUT" "  prints it"
+printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$M"
+recjudge
+assert_status 1 "$ST" "refused: a render.md naming no target"
+assert_contains "$OUT" "$M names no target" "  and the refusal says so"
+rm -rf "$T"
+recjudge
+assert_status 1 "$ST" "refused: a render.md naming no target, the target gone"
+target
+outside
+recorded "$O"
+recjudge
+assert_status 1 "$ST" "refused: a render.md naming a present path that is not the run's target"
+assert_contains "$OUT" "render.md names $O, not the run's target $T" "  with the discard's reason"
+rm -rf "$T"
+recjudge
+assert_status 1 "$ST" "  refused with the run's target gone too"
+rm -rf "$O"
+recjudge
+assert_status 0 "$ST" "a render.md naming a path that is gone, which no removal of it orphans"
+assert_eq "$O" "$OUT" "  prints it"
+target
+answers "$SCRATCH/x/../root$n" "$T"
+recorded "$T"
+recjudge
+assert_status 1 "$ST" "refused: a present recorded target the answers give no target for"
+assert_contains "$OUT" "gives no target" "  with the discard's reason"
+target
+recorded "$T"
+fixture_failing "$SCRATCH/rec$n" awk '*ENVIRON\["K"]*' 1 2
+OUT=$(PATH="$SCRATCH/rec$n:$PATH" && discard_record "$A" widget "$M")
+assert_status 1 "$?" "refused: a render.md whose record cannot be read"
+assert_contains "$OUT" "cannot read $M" "  and the refusal says so"
 
 assert_done
