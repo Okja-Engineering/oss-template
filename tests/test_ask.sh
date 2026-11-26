@@ -970,6 +970,24 @@ asked() {
   OUT=$(cd "$R" && PATH="$SCRATCH/fail$n:$PATH" bin/ask "$@" 2>&1)
   ST=$?
 }
+# q4: a first run refused once it has made the run's folder removes the
+# folder it made, as render does (conformance N-C of S2's fourth ship gate).
+ready
+asked mv '*answers.env.tmp.*' 1 run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: a first run whose answers cannot be renamed into place"
+assert_eq "gone" "$(gone "$OUTD")" "  and the run's folder it made is removed"
+# q6: a redo whose rename fails after its removals refuses naming what it
+# removed and the route, the redo again (conformance N-D of S2's fourth ship
+# gate). The removals stay first, so no new answers name a target still there.
+rendered
+asked mv '*answers.env.tmp.*' 1 run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+assert_status 1 "$ST" "refused: a redo whose answers cannot be renamed into place after its removals"
+assert_contains "$OUT" "having removed $ROOT/widget" "  naming the target it removed"
+assert_contains "$OUT" "stages/01-ask/output/widget/confirmed.md" "  and the confirmation"
+assert_contains "$OUT" "run bin/ask run widget --redo again" "  and the route"
+ask run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_status 0 "$ST" "  and the route, followed, writes the answers"
+assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  as given"
 ready
 before=$(state)
 asked awk '*ENVIRON\["S"] == ""*' 1 setup OWNER=acme
