@@ -237,6 +237,17 @@ assert_eq "TARGET=$SCRATCH/home$n/targets/widget" \
   "$(grep '^TARGET=' "$R/stages/01-ask/output/widget/answers.env")" "  writes TARGET with ~ expanded"
 assert_eq "TARGET_ROOT=~/targets" \
   "$(grep '^TARGET_ROOT=' "$R/stages/01-ask/output/widget/answers.env")" "  and keeps TARGET_ROOT as written"
+# run writes no TARGET it would itself refuse: a HOME whose bytes the value
+# rule refuses gives none (answers A2 of S2's second ship gate).
+for home in "$SCRATCH/home$n/new
+line" "$(printf '%s/home\302\205' "$SCRATCH")" "$(printf '%s/bad\377' "$SCRATCH")" "$SCRATCH/{{OWNER}}"; do
+  rm -rf "$R/stages/01-ask/output/widget"
+  OUT=$(cd "$R" && HOME=$home bin/ask run widget 'TITLE=A title' 'DESCRIPTION=One line' 2>&1)
+  assert_status 1 "$?" "refused: run under a HOME the value rule refuses: $(printf '%s' "$home" | od -An -c | tr -s ' ' | tail -c 24)"
+  assert_contains "$OUT" "gives no target" "  and the refusal says so"
+  assert_eq "absent" "$([ -e "$R/stages/01-ask/output/widget/answers.env" ] && echo present || echo absent)" \
+    "  and writes no answers file"
+done
 
 ready
 before=$(state)
@@ -418,18 +429,19 @@ rrefused "--remove naming another path" "$ROOT/other" run widget --redo --remove
 assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with the target not removed"
 assert_eq "present" "$(gone "$ROOT/other")" "  nor the other path"
 rendered
-rrefused "--remove naming the target in other bytes" "not the target render.md names" \
+rrefused "--remove naming the target in other bytes" "is not the run's target $ROOT/widget" \
   run widget --redo --remove "$ROOT/./widget" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with nothing removed"
 rendered
 mkdir -p "$ROOT/other"
 printf '%s\n' '# Render of widget' '' "target: $ROOT/other" >"$R/stages/02-render/output/widget/render.md"
-rrefused "a recorded target that is not the run's TARGET" "but the run's TARGET is $ROOT/widget" \
+rrefused "a recorded target that is not the run's target" "render.md names $ROOT/other, not the run's target $ROOT/widget" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ROOT/other")" "  with nothing removed"
-# The answers file's TARGET edited by hand to match: the last component.
+# The answers file's TARGET edited by hand to match, under TARGET_ROOT with
+# another last component.
 sed "s|^TARGET=.*|TARGET=$ROOT/other|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
-rrefused "a recorded target whose last component is not NAME" "last component" \
+rrefused "a TARGET edited by hand to another name" "is not TARGET_ROOT $ROOT, expanded here, then /widget" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ROOT/other")" "  with nothing removed"
 rendered
@@ -446,8 +458,45 @@ assert_eq "present" "$(gone "$ROOT/real/sub/file")" "  nor what it points to"
 rendered "$SCRATCH/outside/widget"
 mkdir -p "$SCRATCH/outside/widget"
 rrefused "a path outside TARGET_ROOT, which render.md names but the run's TARGET is not" \
-  "but the run's TARGET is $ROOT/widget" run widget --redo --remove "$SCRATCH/outside/widget" 'TITLE=C' 'DESCRIPTION=D'
+  "render.md names $SCRATCH/outside/widget, not the run's target $ROOT/widget" \
+  run widget --redo --remove "$SCRATCH/outside/widget" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$SCRATCH/outside/widget")" "  with nothing removed"
+# The answers file's TARGET edited by hand to a path outside TARGET_ROOT:
+# another root, a .. component, a symbolic link on the way; with no
+# render.md, and with render.md edited to match (removal N1 of S2's second
+# ship gate). The discard derives the target from TARGET_ROOT itself, so a
+# plain redo never routes to removing that path, and --remove naming it is
+# refused, with nothing removed.
+for how in outside dotdot link; do
+  for md in none edited; do
+    ready
+    ask run widget 'TITLE=A' 'DESCRIPTION=B'
+    O="$SCRATCH/precious$n/widget"
+    mkdir -p "$O"
+    printf 'keep\n' >"$O/file"
+    case "$how" in
+      outside) P=$O ;;
+      dotdot) P="$ROOT/../precious$n/widget" ;;
+      link) ln -s "$SCRATCH/precious$n" "$ROOT/lnk" && P="$ROOT/lnk/widget" ;;
+    esac
+    sed "s|^TARGET=.*|TARGET=$P|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
+    if [ "$md" = edited ]; then
+      mkdir -p "$R/stages/02-render/output/widget"
+      printf '%s\n' '# Render of widget' '' "target: $P" >"$R/stages/02-render/output/widget/render.md"
+    fi
+    ask run widget --redo 'TITLE=C'
+    assert_not_contains "$OUT" "--remove \"$P\"" "a TARGET edited by hand $how TARGET_ROOT, render.md $md: no route removes it"
+    assert_eq "present" "$(gone "$O/file")" "  and it is left"
+    sed "s|^TARGET=.*|TARGET=$P|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
+    if [ "$md" = edited ]; then
+      mkdir -p "$R/stages/02-render/output/widget"
+      printf '%s\n' '# Render of widget' '' "target: $P" >"$R/stages/02-render/output/widget/render.md"
+    fi
+    rrefused "  --remove naming it" "is not TARGET_ROOT $ROOT, expanded here, then /widget" \
+      run widget --redo --remove "$P" 'TITLE=C'
+    assert_eq "present" "$(gone "$O/file")" "  with it left"
+  done
+done
 # A relative path, which render.md names too, is refused (decision 227):
 # run from TARGET_ROOT's parent, with TARGET_ROOT itself named widget.
 fresh
@@ -463,13 +512,13 @@ printf '%s\n' '# Render of widget' '' 'target: widget' >"$R/stages/02-render/out
 before=$(run_state)
 OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove widget 'TITLE=C' 'DESCRIPTION=D' 2>&1)
 assert_status 1 "$?" "refused: --remove naming a relative path that render.md names"
-assert_contains "$OUT" "remove widget: it is not an absolute path" "  and the refusal says so"
+assert_contains "$OUT" "remove widget: " "  and the refusal says so"
 assert_eq "present" "$(gone "$ROOT/kept")" "  and TARGET_ROOT is left alone"
 assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 printf '%s\n' '# Render of widget' '' 'target: widget' >"$R/stages/02-render/output/widget/render.md"
 OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
 assert_status 1 "$?" "refused: a recorded target that is a relative path"
-assert_contains "$OUT" "the recorded target widget is not an absolute path" "  and the refusal says so"
+assert_contains "$OUT" "render.md names widget, not the run's target $ROOT/widget" "  and the refusal says so"
 assert_eq "present" "$(gone "$ROOT/kept")" "  with nothing removed"
 # A run's target present with no render.md naming it, left by a render that
 # was killed, or a directory made by hand: the redo names it, and removes it

@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # bin/lib/discard.sh, the shared discard and its removal helper (AC9;
-# decisions 123, 134, 149, 203, 211, 227), called directly: each guard of
-# discard_check refuses with nothing removed, discard_target judges before
-# it removes, and discard_remove opens every directory it must, dot-named
-# ones included, without following a symbolic link or changing a file's
-# mode, and refuses, naming the path, when anything remains.
+# decisions 123, 134, 149, 203, 211, 227), called directly: the discard
+# derives the run's target itself, from the run's answers file, and each
+# guard of discard_check refuses with nothing removed, a hand-edited TARGET
+# or render.md among them; discard_target judges before it removes; and
+# discard_remove opens every directory it must, dot-named ones included,
+# without following a symbolic link or changing a file's mode, and refuses,
+# naming the path, when anything remains.
+# shellcheck disable=SC2088 # a TARGET_ROOT holds a literal ~
 set -u
 set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
 . "$TEST_DIR/../foundation/tests/lib/assert.sh"
+# shellcheck source-path=SCRIPTDIR source=../bin/lib/answers.sh
+. "$TEST_DIR/../bin/lib/answers.sh"
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/discard.sh
 . "$TEST_DIR/../bin/lib/discard.sh"
 
@@ -18,60 +23,122 @@ SCRATCH=$(mktemp -d)
 SCRATCH=$(CDPATH='' cd -P -- "$SCRATCH" && pwd -P)
 trap 'chmod -R u+rwx "$SCRATCH" 2>/dev/null; rm -rf "$SCRATCH"' EXIT
 n=0
+O=""
 
 gone() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo gone; fi; }
 # mode PATH: PATH's permission bits, as ls shows them, not following a link;
 # ls, since stat's flags differ between BSD and GNU.
 # shellcheck disable=SC2012
 mode() { ls -ld "$1" | cut -c2-10; }
-# target: a fresh TARGET_ROOT, ROOT, holding the run widget's target T.
+# answers TARGET_ROOT TARGET: the run's answers file A, holding them.
+answers() { printf '%s\n' 'NAME=widget' "TARGET=$2" "TARGET_ROOT=$1" >"$A"; }
+# target: a fresh TARGET_ROOT, ROOT, holding the run widget's target T, and
+# the run's answers file A, as bin/ask writes it, with no render.md at M.
 target() {
   n=$((n + 1))
   ROOT="$SCRATCH/root$n"
   T="$ROOT/widget"
+  A="$SCRATCH/answers$n.env"
+  M="$SCRATCH/render$n.md"
+  O=""
   mkdir -p "$T/sub"
   printf 'x\n' >"$T/sub/file"
+  answers "$ROOT" "$T"
 }
-# refused DESCRIPTION NEEDLE PATH NAME RECORDED TARGET: discard_target
-# refuses, saying NEEDLE, and the target is left.
+# outside: a directory outside TARGET_ROOT, O, named widget and holding a
+# file, which no discard may remove.
+outside() {
+  O="$SCRATCH/outside$n/widget"
+  mkdir -p "$O"
+  printf 'keep\n' >"$O/file"
+}
+# recorded TARGET: render.md M, naming TARGET.
+recorded() { printf '%s\n' '# Render of widget' '' "target: $1" >"$M"; }
+# refused DESCRIPTION NEEDLE PATH: discard_target PATH, of the run widget
+# with the answers A and render.md M, refuses, saying NEEDLE, and the target
+# and the outside directory, when there is one, are left.
 refused() {
   local what=$1 needle=$2 out st
-  shift 2
-  out=$(discard_target "$@")
+  out=$(discard_target "$3" "$A" widget "$M")
   st=$?
   assert_status 1 "$st" "refused: $what"
   assert_contains "$out" "$needle" "  and the refusal says: $needle"
   assert_eq "present" "$(gone "$T/sub/file")" "  with nothing removed"
+  if [ -n "$O" ]; then assert_eq "present" "$(gone "$O/file")" "  and the outside directory left"; fi
 }
 
-# --- discard_check's guards, each through discard_target ------------------------------
+# --- the target the discard derives, and each guard of discard_check ---------------------
 target
-discard_target "$T" widget "$T" "$T" >/dev/null
-assert_status 0 "$?" "the target, named as recorded, is removed"
+discard_target "$T" "$A" widget "$M" >/dev/null
+assert_status 0 "$?" "the run's target, TARGET_ROOT then /NAME, is removed"
 assert_eq "gone" "$(gone "$T")" "  and is gone"
-discard_target "$T" widget "$T" "$T" >/dev/null
+discard_target "$T" "$A" widget "$M" >/dev/null
 assert_status 0 "$?" "a target already gone is nothing to remove"
-
 target
-refused "a relative path" "it is not an absolute path" widget widget widget widget
-(cd "$ROOT" && discard_target widget widget "$T" "$T" >/dev/null)
+recorded "$T"
+discard_target "$T" "$A" widget "$M" >/dev/null
+assert_status 0 "$?" "the target, named by render.md too, is removed"
+
+# A TARGET edited by hand in the answers file, with no render.md and with
+# render.md naming it too: outside TARGET_ROOT, through a .. component, and
+# through a symbolic link on the way (removal N1 of S2's second ship gate).
+for how in outside dotdot link; do
+  target
+  outside
+  case "$how" in
+    outside) P=$O ;;
+    dotdot) P="$ROOT/../outside$n/widget" ;;
+    link) ln -s "$SCRATCH/outside$n" "$ROOT/lnk" && P="$ROOT/lnk/widget" ;;
+  esac
+  answers "$ROOT" "$P"
+  refused "a TARGET edited by hand to a path $how TARGET_ROOT" "is not TARGET_ROOT $ROOT, expanded here, then /widget" "$P"
+  recorded "$P"
+  refused "  and with render.md naming it too" "is not TARGET_ROOT $ROOT, expanded here, then /widget" "$P"
+done
+target
+outside
+recorded "$O"
+refused "a render.md naming another path than the run's target" "render.md names $O, not the run's target $T" "$O"
+refused "the run's target while render.md names another" "render.md names $O, not the run's target $T" "$T"
+target
+printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$M"
+refused "a render.md naming no target" "names no target" "$T"
+target
+refused "a relative path" "is not the run's target $T" widget
+(cd "$ROOT" && discard_target widget "$A" widget "$M" >/dev/null)
 assert_status 1 "$?" "refused: a relative path naming the target from its parent"
 assert_eq "present" "$(gone "$T/sub/file")" "  with nothing removed"
-refused "a relative recorded target" "the recorded target widget is not an absolute path" "$T" widget widget "$T"
-refused "a path other than the recorded target" "not the target render.md names" "$ROOT/./widget" widget "$T" "$T"
+refused "the target in other bytes" "is not the run's target $T" "$ROOT/./widget"
 mkdir -p "$ROOT/other"
-refused "a recorded target other than the run's TARGET" "but the run's TARGET is $T" "$ROOT/other" widget "$ROOT/other" "$T"
+refused "another path under TARGET_ROOT" "is not the run's target $T" "$ROOT/other"
 assert_eq "present" "$(gone "$ROOT/other")" "  nor the other path"
-refused "a target whose last component is not NAME" "last component" "$ROOT/other" widget "$ROOT/other" "$ROOT/other"
-assert_eq "present" "$(gone "$ROOT/other")" "  nor the other path"
+refused "another run's name" "is not the run's target $T" "$ROOT/gadget"
+# A TARGET_ROOT the path rule refuses gives no target to remove.
+for bad in relative/root "$SCRATCH/x/../root" "$SCRATCH/./root" /; do
+  target
+  answers "$bad" "$bad/widget"
+  refused "a TARGET_ROOT the path rule refuses, $bad" "gives no target" "$bad/widget"
+done
+target
+answers '~/t' "$T"
+out=$(HOME='' discard_target "$T" "$A" widget "$M")
+assert_status 1 "$?" "refused: a TARGET_ROOT under ~ with HOME unset"
+assert_eq "present" "$(gone "$T/sub/file")" "  with nothing removed"
+target
+grep -v '^TARGET=' "$A" >"$A.x" && mv "$A.x" "$A"
+refused "an answers file holding no TARGET" "no TARGET" "$T"
+target
+grep -v '^TARGET_ROOT=' "$A" >"$A.x" && mv "$A.x" "$A"
+refused "an answers file holding no TARGET_ROOT" "no TARGET_ROOT" "$T"
+target
 mv "$T" "$ROOT/real"
 ln -s "$ROOT/real" "$T"
-out=$(discard_target "$T" widget "$T" "$T")
+out=$(discard_target "$T" "$A" widget "$M")
 assert_status 1 "$?" "refused: a target that is a symbolic link"
 assert_contains "$out" "symbolic link" "  and the refusal says so"
 assert_eq "present" "$(gone "$T")" "  with the link left"
 assert_eq "present" "$(gone "$ROOT/real/sub/file")" "  and what it points to"
-discard_check "$T" widget "$T" "$T" >/dev/null
+discard_check "$T" "$A" widget "$M" >/dev/null
 assert_status 1 "$?" "discard_check alone refuses it too"
 
 # --- discard_remove: open every directory, follow no link, change no file's mode ------------
@@ -81,7 +148,7 @@ if [ "$(id -u)" != 0 ]; then
   printf 'o\n' >"$T/.git/objects/deep/o"
   printf 'p\n' >"$T/..odd/deeper/p"
   chmod 000 "$T/.git/objects/deep" "$T/.git/objects" "$T/.git" "$T/..odd/deeper" "$T/..odd"
-  discard_target "$T" widget "$T" "$T" >/dev/null
+  discard_target "$T" "$A" widget "$M" >/dev/null
   assert_status 0 "$?" "a target holding chmod 000 dot-named directories is removed"
   assert_eq "gone" "$(gone "$T")" "  whole"
 
@@ -90,7 +157,7 @@ if [ "$(id -u)" != 0 ]; then
   chmod 500 "$SCRATCH/outside$n/kept" "$SCRATCH/outside$n"
   ln -s "$SCRATCH/outside$n" "$T/sub/link"
   ln -s "$SCRATCH/outside$n" "$T/.dotlink"
-  discard_target "$T" widget "$T" "$T" >/dev/null
+  discard_target "$T" "$A" widget "$M" >/dev/null
   assert_status 0 "$?" "a target holding links to an outside directory is removed"
   assert_eq "r-x------" "$(mode "$SCRATCH/outside$n")" "  and the linked directory's mode is unchanged"
   assert_eq "r-x------" "$(mode "$SCRATCH/outside$n/kept")" "  as is its subdirectory's"
@@ -109,7 +176,7 @@ if [ "$(id -u)" != 0 ]; then
   chmod 400 "$SCRATCH/hard$n"
   ln "$SCRATCH/hard$n" "$T/sub/hard"
   chmod 500 "$T/sub"
-  discard_target "$T" widget "$T" "$T" >/dev/null
+  discard_target "$T" "$A" widget "$M" >/dev/null
   assert_status 0 "$?" "a target holding a hard link to an outside file is removed"
   assert_eq "r--------" "$(mode "$SCRATCH/hard$n")" "  and the outside file's mode is unchanged"
 fi

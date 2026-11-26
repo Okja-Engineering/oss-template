@@ -273,14 +273,14 @@ render widget
 refused "a second render without --replace" "--replace" widget
 refused "--replace without --remove while the target is present" "--remove" widget --replace
 mkdir -p "$ROOT/other"
-refused "--replace --remove naming another path" "not the target render.md names" widget --replace --remove "$ROOT/other"
+refused "--replace --remove naming another path" "is not the run's target $ROOT/widget" widget --replace --remove "$ROOT/other"
 assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  with the target not removed"
 assert_eq "present" "$(gone "$ROOT/other")" "  nor the other path"
 # render.md edited to name another path: the run's TARGET is the one root.
 sed "s|^target: .*|target: $ROOT/other|" "$R/stages/02-render/output/widget/render.md" >"$SCRATCH/r$n" &&
   mv "$SCRATCH/r$n" "$R/stages/02-render/output/widget/render.md"
 refused "--replace --remove naming a path render.md names, not the run's TARGET" \
-  "but the run's TARGET is $ROOT/widget" widget --replace --remove "$ROOT/other"
+  "render.md names $ROOT/other, not the run's target $ROOT/widget" widget --replace --remove "$ROOT/other"
 assert_eq "present" "$(gone "$ROOT/other")" "  with it not removed"
 render widget --remove "$ROOT/widget"
 assert_status 2 "$ST" "--remove without --replace is a usage error"
@@ -673,7 +673,8 @@ fresh
 confirmed widget
 mkdir -p "$ROOT" "$SCRATCH/emptydir$n"
 ln -s "$SCRATCH/emptydir$n" "$ROOT/widget"
-refused "a symbolic link to an empty directory at the target" "--replace --remove" widget
+refused "a symbolic link to an empty directory at the target" "it is a symbolic link, not the rendered target" widget
+assert_not_contains "$OUT" "--remove \"" "  with no route to a --remove the discard would refuse"
 assert_eq "yes" "$([ -L "$ROOT/widget" ] && echo yes)" "  and the link is left"
 assert_eq "" "$(entries "$SCRATCH/emptydir$n")" "  and nothing is written through it"
 # A directory named like a variant is not one: its files are verbatim.
