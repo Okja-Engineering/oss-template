@@ -106,22 +106,28 @@ rules_word() {
 }
 
 rules_claims() {
-  local src=$1 listing paths file hits targets nr text refused=0
+  local src=$1 listing paths file hits targets nr text on refused=0
   shift
   RULES_FILES=0
   listing=$(tree_list "$src" "$@") || return 2
-  paths=$(printf '%s\n' "$listing" | sed 's/^[^	]*	//')
+  paths=$(printf '%s\n' "$listing" | sed 's/^[^	]*	//') || return 2
   while IFS= read -r file; do
     case "$file" in *.md) ;; *) continue ;; esac
     RULES_FILES=$((RULES_FILES + 1))
-    hits=$(tree_cat "$src" "$file" | rules_lines claims) || return 2
+    hits=$(set -o pipefail; tree_cat "$src" "$file" | rules_lines claims) || return 2
     [ -n "$hits" ] || continue
     # The file's links, read whole, since a reference's definition may sit on
     # any line.
-    targets=$(tree_cat "$src" "$file" | links_targets) || return 2
+    targets=$(set -o pipefail; tree_cat "$src" "$file" | links_targets) || return 2
     while IFS='	' read -r nr text; do
       rules__unenforced "$text" && continue
-      rules__names_check "$file" "$text" "$paths" "$(links_on "$nr" "$targets")" && continue
+      on=$(links_on "$nr" "$targets") || return 2
+      rules__names_check "$file" "$text" "$paths" "$on"
+      case $? in
+        0) continue ;;
+        1) ;;
+        *) return 2 ;;
+      esac
       printf '%s:%s: a rule line that names no check and does not say it is not enforced: %s\n' \
         "$file" "$nr" "$text"
       refused=1
@@ -143,13 +149,19 @@ rules__unenforced() {
 
 # rules__names_check FILE LINE PATHS TARGETS: LINE, in FILE, names an
 # enforcer that PATHS (the tree's paths, one per line) holds, by a code span
-# or by one of TARGETS, its link targets, one per line.
+# or by one of TARGETS, its link targets, one per line. Exit 2 when LINE
+# cannot be read.
 rules__names_check() {
   local file=$1 text=$2 paths=$3 cands target resolved cand
-  cands=$(rules__spans "$text")
+  cands=$(rules__spans "$text") || return 2
   while IFS= read -r target; do
     [ -n "$target" ] || continue
-    resolved=$(links_resolve "$file" "$target") || continue
+    resolved=$(links_resolve "$file" "$target")
+    case $? in
+      0) ;;
+      3) return 2 ;;
+      *) continue ;;
+    esac
     cands="$cands
 ${resolved%%#*}"
   done <<EOF

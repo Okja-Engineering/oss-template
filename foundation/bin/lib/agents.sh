@@ -33,7 +33,7 @@ agents_judge() {
   agents=$(tree_cat "$src" AGENTS.md && printf x)
   case $? in
     0)
-      AGENTS_LINES=$(printf '%s' "${agents%x}" | awk 'END { print NR }')
+      AGENTS_LINES=$(printf '%s' "${agents%x}" | awk 'END { print NR }') || return 2
       if [ "$AGENTS_LINES" -gt "$max" ]; then
         printf 'AGENTS.md has %s lines, over %s\n' "$AGENTS_LINES" "$max"
         refused=1

@@ -29,7 +29,7 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 
 src=$(tree_source)
 listing=$(tree_list "$src") || exit 2
-paths=$(printf '%s\n' "$listing" | sed 's/^[^	]*	//')
+paths=$(printf '%s\n' "$listing" | sed 's/^[^	]*	//') || exit 2
 refused=0
 
 refuse() {
@@ -39,9 +39,15 @@ refuse() {
 # Each lookup reads a here-string, not a pipe: grep -q stops at its match,
 # and under pipefail a writer it leaves mid-list would fail the lookup.
 has_path() { grep -Fxq -- "$1" <<<"$paths"; }
-# under DIR: the paths under DIR/, matched literally.
+# under DIR: the paths under DIR/, matched literally. Every list a rule reads
+# has its status read, and the check cannot run when one fails (decision
+# 228).
 under() { printf '%s\n' "$paths" | P="$1/" awk 'index($0, ENVIRON["P"]) == 1'; }
-has_dir() { [ -n "$(under "$1")" ]; }
+has_dir() {
+  local held
+  held=$(under "$1") || exit 2
+  [ -n "$held" ]
+}
 # mode_of PATH: the mode the listing gives PATH, matched literally, or nothing.
 mode_of() {
   printf '%s\n' "$listing" | P="$1" awk '
@@ -165,17 +171,12 @@ esac
 # and space, and no two spellings of a path, or of any of its directories,
 # differ only in case. Two spellings first differ in one segment under one
 # parent, so each set of twins is named once, under that parent.
+unportable=$(printf '%s\n' "$paths" | awk '!/^[A-Za-z0-9._ \/-]*$/') || exit 2
 while IFS= read -r p; do
   [ -n "$p" ] || continue
   refuse "$p: not a portable path: only ASCII letters, digits, ., _, -, / and space"
-done <<EOF
-$(printf '%s\n' "$paths" | grep -v '^[A-Za-z0-9._ /-]*$')
-EOF
-while IFS= read -r t; do
-  [ -n "$t" ] || continue
-  refuse "$t: tracked paths that differ only in case"
-done <<EOF
-$(printf '%s\n' "$paths" | awk -F/ '
+done <<<"$unportable"
+twins=$(printf '%s\n' "$paths" | awk -F/ '
   NF {
     parent = ""
     for (i = 1; i <= NF; i++) {
@@ -189,11 +190,14 @@ $(printf '%s\n' "$paths" | awk -F/ '
       parent = parent $i "/"
     }
   }
-  END { for (k in n) if (n[k] > 1) print list[k] }' | sort)
-EOF
+  END { for (k in n) if (n[k] > 1) print list[k] }' | sort) || exit 2
+while IFS= read -r t; do
+  [ -n "$t" ] || continue
+  refuse "$t: tracked paths that differ only in case"
+done <<<"$twins"
 
 # --- AC2: stage folders ------------------------------------------------------
-stages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "stages" && NF >= 3 { print $2 }' | sort -u)
+stages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "stages" && NF >= 3 { print $2 }' | sort -u) || exit 2
 # Every list of names or paths is read a line at a time, never split on
 # spaces or expanded as a glob; the tree reader refuses a newline in a path.
 while IFS= read -r s <&3; do
@@ -203,7 +207,7 @@ while IFS= read -r s <&3; do
   has_path "stages/$s/CONTEXT.md" || refuse "stages/$s/: no CONTEXT.md"
   if has_path "stages/$s/output/.gitignore"; then
     # Every byte counts: a trailing blank line is not the two lines.
-    ignore=$(tree_cat "$src" "stages/$s/output/.gitignore" && printf x)
+    ignore=$(tree_cat "$src" "stages/$s/output/.gitignore" && printf x) || exit 2
     ignore=${ignore%x}
     [ "$ignore" = '*
 !.gitignore' ] || [ "$ignore" = '*
@@ -212,39 +216,43 @@ while IFS= read -r s <&3; do
   else
     refuse "stages/$s/output/.gitignore: missing"
   fi
+  held=$(under "stages/$s/output") || exit 2
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     [ "$p" = "stages/$s/output/.gitignore" ] || refuse "$p: a tracked file under output/"
-  done <<EOF
-$(under "stages/$s/output")
-EOF
+  done <<<"$held"
 done 3<<EOF
 $stages
 EOF
 
 # --- AC2: CONTEXT.md and its routing table -----------------------------------
 if has_path CONTEXT.md; then
-  count=$(lines_of CONTEXT.md)
+  count=$(lines_of CONTEXT.md) || exit 2
   [ "$count" -le 60 ] || refuse "CONTEXT.md: $count lines, over 60"
   if tree_cat "$src" CONTEXT.md | grep -x '## Routing' >/dev/null; then
     # Each row counts a stage once, however often it mentions it.
-    routed=$(section CONTEXT.md Routing | body_rows | while IFS= read -r row; do
-      printf '%s\n' "$row" | grep -o 'stages/[^/[:space:]`|()]*/' | sort -u
-    done | sed 's|^stages/||; s|/$||')
+    routed=$(section CONTEXT.md Routing | body_rows | awk '{
+      split("", seen)
+      s = $0
+      while (match(s, /stages\/[^\/[:space:]`|()]*\//)) {
+        name = substr(s, RSTART + 7, RLENGTH - 8)
+        if (!(name in seen)) { seen[name] = 1; print name }
+        s = substr(s, RSTART + RLENGTH)
+      }
+    }') || exit 2
     while IFS= read -r s; do
       [ -n "$s" ] || continue
-      times=$(printf '%s\n' "$routed" | grep -Fxc -- "$s")
+      times=$(printf '%s\n' "$routed" | S=$s awk '$0 == ENVIRON["S"] { n++ } END { print n + 0 }') || exit 2
       [ "$times" -eq 1 ] || refuse "CONTEXT.md: the routing table names stages/$s/ $times times, not once"
     done <<EOF
 $stages
 EOF
+    names=$(printf '%s\n' "$routed" | sort -u) || exit 2
     while IFS= read -r s; do
       [ -n "$s" ] || continue
       grep -Fxq -- "$s" <<<"$stages" ||
         refuse "CONTEXT.md: the routing table names stages/$s/, which is not a stage folder"
-    done <<EOF
-$(printf '%s\n' "$routed" | sort -u)
-EOF
+    done <<<"$names"
   else
     refuse "CONTEXT.md: no ## Routing table"
   fi
@@ -258,16 +266,17 @@ while IFS= read -r s <&3; do
   contract="stages/$s/CONTEXT.md"
   has_path "$contract" || continue
   num=$(stage_num "$s")
-  count=$(lines_of "$contract")
+  count=$(lines_of "$contract") || exit 2
   [ "$count" -le 80 ] || refuse "$contract: $count lines, over 80"
-  case "$(h2s "$contract")" in
+  sections=$(h2s "$contract") || exit 2
+  case "$sections" in
     "Inputs Process Outputs" | "Inputs Process Checkpoints Outputs" | \
       "Inputs Process Audit Outputs" | "Inputs Process Checkpoints Audit Outputs") ;;
     *) refuse "$contract: sections are not Inputs, Process, [Checkpoints], [Audit], Outputs, in order" ;;
   esac
 
   inputs=""
-  rows=$(section "$contract" Inputs | input_rows)
+  rows=$(section "$contract" Inputs | input_rows) || exit 2
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     path=${row#*	}
@@ -304,7 +313,7 @@ while IFS= read -r s <&3; do
         continue
         ;;
     esac
-    target=$(normalize "stages/$s/$path")
+    target=$(normalize "stages/$s/$path") || exit 2
     if [ -z "$target" ]; then
       refuse "$contract: Inputs \`$path\` does not resolve"
       continue
@@ -313,7 +322,7 @@ while IFS= read -r s <&3; do
 "
     # Opened as written, it must reach a tracked regular file: a link is
     # not followed, since its target may lie anywhere.
-    mode=$(mode_of "$target")
+    mode=$(mode_of "$target") || exit 2
     if [ "$mode" = 120000 ]; then
       refuse "$contract: Inputs \`$path\` is a symbolic link, not a file"
     elif [ "$mode" = 160000 ]; then
@@ -350,12 +359,11 @@ while IFS= read -r s <&3; do
 $rows
 EOF
 
+  held=$(under "stages/$s/references") || exit 2
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     grep -Fxq -- "$p" <<<"$inputs" || refuse "$p: in references/ but not in the stage's Inputs"
-  done <<EOF
-$(under "stages/$s/references")
-EOF
+  done <<<"$held"
 done 3<<EOF
 $stages
 EOF

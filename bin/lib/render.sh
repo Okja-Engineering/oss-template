@@ -53,27 +53,34 @@ render_tree() {
   local commit=$1 schema=$2 answers=$3 out=$4 entries line refused=0
   local mode rel name tmpl sel field path values value v src produced="" tmp twins
   entries=$(tree_list "commit:$commit") || return 2
-  # The selecting fields: "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE".
-  sel=$(awk -F '\t' 'NR > 1 && $5 != "-" && $5 != "" { print $1 "\t" $5 "\t" $6 }' "$schema" |
-    while IFS='	' read -r field path values; do
-      value=$(answers_get "$answers" "$field") || value=""
-      printf '%s\t%s\t%s\t%s\n' "$field" "$path" "$values" "$value"
-    done)
+  # The selecting fields: "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE". Every
+  # command a value comes from has its status read (decision 228).
+  sel=$(render__selecting "$schema" "$answers") || {
+    printf 'cannot read the selecting fields\n'
+    return 2
+  }
   # Paths, or directories, that differ only in case, refused before anything
   # is written: on a disk that folds case, one would be written through the
   # other. Each foundation path, without .tmpl, and each selected path.
   twins=$({
     printf '%s\n' "$entries" |
-      awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ { p = substr(p, 12); print p; if (sub(/\.tmpl$/, "", p)) print p }'
-    printf '%s\n' "$sel" | cut -f 2
+      awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ { p = substr(p, 12); print p; if (sub(/\.tmpl$/, "", p)) print p }' &&
+      printf '%s\n' "$sel" | cut -f 2
   } | awk -F / 'NF { p = $1; print p; for (i = 2; i <= NF; i++) { p = p "/" $i; print p } }' | sort -u |
-    awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }')
+    awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }') || {
+    printf 'cannot compare the paths for case twins\n'
+    return 2
+  }
   if [ -n "$twins" ]; then
     printf '%s\n' "$twins"
     return 1
   fi
   tmp=$(mktemp -d) || return 2
-  render__fields "$schema" "$answers" >"$tmp/fields"
+  render__fields "$schema" "$answers" >"$tmp/fields" || {
+    rm -rf "$tmp"
+    printf 'cannot read the render fields\n'
+    return 2
+  }
   while IFS= read -r line <&3; do
     rel=${line#*	}
     case "$rel" in
@@ -149,7 +156,9 @@ EOF
     fi
     produced="$produced$name
 "
-    mkdir -p "$out/$(dirname "$name")" || { refused=2; break; }
+    case "$name" in
+      */*) mkdir -p "$out/${name%/*}" || { refused=2; break; } ;;
+    esac
     if [ "$mode" = 120000 ]; then
       v=$(tree_cat "commit:$commit" "foundation/$rel" && printf x) || { refused=2; break; }
       ln -s "${v%x}" "$out/$name" || { refused=2; break; }
@@ -185,19 +194,37 @@ EOF
 $sel
 EOF
   # shellcheck disable=SC2034 # RENDER_LIST is read by the caller
-  RENDER_LIST=$(printf '%s' "$produced" | sort)
+  RENDER_LIST=$(printf '%s' "$produced" | sort) || {
+    printf 'cannot sort the file list\n'
+    return 2
+  }
   return "$refused"
 }
 
+# render__selecting SCHEMA ANSWERS: one line per selecting field,
+# "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE"; exit 1 when the schema or a value
+# cannot be read.
+render__selecting() {
+  local rows field path values value
+  rows=$(awk -F '\t' 'NR > 1 && $5 != "-" && $5 != "" { print $1 "\t" $5 "\t" $6 }' "$1") || return 1
+  while IFS='	' read -r field path values; do
+    [ -n "$field" ] || continue
+    value=$(answers_get "$2" "$field") || return 1
+    printf '%s\t%s\t%s\t%s\n' "$field" "$path" "$values" "$value" || return 1
+  done <<<"$rows"
+}
+
 # render__fields SCHEMA ANSWERS: one line per render field,
-# "FIELD<TAB>TYPE<TAB>VALUE".
+# "FIELD<TAB>TYPE<TAB>VALUE"; exit 1 when the schema or a value cannot be
+# read.
 render__fields() {
-  local field type value
-  awk -F '\t' 'NR > 1 && $4 == "yes" { print $1 "\t" $3 }' "$1" |
-    while IFS='	' read -r field type; do
-      value=$(answers_get "$2" "$field") || value=""
-      printf '%s\t%s\t%s\n' "$field" "$type" "$value"
-    done
+  local rows field type value
+  rows=$(awk -F '\t' 'NR > 1 && $4 == "yes" { print $1 "\t" $3 }' "$1") || return 1
+  while IFS='	' read -r field type; do
+    [ -n "$field" ] || continue
+    value=$(answers_get "$2" "$field") || return 1
+    printf '%s\t%s\t%s\n' "$field" "$type" "$value" || return 1
+  done <<<"$rows"
 }
 
 # render__substitute FIELDS LABEL FILE: the template FILE, rendered on
@@ -205,8 +232,9 @@ render__fields() {
 # ending as FILE's does; a placeholder that is not a render field is
 # reported on standard error.
 render__substitute() {
-  local nl=0
-  [ -n "$(tail -c 1 "$3")" ] || nl=1
+  local nl=0 last
+  last=$(tail -c 1 "$3") || return 2
+  [ -n "$last" ] || nl=1
   F=$1 L=$2 NL=$nl awk '
     BEGIN {
       while ((getline line < ENVIRON["F"]) > 0) {
@@ -265,26 +293,51 @@ render_walk() {
     rm -rf "$tmp"
     return 1
   fi
-  if grep -q '^G' "$tmp/git"; then
-    sed -n 's/^G\(.*\)$/the target holds \1, an entry named .git/p' "$tmp/git"
-    refused=1
+  # grep's 1 is "none"; anything above it is a list it could not read.
+  grep -q '^G' "$tmp/git"
+  case $? in
+    0)
+      sed -n 's/^G\(.*\)$/the target holds \1, an entry named .git/p' "$tmp/git"
+      refused=1
+      ;;
+    1) ;;
+    *) refused=2 ;;
+  esac
+  grep -qx N "$tmp/git" "$tmp/found" "$tmp/dirs"
+  case $? in
+    0)
+      printf 'the target holds a name with a newline in it\n'
+      refused=1
+      ;;
+    1) ;;
+    *) refused=2 ;;
+  esac
+  if [ "$refused" = 2 ]; then
+    printf 'the walk cannot read its lists of the target\n'
+    rm -rf "$tmp"
+    return 1
   fi
-  if grep -qx N "$tmp/git" "$tmp/found" "$tmp/dirs"; then
-    printf 'the target holds a name with a newline in it\n'
-    refused=1
+  # Each list the walk judges is made with its status read (decision 228).
+  if ! sed -n 's/^F//p' "$tmp/found" | sort >"$tmp/have" ||
+    ! { if [ -n "$list" ]; then printf '%s\n' "$list"; fi | sort >"$tmp/want"; }; then
+    printf 'the walk cannot sort the target'"'"'s files and the file list\n'
+    rm -rf "$tmp"
+    return 1
   fi
-  sed -n 's/^F//p' "$tmp/found" | sort >"$tmp/have"
-  if [ -n "$list" ]; then printf '%s\n' "$list"; fi | sort >"$tmp/want"
   if ! cmp -s "$tmp/have" "$tmp/want"; then
     comm -13 "$tmp/want" "$tmp/have" | sed 's/^/the target holds a file render did not write: /'
     comm -23 "$tmp/want" "$tmp/have" | sed 's/^/the target lacks a file render wrote: /'
     refused=1
   fi
-  sed -n 's/^D//p' "$tmp/dirs" | while IFS= read -r p; do
+  if ! sed -n 's/^D//p' "$tmp/dirs" | while IFS= read -r p; do
     if ! P="$p/" awk 'index($0, ENVIRON["P"]) == 1 { found = 1; exit } END { exit !found }' "$tmp/want"; then
       printf 'the target directory %s holds no listed file\n' "$p"
     fi
-  done >"$tmp/empty"
+  done >"$tmp/empty"; then
+    printf 'the walk cannot judge the directories of the target\n'
+    rm -rf "$tmp"
+    return 1
+  fi
   if [ -s "$tmp/empty" ]; then
     cat "$tmp/empty"
     refused=1
@@ -318,7 +371,11 @@ render_fingerprint() {
     printf 'cannot make a private repository to fingerprint the target\n'
     return 1
   fi
-  if [ -n "$list" ]; then printf '%s\n' "$list"; fi | tr '\n' '\0' >"$g/paths"
+  if ! { if [ -n "$list" ]; then printf '%s\n' "$list"; fi | tr '\n' '\0' >"$g/paths"; }; then
+    rm -rf "$g"
+    printf 'cannot list the paths to fingerprint\n'
+    return 1
+  fi
   GIT_DIR=$g/repo GIT_WORK_TREE=$target GIT_INDEX_FILE=$g/index \
     git --literal-pathspecs add --pathspec-from-file="$g/paths" --pathspec-file-nul >"$g/out" 2>&1
   st=$?

@@ -68,7 +68,8 @@ tree_cat() {
       ) || return 2
       printf '%s\n' "$listed" | grep -Fxq -e "$path" || return 1
       if [ -L "$top/$path" ]; then
-        printf '%s' "$(readlink "$top/$path")"
+        listed=$(readlink "$top/$path") || return 2
+        printf '%s' "$listed"
       elif [ -f "$top/$path" ]; then
         cat "$top/$path"
       else

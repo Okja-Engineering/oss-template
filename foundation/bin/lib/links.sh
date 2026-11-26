@@ -25,7 +25,7 @@
 #                            bare "#ANCHOR". Exit 0; 1 when TARGET is not
 #                            relative (a scheme, `//`, or a leading `/`),
 #                            which is not judged; 2 when it climbs above the
-#                            top of the tree.
+#                            top of the tree; 3 when it cannot be read.
 #   links_anchors            Markdown in; the anchor of each heading out, as
 #                            GitHub makes them: markup removed, so a link
 #                            keeps its text, code keeps its contents, and
@@ -252,7 +252,7 @@ links_resolve() {
         for (i = 1; i <= n; i++) s = s (i > 1 ? "/" : "") p[i]
         print "OK" s
       }'
-    )
+    ) || return 3
     case "$path" in
       UP) return 2 ;;
       OK*) path=${path#OK} ;;
@@ -306,19 +306,21 @@ links_anchors() {
 }
 
 links_judge() {
-  local src=$1 file=$2 paths=$3 targets nr target resolved st path anchor refused=0
-  targets=$(tree_cat "$src" "$file" | links_targets) || return 2
+  local src=$1 file=$2 paths=$3 targets nr target resolved st path anchor text anchors refused=0
+  targets=$(set -o pipefail; tree_cat "$src" "$file" | links_targets) || return 2
   [ -n "$targets" ] || return 0
   while IFS='	' read -r nr target; do
     resolved=$(links_resolve "$file" "$target")
     st=$?
     case "$st" in
+      0) ;;
       1) continue ;;
       2)
         printf '%s:%s: the link %s climbs out of the repository\n' "$file" "$nr" "$target"
         refused=1
         continue
         ;;
+      *) return 2 ;;
     esac
     path=${resolved%%#*}
     if ! links__holds "$paths" "$path"; then
@@ -329,7 +331,16 @@ links_judge() {
     case "$resolved" in *'#'*) ;; *) continue ;; esac
     anchor=${resolved#*#}
     case "$path" in *.md) ;; *) continue ;; esac
-    if ! tree_cat "$src" "$path" | links_anchors | grep -Fx -e "$anchor" >/dev/null; then
+    # A directory named *.md holds no heading; a file that cannot be read is
+    # a link that cannot be judged.
+    text=$(tree_cat "$src" "$path" && printf x)
+    case $? in
+      0) ;;
+      1) text="" ;;
+      *) return 2 ;;
+    esac
+    anchors=$(printf '%s' "${text%x}" | links_anchors && printf x) || return 2
+    if ! printf '%s' "${anchors%x}" | grep -Fx -e "$anchor" >/dev/null; then
       printf '%s:%s: the link %s does not resolve: %s has no heading #%s\n' \
         "$file" "$nr" "$target" "$path" "$anchor"
       refused=1

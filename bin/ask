@@ -126,7 +126,7 @@ sorted() { printf '%s' "$1" | sort; }
 present() { [ -e "$1" ] || [ -L "$1" ]; }
 
 cmd_setup() {
-  local field value have="" out="" faults="" fault line
+  local field fields value have="" out="" faults="" fault line
   schema_ok
   assignments setup "$@"
   if [ -f "$SETUP" ]; then
@@ -135,8 +135,9 @@ cmd_setup() {
       [ "$(answers_col "$SCHEMA" "$field" scope)" = setup ] ||
         refuse "setup/answers.env holds a line for $field, which the schema does not list as a setup field: $line"
     done <"$SETUP"
-    have=$(cat "$SETUP")
+    have=$(cat "$SETUP") || refuse "cannot read setup/answers.env"
   fi
+  fields=$(answers_fields "$SCHEMA" setup) || refuse "cannot read the setup fields of shared/answers.tsv"
   while IFS= read -r field; do
     [ -n "$field" ] || continue
     if value=$(printf '%s' "$PAIRS" | answers_get - "$field"); then
@@ -144,7 +145,7 @@ cmd_setup() {
     elif value=$(printf '%s\n' "$have" | answers_get - "$field"); then
       :
     else
-      value=$(answers_default "$SCHEMA" "$field" "$out")
+      value=$(answers_default "$SCHEMA" "$field" "$out") || refuse "cannot work out the default of $field"
     fi
     if ! fault=$(answers_check "$SCHEMA" "$field" "$value"); then
       faults="$faults$fault
@@ -152,9 +153,7 @@ cmd_setup() {
     fi
     out="$out$field=$value
 "
-  done <<EOF
-$(answers_fields "$SCHEMA" setup)
-EOF
+  done <<<"$fields"
   [ -z "$faults" ] || refuse "setup/answers.env is not written:" "$faults"
   write "$SETUP" sorted "$out"
   printf 'bin/ask: wrote setup/answers.env\n'
@@ -168,7 +167,7 @@ cmd_questionnaire() {
 }
 
 cmd_run() {
-  local name redo=0 remove="" have_remove=0 to=run arg fault faults="" field value
+  local name redo=0 remove="" have_remove=0 to=run arg fault faults="" field fields value
   local out="" run_pairs override_pairs setup_have outd render_md recorded="" old_target="" target
   local old_answers="" old_overrides="" line
   local answers_text override_text
@@ -249,20 +248,21 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
 $old_overrides
 EOF
 
+  fields=$(answers_fields "$SCHEMA" setup) || refuse "cannot read the setup fields of shared/answers.tsv"
   while IFS= read -r field; do
     [ -n "$field" ] || continue
     if value=$(printf '%s' "$override_pairs" | answers_get - "$field"); then
       :
     else
-      value=$(printf '%s\n' "$setup_have" | answers_get - "$field")
+      value=$(printf '%s\n' "$setup_have" | answers_get - "$field") ||
+        refuse "cannot read $field from setup/answers.env"
     fi
     out="$out$field=$value
 "
-  done <<EOF
-$(answers_fields "$SCHEMA" setup)
-EOF
+  done <<<"$fields"
   out="${out}NAME=$name
 "
+  fields=$(answers_fields "$SCHEMA" run) || refuse "cannot read the run fields of shared/answers.tsv"
   while IFS= read -r field; do
     [ -n "$field" ] && [ "$field" != NAME ] || continue
     if value=$(printf '%s' "$run_pairs" | answers_get - "$field"); then
@@ -271,7 +271,7 @@ EOF
       fault=$(answers_check "$SCHEMA" "$field" "$value") || faults="$faults$fault; give $field again
 "
     elif [ -n "$(answers_col "$SCHEMA" "$field" default)" ]; then
-      value=$(answers_default "$SCHEMA" "$field" "$out")
+      value=$(answers_default "$SCHEMA" "$field" "$out") || refuse "cannot work out the default of $field"
       fault=$(answers_check "$SCHEMA" "$field" "$value") || faults="$faults$fault
 "
     else
@@ -281,12 +281,10 @@ EOF
     fi
     out="$out$field=$value
 "
-  done <<EOF
-$(answers_fields "$SCHEMA" run)
-EOF
+  done <<<"$fields"
   [ -z "$faults" ] || refuse "the answers are not written:" "$faults"
-  target=$(answers_target_for "$(printf '%s' "$out" | answers_get - TARGET_ROOT)" "$name") ||
-    refuse "$target"
+  value=$(printf '%s' "$out" | answers_get - TARGET_ROOT) || refuse "the answers hold no TARGET_ROOT"
+  target=$(answers_target_for "$value" "$name") || refuse "$target"
   out="${out}TARGET=$target
 "
   # What the run writes, made before anything is removed.
@@ -352,7 +350,7 @@ cmd_confirm() {
   esac
   # Hashed as render hashes it: in the workspace, under git.sh's environment.
   blob=$(cd "$ws" && answers_blob "$outd/answers.env") || refuse "cannot hash $outd/answers.env"
-  at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || refuse "cannot read the time"
   write "$outd/confirmed.md" printf '%s\n' "# Confirmed: $name" '' "by: $who" "at: $at" "answers: $blob"
   printf 'bin/ask: wrote stages/01-ask/output/%s/confirmed.md\n' "$name"
 }

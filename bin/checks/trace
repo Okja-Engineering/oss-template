@@ -24,20 +24,25 @@ here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 SOURCES='docs/workflow.md CONTRIBUTING.md GOVERNANCE.md'
 src=$(tree_source)
 all=$(tree_list "$src") || exit 2
-paths=$(printf '%s\n' "$all" | sed 's/^[^	]*	//')
+paths=$(printf '%s\n' "$all" | sed 's/^[^	]*	//') || exit 2
 agents=$(printf '%s\n' "$paths" | awk '
   $0 == "AGENTS.md" || $0 == "CLAUDE.md" || $0 == "CONTEXT.md" ||
-    $0 ~ /^stages\/[^\/]+\/CONTEXT\.md$/')
+    $0 ~ /^stages\/[^\/]+\/CONTEXT\.md$/') || exit 2
 refused=0
 files=0
 
 # sourced FILE TARGETS: one of TARGETS, link targets in FILE one a line, is
-# one of SOURCES.
+# one of SOURCES. The check cannot run when a target cannot be read.
 sourced() {
   local target resolved
   while IFS= read -r target; do
     [ -n "$target" ] || continue
-    resolved=$(links_resolve "$1" "$target") || continue
+    resolved=$(links_resolve "$1" "$target")
+    case $? in
+      0) ;;
+      3) exit 2 ;;
+      *) continue ;;
+    esac
     case " $SOURCES " in *" ${resolved%%#*} "*) return 0 ;; esac
   done <<EOF
 $2
@@ -54,7 +59,8 @@ while IFS= read -r file; do
   targets=$(tree_cat "$src" "$file" | links_targets) || exit 2
   while IFS='	' read -r nr text; do
     [ -n "$nr" ] || continue
-    sourced "$file" "$(links_on "$nr" "$targets")" && continue
+    on=$(links_on "$nr" "$targets") || exit 2
+    sourced "$file" "$on" && continue
     printf '%s:%s: a rule line that links none of %s: %s\n' "$file" "$nr" "$SOURCES" "$text"
     refused=1
   done <<EOF
@@ -76,24 +82,17 @@ case $? in
   0 | 1) ;;
   *) exit 2 ;;
 esac
-guards=$(tree_cat "$src" CONTRIBUTING.md | awk '
+contributing=$(tree_cat "$src" CONTRIBUTING.md)
+case $? in
+  0 | 1) ;;
+  *) exit 2 ;;
+esac
+guards=$(printf '%s\n' "$contributing" | awk '
   /^```/ { fence = !fence }
   !fence && /^## / { insec = ($0 == "## Agent guards"); next }
-  insec { print }')
-denies=0
-while IFS= read -r entry; do
-  [ -n "$entry" ] || continue
-  denies=$((denies + 1))
-  case "$guards" in
-    *"$entry"*) ;;
-    *)
-      printf '.claude/settings.json: the deny entry %s is not listed in CONTRIBUTING.md § Agent guards\n' "$entry"
-      refused=1
-      ;;
-  esac
-done <<EOF
-$(printf '%s\n' "$settings" | awk '
-  # The strings of the "deny" array, each on its own line.
+  insec { print }') || exit 2
+# The strings of the "deny" array, each on its own line.
+entries=$(printf '%s\n' "$settings" | awk '
   { s = s $0 "\n" }
   END {
     i = index(s, "\"deny\"")
@@ -107,8 +106,19 @@ $(printf '%s\n' "$settings" | awk '
       sub(/^[^"]*"/, "", e)
       print substr(e, 1, length(e) - 1)
     }
-  }')
-EOF
+  }') || exit 2
+denies=0
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  denies=$((denies + 1))
+  case "$guards" in
+    *"$entry"*) ;;
+    *)
+      printf '.claude/settings.json: the deny entry %s is not listed in CONTRIBUTING.md § Agent guards\n' "$entry"
+      refused=1
+      ;;
+  esac
+done <<<"$entries"
 
 printf 'examined %s agent files and %s deny entries in %s\n' "$files" "$denies" "$src"
 exit "$refused"

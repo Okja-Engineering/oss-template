@@ -61,9 +61,11 @@ refuse() {
 
 # present PATH: something, a dangling symbolic link included, is at PATH.
 present() { [ -e "$1" ] || [ -L "$1" ]; }
-# empty_dir PATH: PATH is a directory, not a symbolic link, holding nothing.
+# empty_dir PATH: PATH is a directory, not a symbolic link, that ls lists
+# whole as holding nothing.
 empty_dir() {
-  [ -d "$1" ] && [ ! -L "$1" ] && [ -z "$(ls -A -- "$1" 2>/dev/null)" ] && [ -r "$1" ]
+  local held
+  [ -d "$1" ] && [ ! -L "$1" ] && held=$(ls -A -- "$1" 2>/dev/null) && [ -z "$held" ]
 }
 
 [ "$#" -ge 1 ] || usage "NAME is required"
@@ -121,7 +123,8 @@ named=$(answers_record "$outd/confirmed.md" answers) || named=""
   refuse "$outd/answers.env is not the answers confirmed.md names (blob $blob, not ${named:-none}); the operator confirms them again at stage 01's checkpoint"
 fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env") ||
   refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault"
-[ "$(answers_get "$work/answers.env" NAME)" = "$name" ] || refuse "$outd/answers.env names another run"
+named=$(answers_get "$work/answers.env" NAME) || refuse "cannot read NAME from $outd/answers.env"
+[ "$named" = "$name" ] || refuse "$outd/answers.env names another run"
 target=$(answers_target_check "$work/answers.env" "$name") ||
   refuse "$outd/answers.env: $target; change the answers with bin/ask run $name --redo"
 root=${target%/*}
@@ -154,7 +157,10 @@ render_tree "$head" "$work/schema" "$work/answers.env" "$work/out" >"$work/fault
 case "$?" in
   0) ;;
   1) refuse "the foundation at HEAD does not render; nothing is written:" "$(cat "$work/faults")" ;;
-  *) refuse "cannot read foundation/ at HEAD" ;;
+  *)
+    fault=$(cat "$work/faults")
+    refuse "cannot read foundation/ at HEAD" ${fault:+"$fault"}
+    ;;
 esac
 
 # A staging directory a killed render of this run left, by the staging name
@@ -195,11 +201,9 @@ fi
 cp -Rp "$work/out/." "$stage/" || refuse "cannot copy the render into $stage"
 fault=$(render_walk "$stage" "$RENDER_LIST") || refuse "the walk refuses the render:" "$fault"
 fp=$(render_fingerprint "$stage" "$RENDER_LIST") || refuse "cannot fingerprint the render:" "$fp"
-{
-  printf '%s\n' "# Render of $name" '' "target: $target" "workspace: $head" "answers: $blob" \
-    "fingerprint: $fp" '' '## Files' ''
-  printf '%s\n' "$RENDER_LIST"
-} >"$tmp" || refuse "cannot write $tmp"
+# render.md's text in one write, so its one status is the write's.
+printf '%s\n' "# Render of $name" '' "target: $target" "workspace: $head" "answers: $blob" \
+  "fingerprint: $fp" '' '## Files' '' "$RENDER_LIST" >"$tmp" || refuse "cannot write $tmp"
 trap '' HUP INT TERM
 if [ -d "$target" ] && [ ! -L "$target" ]; then
   rmdir -- "$target" 2>/dev/null || refuse "the target $target is no longer an empty directory; it is left alone"

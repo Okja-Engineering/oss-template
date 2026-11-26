@@ -180,8 +180,11 @@ answers_check() {
     printf '%s: an unknown field\n' "$field"
     return 1
   }
-  pattern=$(answers_col "$schema" "$field" pattern)
-  default=$(answers_col "$schema" "$field" default)
+  # Every cell a rule reads has its status read (decision 228).
+  if ! pattern=$(answers_col "$schema" "$field" pattern) || ! default=$(answers_col "$schema" "$field" default); then
+    printf '%s: cannot read its row of the schema\n' "$field"
+    return 1
+  fi
   answers__value "$field" "$v" || return 1
   case "$type" in
     name)
@@ -198,15 +201,19 @@ answers_check() {
     text) answers__free "$field" "$v" || return 1 ;;
     description)
       answers__free "$field" "$v" || return 1
-      [ "$(printf '%s' "$v" | tr -d '\200-\277' | wc -c | tr -d ' ')" -le 350 ] ||
-        { answers__no "$field" "a description is at most 350 characters"; return 1; }
+      # UTF-8 characters: the bytes that are not continuation bytes.
+      item=$(printf '%s' "$v" | tr -d '\200-\277' | wc -c) ||
+        { answers__no "$field" "cannot count the characters of the description"; return 1; }
+      [ "$((item + 0))" -le 350 ] || { answers__no "$field" "a description is at most 350 characters"; return 1; }
       ;;
     list)
       rest=$v,
       while [ -n "$rest" ]; do
         item=${rest%%,*}
         rest=${rest#*,}
-        item=$(printf '%s' "$item" | sed 's/^ *//; s/ *$//')
+        # Trimmed of spaces at each end.
+        item=${item#"${item%%[! ]*}"}
+        item=${item%"${item##*[! ]}"}
         [ -n "$item" ] || { answers__no "$field" "a list holds an empty item"; return 1; }
         answers__free "$field" "$item" || return 1
       done
@@ -324,10 +331,13 @@ answers_default() {
 }
 
 answers_questionnaire() {
+  # One command writes the whole text, so its status is the write's.
   # shellcheck disable=SC2016 # backticks here are Markdown code spans
-  printf '%s\n' '# Setup questionnaire' '' \
-    '`bin/ask questionnaire` writes this file from `shared/answers.tsv`, so a change goes in the schema, not here. Answer every question at once, then record the answers with `bin/ask setup FIELD=value…`, which writes `setup/answers.env`. In a default, `{{FIELD}}` stands for that field'"'"'s answer.' ''
-  awk -F '\t' '
+  H='# Setup questionnaire
+
+`bin/ask questionnaire` writes this file from `shared/answers.tsv`, so a change goes in the schema, not here. Answer every question at once, then record the answers with `bin/ask setup FIELD=value…`, which writes `setup/answers.env`. In a default, `{{FIELD}}` stands for that field'"'"'s answer.
+' awk -F '\t' '
+    BEGIN { print ENVIRON["H"] }
     NR > 1 && $2 == "setup" {
       d = ($7 == "-" || $7 == "") ? "no default" : "default `" $7 "`"
       printf "%d. %s (`%s`, %s; %s)\n", ++n, $8, $1, $3, d
@@ -337,15 +347,15 @@ answers_questionnaire() {
 answers_validate() {
   local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field
   if [ "$scope" = run ]; then
-    want="$(answers_fields "$schema")
+    want=$(answers_fields "$schema") && want="$want
 TARGET"
   else
     want=$(answers_fields "$schema" "$scope")
-  fi
-  if [ "$(tr -d '\000' <"$file" | wc -c)" -ne "$(wc -c <"$file")" ]; then
-    printf '%s: the file holds a NUL byte, which some readers drop and others stop at\n' "$label"
+  fi || {
+    printf '%s: cannot read the fields of the schema\n' "$label"
     return 1
-  fi
+  }
+  answers__file "$file" "$label" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     key=${line%%=*}
@@ -403,6 +413,22 @@ EOF
 answers__no() {
   printf '%s: %s\n' "$1" "$2"
   return 1
+}
+
+# answers__file FILE LABEL: the rule an answers file meets as a whole, before
+# any value from it is kept: it holds no NUL byte, which bash's read and
+# command substitution drop and awk may stop at. Each count has its status
+# read. The reason out, naming LABEL, and exit 1 when refused.
+answers__file() {
+  local all kept
+  if ! all=$(wc -c <"$1") || ! kept=$(tr -d '\000' <"$1" | wc -c); then
+    printf '%s: cannot read the file\n' "$2"
+    return 1
+  fi
+  if [ "$((all + 0))" -ne "$((kept + 0))" ]; then
+    printf '%s: the file holds a NUL byte, which some readers drop and others stop at\n' "$2"
+    return 1
+  fi
 }
 
 # answers__abs FIELD PATH: PATH is absolute, not `/` alone, with no empty,
