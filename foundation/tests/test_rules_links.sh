@@ -99,6 +99,15 @@ assert_eq "fence fence fence fence text " "$(kinds '````' '```' 'x' '````' 'y')"
 assert_eq "fence fence fence text " "$(kinds '```' 'x' '`````' 'y')" "a longer run closes a fence"
 assert_eq "fence fence fence fence text " "$(kinds '~~~' '~~~ sh' 'x' '~~~ ' 'y')" \
   "a line with an info string closes none, and trailing blanks do not count"
+assert_eq "fence fence fence fence fence " "$(kinds '```' 'x' '``` sh' 'y' '```')" \
+  "a backtick line with text after its run closes none"
+assert_eq "fence fence fence text " "$(kinds '```' 'x' '```  ' 'y')" "  and one with blanks after it closes the fence"
+# A backtick opener whose info string holds a backtick is no fence
+# (CommonMark 4.5; conformance N-A of S2's fourth ship gate); a tilde
+# opener's may.
+assert_eq "text text " "$(kinds '```a`b' 'x')" "a backtick run whose info string holds a backtick opens no fence"
+assert_eq "2:x.md " "$(printf '%s\n' '``` sh`' '[a](x.md)' | links_targets | tr '\t\n' ': ')" "  so a link after it is read"
+assert_eq "fence fence fence " "$(kinds '~~~ a`b' 'x' '~~~')" "a tilde fence's info string may hold a backtick"
 # Frontmatter needs its closing line; without one, its --- is no frontmatter
 # (conformance N3).
 assert_eq "under text text " "$(kinds '---' 'a: b' 'text')" "an unclosed --- is no frontmatter"
