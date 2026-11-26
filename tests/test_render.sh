@@ -167,6 +167,20 @@ printf 'VISIBILITY=private\n' >>"$R/stages/01-ask/output/widget/answers.env"
 refused "answers whose blob id confirmed.md does not name" "is not the answers confirmed.md names" widget
 fresh
 refused "a run that does not exist" "widget" widget
+# The schema render judges is HEAD's, whatever the disk holds: absent there,
+# or not parsing there (T2's rest in the tests lens).
+fresh
+confirmed widget
+git -C "$R" rm -q --cached shared/answers.tsv
+git -C "$R" commit -q -m "test: no schema at HEAD"
+refused "a HEAD that holds no shared/answers.tsv" "HEAD holds no shared/answers.tsv" widget
+fresh
+confirmed widget
+cp "$R/shared/answers.tsv" "$SCRATCH/schema$n"
+printf 'BROKEN\tsetup\tno-such-type\tno\t-\t-\t-\tQ?\n' >>"$R/shared/answers.tsv"
+fixture_commit "$R" "test: a schema at HEAD that does not parse"
+cp "$SCRATCH/schema$n" "$R/shared/answers.tsv"
+refused "a shared/answers.tsv at HEAD that does not parse" "shared/answers.tsv at HEAD does not parse:" widget
 fresh
 put foundation/README.md.tmpl '# {{NAME}} for {{OWNER}}'
 fixture_commit "$R" "test: a placeholder that is not a render field"
@@ -270,8 +284,13 @@ assert_eq "present" "$(gone "$ROOT/widget/kept")" "  and it is left alone"
 fresh
 confirmed widget
 render widget
-refused "a second render without --replace" "--replace" widget
+refused "a second render without --replace" "rendered already" widget
 refused "--replace without --remove while the target is present" "--remove" widget --replace
+# With the target gone, render.md alone keeps a second render to --replace
+# (the tests lens's F2).
+mv "$ROOT/widget" "$SCRATCH/moved$n"
+refused "a second render without --replace, its target gone" "the run widget is rendered already" widget
+mv "$SCRATCH/moved$n" "$ROOT/widget"
 mkdir -p "$ROOT/other" "$ROOT/.widget.render.4242"
 refused "--replace --remove naming another path" "is not the run's target $ROOT/widget" widget --replace --remove "$ROOT/other"
 assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  with the target not removed"
@@ -349,6 +368,16 @@ OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remo
 assert_status 1 "$?" "refused: --replace whose clear of the 03 outputs fails"
 assert_contains "$OUT" "could not remove stages/03-verify/output/widget" "  and the refusal names that path"
 assert_eq "present" "$(gone "$R/stages/02-render/output/widget/render.md")" "  and render.md stays, asking for --replace"
+# The removal of render.md, reached once the 03 outputs are gone: refused
+# naming it, not overwritten by the new one (removal N4's r02).
+fresh
+confirmed widget
+render widget
+mkdir -p "$SCRATCH/stub$n"
+rmstub 'rf?--?stages/02-render/output/widget/render.md'
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+assert_status 1 "$?" "refused: --replace whose removal of render.md fails"
+assert_contains "$OUT" "could not remove stages/02-render/output/widget/render.md" "  and the refusal names it"
 
 # --- the write is one transaction (decision 226) ---------------------------------------------
 # gitstub CODE: a git first on PATH that runs CODE when called for
@@ -761,6 +790,21 @@ confirmed widget
 render widget
 assert_eq "$(printf 'Deciders:\r\n- A Person\r\n- B Person\r\nEnd.\r')" "$(cat "$ROOT/widget/crlf-list.md")" \
   "a CRLF list line is repeated per item, each line ending CRLF"
+# A template's last line ends as the template's does, judged by its bytes,
+# which $(cat) would strip (the tests lens's F1).
+fresh
+printf 'Held by {{HOLDER}}.\n' >"$R/foundation/ends.md.tmpl"
+printf 'Held by {{HOLDER}}.' >"$R/foundation/open.md.tmpl"
+printf 'Line\n\n' >"$R/foundation/blank.md.tmpl"
+fixture_commit "$R" "test: templates ending with and without a newline"
+confirmed widget
+render widget
+assert_eq "$(printf 'Held by Okja-Engineering.\n' | od -An -tx1)" "$(od -An -tx1 <"$ROOT/widget/ends.md")" \
+  "a template ending in a newline renders ending in one"
+assert_eq "$(printf 'Held by Okja-Engineering.' | od -An -tx1)" "$(od -An -tx1 <"$ROOT/widget/open.md")" \
+  "  and one ending without renders without"
+assert_eq "$(printf 'Line\n\n' | od -An -tx1)" "$(od -An -tx1 <"$ROOT/widget/blank.md")" \
+  "  and one ending in a blank line keeps it"
 # A render that fails partway, exit 2 in render_tree, leaves no temporary
 # directory.
 fresh
@@ -839,6 +883,8 @@ stage_refused() {
   assert_contains "$OUT" "$2" "  saying: $2"
   assert_eq "" "$(left)" "  with nothing of this run left, no target and no render.md"
 }
+failing git '*ls-tree -r -z --full-tree *'
+stage_refused "the listing of HEAD's tree fails" "cannot read foundation/ at HEAD"
 failing awk '*$5 != "" { print $1*'
 stage_refused "the selecting fields' awk fails" "cannot read the selecting fields"
 failing awk '*p !~ /^\[A-Za-z0-9*'

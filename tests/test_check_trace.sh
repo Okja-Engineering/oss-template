@@ -215,6 +215,13 @@ fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)
       "Read(**/secrets/**)"'
 fixture_commit "$R" "test: a new deny entry"
 refused "an unlisted deny entry" "Read(**/secrets/**)"
+# The heading that opens the section is not one of its lines, so an entry
+# its words alone would hold is unlisted.
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Agent guards"'
+fixture_commit "$R" "test: a deny entry only the heading holds"
+refused "a deny entry the section's heading alone holds" "the deny entry Agent guards is not listed"
 valid
 fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
       "Read(**/secrets/**)"'
@@ -320,5 +327,17 @@ cannot_run awk '*print "OK" s*' 2 "where a link leads"
 cannot_run git '*:(literal)CONTRIBUTING.md' 1 "CONTRIBUTING.md"
 cannot_run awk '*insec = (t == "Agent guards")*' 1 "§ Agent guards"
 cannot_run awk '*s = substr(s, i + 6)*' 1 "the deny entries"
+# The tree reader failing on a file's bytes, at each read, and on a commit
+# that does not exist (the tests lens's F3).
+cannot_run cat '/*/CONTEXT.md' 1 "CONTEXT.md, for its rule lines"
+cannot_run cat '/*/CONTEXT.md' 2 "CONTEXT.md, for the links its rule lines need"
+cannot_run cat '/*/CONTEXT.md' 3 "CONTEXT.md, for every link it holds"
+cannot_run cat '/*/docs/workflow.md' 1 "a linked file, for its anchors"
+cannot_run cat '/*/.claude/settings.json' 1 ".claude/settings.json"
+cannot_run cat '/*/CONTRIBUTING.md' 1 "CONTRIBUTING.md"
+valid
+OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/trace 2>&1)
+assert_status 2 "$?" "the check cannot run on a commit that does not exist"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
 
 assert_done

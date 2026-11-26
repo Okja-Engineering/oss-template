@@ -359,25 +359,31 @@ printf '%s\n' 'target: /first' 'target: /second' >"$SCRATCH/twice.md"
 assert_eq "/first" "$(answers_record "$SCRATCH/twice.md" target)" "answers_record gives a key's first value alone"
 good_setup
 printf 'BOGUS=1\n' >>"$SETUP"
-vrefused "an unknown field" "BOGUS"
+vrefused "an unknown field" "BOGUS: an unknown field"
 good_setup
 printf 'TITLE=A title\n' >>"$SETUP"
-vrefused "a run field in a setup file" "TITLE"
+vrefused "a run field in a setup file" "TITLE is a run field, not one of this file"
 good_setup
 grep -v '^TEAM=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
-vrefused "a missing field" "TEAM"
+vrefused "a missing field" "TEAM is missing"
 good_setup
 printf 'OWNER=Other\n' >>"$SETUP"
-vrefused "a field given twice" "OWNER"
+vrefused "a field given twice" "OWNER is given twice"
 good_setup
 printf 'not a line\n' >>"$SETUP"
-vrefused "a line that is not FIELD=value" "not a line"
+vrefused "a line that is not FIELD=value" "not a FIELD=value line"
 good_setup
 printf 'owner=x\n' >>"$SETUP"
-vrefused "a field not in capitals" "owner"
+vrefused "a field not in capitals" "not a FIELD=value line"
+# A bare field name, with no =, gives no value, even when the name alone would
+# pass as one (the tests lens's F7).
+good_setup
+grep -v '^OWNER=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
+printf 'OWNER\n' >>"$SETUP"
+vrefused "a bare field name with no =" "$SETUP:6: not a FIELD=value line"
 good_setup
 printf 'OWNER=-bad\n' | cat - "$SETUP" | grep -v '^OWNER=Okja' >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
-vrefused "a value its type refuses" "OWNER"
+vrefused "a value its type refuses" "OWNER: a GitHub login is"
 good_setup
 grep -v '^PEOPLE=' "$SETUP" >"$SETUP.x" && mv "$SETUP.x" "$SETUP"
 printf 'PEOPLE=B\r\n' >>"$SETUP"

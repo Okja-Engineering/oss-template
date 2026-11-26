@@ -141,16 +141,16 @@ refused "a setup/given.env line that is not FIELD=value" "not a FIELD=value line
 
 fresh
 ask setup
-refused "a run field given to setup" "NAME" setup NAME=widget
-refused "an unknown field" "BOGUS" setup BOGUS=1
-refused "a value its type refuses" "OWNER" setup OWNER=-acme
-refused "an argument that is not FIELD=value" "OWNER" setup OWNER
-refused "a field given twice" "OWNER" setup OWNER=a OWNER=b
-refused "an email address in free text" "email" setup 'HOLDER=a.person@example.org'
-refused "a rule word in free text" "never" setup 'HOLDER=It never ends'
-refused "a TARGET_ROOT holding a .. component" ".." setup 'TARGET_ROOT=/srv/../etc'
-refused "a TARGET_ROOT holding a . component" "component" setup 'TARGET_ROOT=/srv/./targets'
-refused "a TARGET_ROOT ending in /" "component" setup 'TARGET_ROOT=/srv/targets/'
+refused "a run field given to setup" "NAME is a run field, not a setup field" setup NAME=widget
+refused "an unknown field" "BOGUS: an unknown field" setup BOGUS=1
+refused "a value its type refuses" "OWNER: a GitHub login is" setup OWNER=-acme
+refused "an argument that is not FIELD=value" "not FIELD=value: OWNER" setup OWNER
+refused "a field given twice" "OWNER is given twice" setup OWNER=a OWNER=b
+refused "an email address in free text" "free text holds no email address" setup 'HOLDER=a.person@example.org'
+refused "a rule word in free text" "free text holds no rule word" setup 'HOLDER=It never ends'
+refused "a TARGET_ROOT holding a .. component" "a path holds no empty, . or .. component" setup 'TARGET_ROOT=/srv/../etc'
+refused "a TARGET_ROOT holding a . component" "a path holds no empty, . or .. component" setup 'TARGET_ROOT=/srv/./targets'
+refused "a TARGET_ROOT ending in /" "a path holds no empty, . or .. component" setup 'TARGET_ROOT=/srv/targets/'
 fixture_append "$R/setup/answers.env" 'STALE=1'
 ask setup OWNER=acme
 assert_status 0 "$ST" "setup beside a setup/answers.env holding a field the schema does not list"
@@ -214,6 +214,16 @@ rrefused() {
   assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
   assert_eq "$setup_before" "$(state)" "  and setup/answers.env is as it was"
 }
+
+# A schema that does not parse is refused by each command that reads it,
+# before it writes anything (T2's rest in the tests lens).
+ready
+printf 'BROKEN\tsetup\tno-such-type\tno\t-\t-\t-\tQ?\n' >>"$R/shared/answers.tsv"
+rrefused "setup under a schema that does not parse" "shared/answers.tsv does not parse:" setup OWNER=acme
+rrefused "questionnaire under a schema that does not parse" "shared/answers.tsv does not parse:" questionnaire
+assert_eq "gone" "$(gone "$R/setup/questionnaire.md")" "  and writes no questionnaire"
+rrefused "run under a schema that does not parse" "shared/answers.tsv does not parse:" \
+  run widget 'TITLE=A' 'DESCRIPTION=B'
 
 # T6's survivors: a schema with no TARGET_ROOT, a default its check refuses,
 # a render.md naming no target, and a stale setup.override.env.
@@ -366,11 +376,11 @@ rrefused "a run field given to --setup-override" "TITLE is a run field, not a se
 rrefused "a select value of two listed values joined" "VISIBILITY" \
   run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public|private'
 rrefused "a value holding a C1 control" "C1 control" run widget "$(printf 'TITLE=A\302\205')" 'DESCRIPTION=B'
-rrefused "an override its type refuses" "OWNER" run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=-acme
-rrefused "a NAME over GitHub's limit" "100" run "$(rep 101 a)" 'TITLE=A' 'DESCRIPTION=B'
-rrefused "a NAME its type refuses" "NAME" run Widget 'TITLE=A' 'DESCRIPTION=B'
-rrefused "a DESCRIPTION over GitHub's limit" "350" run widget 'TITLE=A' "DESCRIPTION=$(rep 351 'é')"
-rrefused "NAME given as a field" "NAME" run widget 'NAME=gadget' 'TITLE=A' 'DESCRIPTION=B'
+rrefused "an override its type refuses" "OWNER: a GitHub login is" run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=-acme
+rrefused "a NAME over GitHub's limit" "a name is at most 100 characters" run "$(rep 101 a)" 'TITLE=A' 'DESCRIPTION=B'
+rrefused "a NAME its type refuses" "NAME: a name is lowercase letters" run Widget 'TITLE=A' 'DESCRIPTION=B'
+rrefused "a DESCRIPTION over GitHub's limit" "a description is at most 350 characters" run widget 'TITLE=A' "DESCRIPTION=$(rep 351 'é')"
+rrefused "NAME given as a field" "given as bin/ask run NAME, not as NAME=value" run widget 'NAME=gadget' 'TITLE=A' 'DESCRIPTION=B'
 fixture_replace "$R/setup/answers.env" "OWNER=Okja-Engineering" "OWNER=-okja"
 rrefused "a setup file the validator rejects" "setup/answers.env" run widget 'TITLE=A' 'DESCRIPTION=B'
 ready

@@ -144,6 +144,9 @@ refused "a routed stage that does not exist" "09-gone"
 valid
 fixture_replace "$R/CONTEXT.md" "## Routing" "## Stages"
 refused "a CONTEXT.md with no routing table" "Routing"
+valid
+fixture_remove "$R/CONTEXT.md"
+refused "a missing CONTEXT.md" "CONTEXT.md: missing"
 
 # --- AC2: stage folders --------------------------------------------------------
 for bad in 3-verify 03_verify 03-Verify 03-verify-; do
@@ -637,5 +640,26 @@ cannot_run awk '*if (n == 0) { print ""; exit }*' 1 "an input's path"
 cannot_run awk '*!found && substr($0, i + 1)*' 1 "an input's mode"
 cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 4 "whether an input is a directory"
 cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 5 "a stage's references/"
+# The tree reader failing on a file's bytes, at each of its reads, and on a
+# commit that does not exist (the tests lens's F3). PATH is the file's path
+# in the workspace, NTH its read; the stub matches it under the workspace's
+# own folder name, as git names the top with links resolved.
+cannot_read() { # PATH NTH WHAT
+  valid
+  fixture_failing "$R-stub" cat "*/${R##*/}/$1" "$2"
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/checks/disclosure 2>&1)
+  assert_status 2 "$?" "the check cannot run when it cannot read $3"
+  assert_not_contains "$OUT" "examined" "  and judges nothing"
+}
+cannot_read CLAUDE.md 1 "CLAUDE.md"
+cannot_read AGENTS.md 1 "AGENTS.md"
+cannot_read CONTEXT.md 1 "CONTEXT.md, for its lines"
+cannot_read CONTEXT.md 2 "CONTEXT.md, for its ## Routing heading"
+cannot_read CONTEXT.md 3 "CONTEXT.md, for its routing table"
+cannot_read "$C1" 1 "a contract, for its lines"
+valid
+OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/disclosure 2>&1)
+assert_status 2 "$?" "the check cannot run on a commit that does not exist"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
 
 assert_done

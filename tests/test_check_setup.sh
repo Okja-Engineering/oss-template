@@ -125,6 +125,25 @@ assert_status 2 "$?" "a comparison that cannot run is an error, not a pass or a 
 fixture_failing "$SCRATCH/gstub$n" cat '*/setup/given.env' 1 1
 OUT=$(cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" bin/check setup 2>&1)
 assert_status 2 "$?" "a setup/given.env that cannot be read is an error, not one that is absent"
+# The check cannot run, and says nothing it judged, when the tree reader
+# fails on a file, when the questionnaire cannot be written, when it has no
+# scratch directory, and on a commit that does not exist (the tests lens's
+# F3).
+cannot_run() { # TOOL PATTERN WHAT
+  local stub="$SCRATCH/cstub$n-$4"
+  fixture_failing "$stub" "$1" "$2" 1
+  OUT=$(cd "$R" && PATH="$stub:$PATH" bin/checks/setup 2>&1)
+  assert_status 2 "$?" "the check cannot run when it cannot $3"
+  assert_not_contains "$OUT" "examined" "  and judges nothing"
+}
+cannot_run cat '*/shared/answers.tsv' "read shared/answers.tsv" 1
+cannot_run cat '*/setup/questionnaire.md' "read setup/questionnaire.md" 2
+cannot_run cat '*/setup/answers.env' "read setup/answers.env" 3
+cannot_run awk '*BEGIN { print ENVIRON\["H"] }*' "write the questionnaire it compares" 4
+cannot_run mktemp '-d' "make its scratch directory" 5
+OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/setup 2>&1)
+assert_status 2 "$?" "the check cannot run on a commit that does not exist"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
 
 # Read through the tree reader.
 valid

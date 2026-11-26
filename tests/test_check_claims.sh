@@ -219,5 +219,22 @@ cannot_run sed 's/^\[^*' "the tree's paths"
 cannot_run awk '*$1 == ENVIRON\["N"]*' "a rule line's links"
 cannot_run awk '*split(span, w, " ")*' "a rule line's code spans"
 cannot_run awk '*print "OK" s*' "where a rule line's link leads"
+# The tree reader failing: a file whose bytes cannot be read, for its rule
+# lines and then for its links, and a commit that does not exist (the tests
+# lens's F3).
+cannot_read() { # NTH WHAT
+  fresh
+  line 'Force pushes to main are refused by [the check](bin/check).'
+  fixture_failing "$R-stub" cat '*/README.md' "$1"
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/check claims 2>&1)
+  ST=$?
+  assert_status 2 "$ST" "the check cannot run when it cannot read $2"
+}
+cannot_read 1 "a file, for its rule lines"
+cannot_read 2 "a file, for its links"
+fresh
+OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/claims 2>&1)
+assert_status 2 "$?" "the check cannot run on a commit that does not exist"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
 
 assert_done
