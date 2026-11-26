@@ -86,6 +86,46 @@ fixture_remove "$R/setup/answers.env"
 fixture_commit "$R" "test: no setup file"
 refused "a missing setup file" "setup/answers.env"
 
+# setup/answers.env is what bin/ask setup works out from setup/given.env
+# (decision 229).
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+fixture_commit "$R" "test: an owner given"
+run
+assert_status 0 "$ST" "passes: setup/answers.env and setup/given.env as bin/ask setup writes them"
+assert_contains "$OUT" "setup/given.env" "  and it says it examined setup/given.env"
+valid
+fixture_replace "$R/setup/answers.env" "OWNER=Okja-Engineering" "OWNER=acme"
+fixture_commit "$R" "test: an owner edited by hand"
+refused "a setup/answers.env edited by hand, away from what was given" "run bin/ask setup"
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+fixture_remove "$R/setup/given.env"
+fixture_commit "$R" "test: given.env removed"
+refused "a setup/answers.env whose setup/given.env is gone" "not what bin/ask setup writes"
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+printf 'OWNER=ac\000me\n' >"$R/setup/given.env"
+fixture_commit "$R" "test: a NUL in given.env"
+refused "a setup/given.env holding a NUL" "setup/given.env: the file holds a NUL byte"
+valid
+printf 'OWNER\n' >"$R/setup/given.env"
+fixture_commit "$R" "test: a bare field in given.env"
+refused "a setup/given.env line that is not FIELD=value" "setup/given.env:1: not a FIELD=value line"
+valid
+printf 'OWNER=-acme\n' >"$R/setup/given.env"
+fixture_commit "$R" "test: a bad value in given.env"
+refused "a setup/given.env value its check refuses" "give OWNER again"
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+fixture_commit "$R" "test: an owner given"
+fixture_failing "$SCRATCH/stub$n" cmp '*/want *' 1 2
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/check setup 2>&1)
+assert_status 2 "$?" "a comparison that cannot run is an error, not a pass or a refusal"
+fixture_failing "$SCRATCH/gstub$n" cat '*/setup/given.env' 1 1
+OUT=$(cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" bin/check setup 2>&1)
+assert_status 2 "$?" "a setup/given.env that cannot be read is an error, not one that is absent"
+
 # Read through the tree reader.
 valid
 fixture_replace "$R/setup/answers.env" "OWNER=Okja-Engineering" "OWNER=-okja"

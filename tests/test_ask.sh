@@ -47,11 +47,13 @@ fresh() {
     row DESCRIPTION run description yes - - - 'One line about the repository?'
     row VISIBILITY run select no - 'public|private' public 'Public or private?'
     row TITLE run text no - - - 'What is its title?'
+    row SUMMARY run text no - '[A-Z].*' 'About {{TITLE}}' 'What is it about?'
   } >"$R/shared/answers.tsv"
   fixture_commit "$R" "test: a fixture schema"
 }
 ask() { OUT=$(cd "$R" && bin/ask "$@" 2>&1); ST=$?; }
 setup_file() { cat "$R/setup/answers.env" 2>/dev/null; }
+gone() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo gone; fi; }
 state() { cksum 2>/dev/null <"$R/setup/answers.env" || echo absent; }
 # refused DESCRIPTION NEEDLE ARGS...: bin/ask refuses and writes nothing.
 refused() {
@@ -104,12 +106,38 @@ ask setup 'HOLDER=$(touch made-by-value) `touch made-by-backticks`'
 assert_status 0 "$ST" "setup with \$(touch x) in a value"
 assert_eq "" "$(find "$SCRATCH" -name 'made-by-*')" "  creates nothing"
 
-# A stored value its check now refuses is not written back (T6's k11).
+# Setup keeps only what the operator gave, in setup/given.env, and works
+# each other field's default out again from it (decision 229).
+fresh
+ask setup OWNER=acme
+assert_eq "OWNER=acme" "$(cat "$R/setup/given.env" 2>/dev/null)" "  setup records what was given in setup/given.env"
+ask setup OWNER=other
+assert_status 0 "$ST" "a second setup giving OWNER again"
+assert_eq "HOLDER=other
+OWNER=other
+TARGET_ROOT=~/Development/other" "$(setup_file)" "  moves each default worked out from OWNER with it"
+ask setup HOLDER=Someone
+assert_eq "HOLDER=Someone
+OWNER=other" "$(cat "$R/setup/given.env" 2>/dev/null)" "  and setup/given.env keeps every field given"
 fresh
 ask setup
-printf 'HOLDER=a\001b\nOWNER=acme\nTARGET_ROOT=/srv/t\n' >"$R/setup/answers.env"
-refused "a stored setup value that fails its check" "setup/answers.env is not written" setup OWNER=other
-assert_contains "$OUT" "HOLDER" "  and the refusal names the stored field"
+assert_eq "gone" "$(gone "$R/setup/given.env")" "setup given nothing writes no setup/given.env"
+printf 'OWNER=acme\n' >"$R/setup/given.env"
+ask setup
+assert_eq "OWNER=acme" "$(grep '^OWNER=' "$R/setup/answers.env")" "  and keeps a given.env's value when given nothing"
+
+# A given value its check now refuses is not written back (T6's k11).
+fresh
+ask setup
+printf 'HOLDER=a\001b\nOWNER=acme\n' >"$R/setup/given.env"
+refused "a given setup value that fails its check" "setup/answers.env is not written" setup OWNER=other
+assert_contains "$OUT" "HOLDER" "  and the refusal names the given field"
+assert_contains "$OUT" "give HOLDER again" "  and says to give it again"
+# The one reader refuses a file holding a NUL before any value is kept.
+printf 'OWNER=ac\000me\n' >"$R/setup/given.env"
+refused "a setup/given.env holding a NUL" "setup/given.env" setup
+printf 'OWNER\n' >"$R/setup/given.env"
+refused "a setup/given.env line that is not FIELD=value" "not a FIELD=value line" setup
 
 fresh
 ask setup
@@ -124,7 +152,14 @@ refused "a TARGET_ROOT holding a .. component" ".." setup 'TARGET_ROOT=/srv/../e
 refused "a TARGET_ROOT holding a . component" "component" setup 'TARGET_ROOT=/srv/./targets'
 refused "a TARGET_ROOT ending in /" "component" setup 'TARGET_ROOT=/srv/targets/'
 fixture_append "$R/setup/answers.env" 'STALE=1'
-refused "a setup file holding a field the schema does not list" "STALE" setup OWNER=acme
+ask setup OWNER=acme
+assert_status 0 "$ST" "setup beside a setup/answers.env holding a field the schema does not list"
+assert_not_contains "$(setup_file)" "STALE" "  writes it from what was given, without that field"
+printf 'OWNER=acme\nSTALE=1\n' >"$R/setup/given.env"
+ask setup
+assert_status 0 "$ST" "setup beside a setup/given.env holding a field the schema does not list"
+assert_contains "$OUT" "setup/given.env holds STALE, which is no longer a setup field; it is dropped" "  drops it, with a note"
+assert_eq "OWNER=acme" "$(cat "$R/setup/given.env")" "  from setup/given.env too"
 
 # --- questionnaire -----------------------------------------------------------------
 fresh
@@ -168,7 +203,6 @@ run_state() {
 }
 # rrefused DESCRIPTION NEEDLE ARGS...: bin/ask refuses, and writes no answers
 # file and no setup file.
-gone() { if [ -e "$1" ] || [ -L "$1" ]; then echo present; else echo gone; fi; }
 rrefused() {
   local what=$1 needle=$2 before setup_before
   shift 2
@@ -221,6 +255,7 @@ assert_eq "DESCRIPTION=One line
 HOLDER=Okja-Engineering
 NAME=widget
 OWNER=Okja-Engineering
+SUMMARY=About A title
 TARGET=$ROOT/widget
 TARGET_ROOT=$ROOT
 TITLE=A title
@@ -237,14 +272,16 @@ assert_eq "TARGET=$SCRATCH/home$n/targets/widget" \
   "$(grep '^TARGET=' "$R/stages/01-ask/output/widget/answers.env")" "  writes TARGET with ~ expanded"
 assert_eq "TARGET_ROOT=~/targets" \
   "$(grep '^TARGET_ROOT=' "$R/stages/01-ask/output/widget/answers.env")" "  and keeps TARGET_ROOT as written"
-# run writes no TARGET it would itself refuse: a HOME whose bytes the value
-# rule refuses gives none (answers A2 of S2's second ship gate).
+# run writes no TARGET it would itself refuse: the path type judges a
+# TARGET_ROOT's expansion, so a HOME whose bytes the value rule refuses is
+# refused before any TARGET is worked out (answers A2 of S2's second ship
+# gate; decision 227).
 for home in "$SCRATCH/home$n/new
 line" "$(printf '%s/home\302\205' "$SCRATCH")" "$(printf '%s/bad\377' "$SCRATCH")" "$SCRATCH/{{OWNER}}"; do
   rm -rf "$R/stages/01-ask/output/widget"
   OUT=$(cd "$R" && HOME=$home bin/ask run widget 'TITLE=A title' 'DESCRIPTION=One line' 2>&1)
   assert_status 1 "$?" "refused: run under a HOME the value rule refuses: $(printf '%s' "$home" | od -An -c | tr -s ' ' | tail -c 24)"
-  assert_contains "$OUT" "gives no target" "  and the refusal says so"
+  assert_contains "$OUT" "TARGET_ROOT, its ~ expanded," "  and the refusal says so"
   assert_eq "absent" "$([ -e "$R/stages/01-ask/output/widget/answers.env" ] && echo present || echo absent)" \
     "  and writes no answers file"
 done
@@ -258,6 +295,52 @@ assert_eq "HOLDER=Acme & Co" "$(grep '^HOLDER=' "$ANS")" "  each field it names"
 assert_eq "HOLDER=Acme & Co
 OWNER=acme" "$(cat "$OUTD/setup.override.env" 2>/dev/null)" "  recorded in the run's setup.override.env"
 assert_eq "$before" "$(state)" "  and leaves setup/answers.env untouched"
+
+# A run records what the operator gave in its given.env, written in the step
+# that writes answers.env; a redo keeps only that and works each default out
+# again, so a default from another field follows it (decision 229).
+ready
+ask run widget 'TITLE=A title' 'DESCRIPTION=One line'
+assert_eq "DESCRIPTION=One line
+TITLE=A title" "$(cat "$OUTD/given.env" 2>/dev/null)" "run records the fields given in given.env"
+assert_eq "SUMMARY=About A title" "$(grep '^SUMMARY=' "$ANS")" "  and works SUMMARY out from TITLE"
+ask run widget --redo 'TITLE=B title'
+assert_status 0 "$ST" "a redo giving TITLE again"
+assert_eq "SUMMARY=About B title" "$(grep '^SUMMARY=' "$ANS")" "  moves SUMMARY, worked out from TITLE, with it"
+assert_eq "DESCRIPTION=One line" "$(grep '^DESCRIPTION=' "$ANS")" "  and keeps a field given before"
+ask run widget --redo 'SUMMARY=Given here'
+ask run widget --redo 'TITLE=C title'
+assert_eq "SUMMARY=Given here" "$(grep '^SUMMARY=' "$ANS")" "  and a SUMMARY given stays as given"
+assert_eq "DESCRIPTION=One line
+SUMMARY=Given here
+TITLE=C title" "$(cat "$OUTD/given.env" 2>/dev/null)" "  recorded in given.env"
+rrefused "a pattern field's value that does not match" "does not match" \
+  run widget --redo 'SUMMARY=lowercase'
+printf 'DESCRIPTION=One line\nSTALE=1\nTITLE=C title\n' >"$OUTD/given.env"
+ask run widget --redo
+assert_status 0 "$ST" "a redo beside a given.env holding a field the schema does not list"
+assert_contains "$OUT" "given.env holds STALE, which is no longer a run field; it is dropped" "  drops it, with a note"
+assert_not_contains "$(cat "$OUTD/given.env")" "STALE" "  from given.env too"
+printf 'DESCRIPTION=One\000line\nTITLE=C title\n' >"$OUTD/given.env"
+rrefused "a given.env holding a NUL" "NUL" run widget --redo
+printf 'DESCRIPTION=One line\nTITLE=C title\n' >"$OUTD/given.env"
+printf 'OWNER=ac\000me\n' >"$OUTD/setup.override.env"
+rrefused "a setup.override.env holding a NUL" "NUL" run widget --redo
+printf 'OWNER=acme\nSTALE=1\n' >"$OUTD/setup.override.env"
+ask run widget --redo
+assert_status 0 "$ST" "a redo beside a setup.override.env holding a field no longer a setup field"
+assert_contains "$OUT" "setup.override.env holds STALE, which is no longer a setup field; it is dropped" \
+  "  drops it, with a note"
+assert_eq "OWNER=acme" "$(cat "$OUTD/setup.override.env" 2>/dev/null)" "  and keeps the rest"
+rm -f "$OUTD/given.env"
+ask run widget --redo
+assert_status 1 "$ST" "a redo of a run with no given.env, a required field never given"
+assert_contains "$OUT" "TITLE is missing" "  asks for it again"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B' 'SUMMARY=Given'
+ask run widget --redo 'DESCRIPTION=C' 'SUMMARY=About A'
+assert_eq "SUMMARY=About A" "$(grep '^SUMMARY=' "$OUTD/given.env")" \
+  "a redo giving a value equal to its default still records it as given"
 
 ready
 VALUE='Bé & back\slash = equals $HOME'
@@ -325,6 +408,13 @@ assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes nothing"
 ask confirm widget --by ''
 assert_status 1 "$ST" "confirm refuses an empty --by"
 assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes nothing"
+# --by meets the rule every value meets, as an answer does.
+for who in "$(printf 'A\302\205Person')" "$(printf 'A\377Person')" "$(printf 'A\342\200\250Person')" 'A {{NAME}}'; do
+  ask confirm widget --by "$who"
+  assert_status 1 "$ST" "confirm refuses a --by the value rule refuses: $(printf '%s' "$who" | od -An -c | tr -s ' ' | tail -c 20)"
+  assert_contains "$OUT" "--by names the operator on one line" "  and says so"
+  assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and writes nothing"
+done
 mkdir -p "$R/stages/01-ask/output"
 ask confirm ../../../setup --by 'A Person'
 assert_status 1 "$ST" "confirm refuses a NAME its type refuses, as ../../../setup"
@@ -416,7 +506,11 @@ assert_status 0 "$ST" "  and giving it again redoes the run"
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=acme
 printf 'TITLE=X\n' >>"$OUTD/setup.override.env"
-rrefused "a kept override that is not a setup field" "TITLE, which is not a setup field" run widget --redo 'TITLE=C'
+ask run widget --redo 'TITLE=C'
+assert_status 0 "$ST" "a redo beside a kept override for a run field"
+assert_contains "$OUT" "setup.override.env holds TITLE, which is no longer a setup field; it is dropped" \
+  "  drops it, with a note"
+assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  and the run field is the one given"
 printf 'OWNER=-acme\n' >"$OUTD/setup.override.env"
 rrefused "a kept override the schema refuses" "setup.override.env: OWNER" run widget --redo 'TITLE=C'
 
@@ -593,6 +687,45 @@ assert_contains "$OUT" "stages/03-verify/output/widget" "  and the refusal names
 assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 assert_eq "gone" "$(gone "$ROOT/widget")" "  the target, which the operator's yes removed, aside"
 
+# --- what a run owns (decisions 226, 230) ---------------------------------------------------
+# Everything that can refuse is settled before anything is removed: a redo
+# whose answers file cannot be staged, its run folder read-only, refuses
+# with the target and the run's files as they were.
+if [ "$(id -u)" != 0 ]; then
+  rendered
+  before=$(run_state)
+  chmod 555 "$OUTD"
+  ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+  chmod 755 "$OUTD"
+  assert_status 1 "$ST" "refused: a redo whose answers file cannot be staged"
+  assert_contains "$OUT" "cannot write beside" "  and the refusal says so"
+  assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with the target as it was"
+  assert_eq "$before" "$(run_state)" "  and the run's files as they were"
+fi
+# A signal removes what the run made: a redo signalled while it clears its
+# 03 outputs ends by the signal, leaving no temporary file beside the files
+# it writes.
+rendered
+mkdir -p "$SCRATCH/stub$n"
+printf '#!/bin/sh\ncase "$*" in *03-verify*) kill -s TERM "$(cat "%s")" ;; esac\nexec %s "$@"\n' \
+  "$SCRATCH/pid$n" "$(command -v rm)" >"$SCRATCH/stub$n/rm"
+chmod +x "$SCRATCH/stub$n/rm"
+OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" sh -c 'echo "$$" >"$1" && shift && exec bin/ask "$@"' sh "$SCRATCH/pid$n" \
+  run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+ST=$?
+assert_status 143 "$ST" "a redo signalled during its removals ends by the signal"
+assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  and leaves no temporary file"
+# A redo removes the staging directories a killed render left under the old
+# TARGET_ROOT, so a moved TARGET_ROOT strands none (decision 226), and
+# nothing else there.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$ROOT/.widget.render.4242/a" "$ROOT/.widget.render.x1" "$SCRATCH/moved$n"
+ask run widget --redo --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+assert_status 0 "$ST" "a redo that moves TARGET_ROOT"
+assert_eq "gone" "$(gone "$ROOT/.widget.render.4242")" "  removes a killed render's staging directory under the old one"
+assert_eq "present" "$(gone "$ROOT/.widget.render.x1")" "  and nothing else there"
+
 
 
 # --- a write that fails (decision 228) ------------------------------------------------------
@@ -605,7 +738,7 @@ if [ "$(id -u)" != 0 ]; then
   ask setup OWNER=acme
   chmod 755 "$R/setup"
   assert_status 1 "$ST" "refused: setup whose file cannot be written"
-  assert_contains "$OUT" "setup/answers.env" "  and the refusal names it"
+  assert_contains "$OUT" "cannot write beside $R/setup/given.env" "  and the refusal names the first it writes"
   assert_not_contains "$OUT" "wrote" "  and claims no write"
   assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
   mkdir -p "$OUTD"
@@ -630,6 +763,17 @@ OUT=$(cd "$R" && PATH="$SCRATCH/sortstub$n:$PATH" bin/ask setup OWNER=acme 2>&1)
 ST=$?
 assert_status 1 "$ST" "refused: setup whose text cannot be sorted"
 assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+# The temporary file is made exclusively: a symbolic link to /dev/null
+# planted at the name this process will use, which noclobber alone would
+# open, is refused and left (decision 230).
+ready
+before=$(state)
+OUT=$(cd "$R" && sh -c 'ln -s /dev/null "setup/answers.env.tmp.$$" && exec bin/ask setup OWNER=acme' 2>&1)
+ST=$?
+assert_status 1 "$ST" "refused: a symbolic link to /dev/null at the temporary file's name"
+assert_contains "$OUT" "is in the way" "  and the refusal says so"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+assert_eq "1" "$(find "$R/setup" -name 'answers.env.tmp.*' -type l | wc -l | tr -d ' ')" "  and the planted link is left"
 # The temporary file is made exclusively: one already there, a symbolic link
 # planted at the name this process will use, is refused, not written through.
 ready
@@ -670,18 +814,20 @@ assert_status 1 "$ST" "refused: setup whose setup fields cannot be read"
 assert_contains "$OUT" "cannot read the setup fields" "  and the refusal says so"
 assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
 # A default that cannot be worked out is refused, never written empty: in
-# setup, the first schema cell read is OWNER's default; in run, the 23rd is
-# VISIBILITY's.
+# setup, the first schema cell read is OWNER's default; in run, the 28th is
+# VISIBILITY's, and the 29th the one answers_default works it out from.
 fresh
 asked awk '*col\[$i] = i*' 1 setup
 assert_status 1 "$ST" "refused: setup whose default cannot be read"
-assert_contains "$OUT" "cannot work out the default of OWNER" "  and the refusal says so"
+assert_contains "$OUT" "OWNER: cannot read its default" "  and the refusal says so"
 assert_eq "absent" "$(state)" "  and no setup/answers.env is written"
-ready
-asked awk '*col\[$i] = i*' 23 run widget 'TITLE=A' 'DESCRIPTION=B'
-assert_status 1 "$ST" "refused: run whose default cannot be read"
-assert_contains "$OUT" "cannot work out the default of VISIBILITY" "  and the refusal says so"
-assert_eq "absent" "$(run_state)" "  and no answers file is written"
+for at in "28 VISIBILITY: cannot read its default" "29 VISIBILITY: cannot work out its default"; do
+  ready
+  asked awk '*col\[$i] = i*' "${at%% *}" run widget 'TITLE=A' 'DESCRIPTION=B'
+  assert_status 1 "$ST" "refused: run whose default cannot be read, at read ${at%% *}"
+  assert_contains "$OUT" "${at#* }" "  and the refusal says so"
+  assert_eq "absent" "$(run_state)" "  and no answers file is written"
+done
 ready
 asked awk '*BEGIN { print ENVIRON\["H"] }*' 1 questionnaire
 assert_status 1 "$ST" "refused: a questionnaire whose text cannot be made"
@@ -701,7 +847,7 @@ assert_status 1 "$ST" "refused: run whose setup value cannot be read"
 assert_contains "$OUT" "cannot read OWNER from setup/answers.env" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
 ready
-asked awk '*!found && i > 1*' 10 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+asked awk '*!found && i > 1*' 13 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
 assert_status 1 "$ST" "refused: run whose TARGET_ROOT cannot be read back"
 assert_contains "$OUT" "the answers hold no TARGET_ROOT" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"

@@ -168,6 +168,10 @@ ok TEAM '@okja-eng/maintainers'
 no TEAM octo "TEAM"
 no TEAM '@okja/' "TEAM"
 no TEAM '@-octo' "TEAM"
+# A GitHub login is at most 39 characters, in every type that holds one.
+ok TEAM "@$(rep 39 a)/maintainers"
+no TEAM "@$(rep 40 a)/maintainers" "39"
+no TEAM "@$(rep 40 a)" "39"
 ok CONTACT 'https://example.com/conduct'
 ok CONTACT 'not yet set, so launch waits on it'
 no CONTACT 'http://example.com/conduct' "CONTACT"
@@ -175,6 +179,12 @@ no CONTACT 'nobody' "CONTACT"
 ok HOME_URL 'https://github.com/Okja-Engineering/oss-template'
 no HOME_URL 'https://gitlab.com/okja/oss-template' "HOME_URL"
 no HOME_URL 'https://github.com/okja' "HOME_URL"
+ok HOME_URL "https://github.com/$(rep 39 a)/x"
+no HOME_URL "https://github.com/$(rep 40 a)/x" "39"
+ok HOME_URL 'https://github.com/okja/.github'
+ok HOME_URL 'https://github.com/okja/...'
+no HOME_URL 'https://github.com/okja/.' "not named . or .."
+no HOME_URL 'https://github.com/okja/..' "not named . or .."
 ok PEOPLE 'A Person, B Person'
 ok PEOPLE 'A Person'
 no PEOPLE 'A Person,, B Person' "empty item"
@@ -215,6 +225,16 @@ assert_status 1 "$?" "answers_path cannot expand ~ with HOME unset"
 assert_eq "" "$out" "  and prints nothing"
 out=$(HOME='' answers_path '~' 2>&1)
 assert_status 1 "$?" "  nor with HOME empty"
+# The expansion meets the rule every value meets (answers A2, decision 227).
+for home in "$(printf '/h/new\nline')" "$(printf '/h/c1\302\205')" "$(printf '/h/bad\377')" '/h/{{OWNER}}'; do
+  out=$(HOME=$home answers_check "$S" TARGET_ROOT '~/x' 2>&1)
+  assert_status 1 "$?" "refused: TARGET_ROOT=~/x under a HOME the value rule refuses: $(printf '%s' "$home" | od -An -c | tr -s ' ' | tail -c 20)"
+  assert_contains "$out" "TARGET_ROOT, its ~ expanded," "  and the refusal names the expansion"
+done
+out=$(HOME='/h/plain' answers_check "$S" TARGET_ROOT '~/x' 2>&1)
+assert_status 0 "$?" "  and a HOME it accepts is accepted"
+out=$(HOME="$(printf '/h/new\nline')" answers_check "$S" TARGET_ROOT '/srv/x' 2>&1)
+assert_status 0 "$?" "  and a TARGET_ROOT with no ~ is not judged by HOME"
 ok TARGET_ROOT /srv/targets
 
 # Every type: a newline and {{ refused.
@@ -260,6 +280,27 @@ answers_get "$A" '' >/dev/null
 assert_status 1 "$?" "a line with no field before its = is no field's"
 assert_eq "TARGET_ROOT=~/Development/{{OWNER}}" "TARGET_ROOT=$(answers_default "$S" TARGET_ROOT '')" \
   "a default's {{OWNER}} is left when the pairs lack OWNER, for the validator"
+# The one reader: the file-level rule before any value is kept (answers A1).
+printf 'OWNER=Okja\000-Engineering\nTITLE=x\n' >"$SCRATCH/nul.env"
+out=$(answers_read "$SCRATCH/nul.env" the-label 2>&1)
+assert_status 1 "$?" "answers_read refuses a file holding a NUL"
+assert_contains "$out" "the-label: the file holds a NUL byte" "  naming the file by its label"
+answers_get "$SCRATCH/nul.env" TITLE >/dev/null 2>&1
+assert_status 2 "$?" "answers_get refuses one too, as unreadable, not as absent"
+assert_eq "$(cat "$A")" "$(answers_read "$A" a)" "answers_read gives an accepted file's text"
+out=$(answers_read "$SCRATCH/no-such.env" the-label 2>&1)
+assert_status 1 "$?" "answers_read refuses a file it cannot read"
+assert_contains "$out" "the-label" "  naming it"
+# answers_setup: the setup fields, each given or its default worked out from
+# those before it, sorted (decision 229).
+out=$(answers_setup "$S" "$(printf 'OWNER=acme\nPEOPLE=A Person')" 2>&1)
+assert_status 0 "$?" "answers_setup"
+assert_contains "$out" "TARGET_ROOT=~/Development/acme" "  works a default out from a field given"
+assert_contains "$out" "TEAM=@acme/maintainers" "  each default"
+assert_eq "$out" "$(printf '%s\n' "$out" | LC_ALL=C sort)" "  sorted"
+out=$(answers_setup "$S" "$(printf 'OWNER=acme\nPEOPLE=A\nTEAM=octo')" 2>&1)
+assert_status 1 "$?" "answers_setup refuses a given value its check refuses"
+assert_contains "$out" "give TEAM again" "  and says to give it again"
 
 mkdir "$SCRATCH/cwd"
 printf 'TITLE=$(touch made-by-value)\nCODE=`touch made-by-backticks`\n' >"$SCRATCH/cwd/answers.env"

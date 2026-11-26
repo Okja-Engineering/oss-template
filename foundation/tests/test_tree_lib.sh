@@ -184,6 +184,17 @@ assert_eq "CLAUDE.md" "$(content_of "$O" worktree -link)" "worktree: reads a lin
 fixture_failing "$SCRATCH/stub" readlink '*/-link' 1
 (cd "$O" && PATH="$SCRATCH/stub:$PATH" && tree_cat worktree -link >/dev/null)
 assert_status 2 "$?" "worktree: a link readlink cannot read fails the read"
+# A listed file whose bytes cannot be read fails the read (2); it is not a
+# file the tree lacks (1), whatever status the reader exits with.
+fixture_failing "$SCRATCH/catstub" cat '*/CLAUDE.md' 1 1
+(cd "$O" && PATH="$SCRATCH/catstub:$PATH" && tree_cat worktree CLAUDE.md >/dev/null)
+assert_status 2 "$?" "worktree: a file cat cannot read fails the read"
+for src in index commit:HEAD; do
+  rm -rf "$SCRATCH/gitstub"
+  fixture_failing "$SCRATCH/gitstub" git '*cat-file blob *:CLAUDE.md' 1 1
+  (cd "$O" && PATH="$SCRATCH/gitstub:$PATH" && tree_cat "$src" CLAUDE.md >/dev/null)
+  assert_status 2 "$?" "$src: a blob git cannot read fails the read"
+done
 
 # A path no listing line can hold (a newline) fails every source alike.
 N="$SCRATCH/newline"
