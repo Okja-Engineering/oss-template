@@ -3,11 +3,11 @@
 # most RUN_ALL_JOBS at a time (decision 233), and report through the
 # product's runner library.
 #
-# RUN_ALL_JOBS, a whole number above 0, defaults to the CPU count: getconf's,
-# else sysctl's, else 2. Each suite's output, its standard output and error
-# together, is kept in one private directory and printed whole, in the
-# suites' order, once every suite has ended: the output is a serial run's,
-# but for its timing. A suite passes when it exits 0 having printed its plan,
+# RUN_ALL_JOBS, a whole number above 0, its leading zeros dropped, defaults
+# to the CPU count: getconf's, else sysctl's, else 2. Each suite's output,
+# its standard output and error together, is kept in one private directory
+# and printed whole, in the suites' order, once every suite has ended: the
+# output is a serial run's, but for its timing. A suite passes when it exits 0 having printed its plan,
 # assert_done's "# N assertions, 0 failed"; one that cannot be started fails.
 # An interrupt ends the suites and removes the private directory.
 # usage: tests/run-all.sh [DIRECTORY]
@@ -29,9 +29,10 @@ cpus() {
   printf '2\n'
 }
 if [ -n "${RUN_ALL_JOBS+set}" ]; then
-  jobs=$RUN_ALL_JOBS
+  # Leading zeros dropped, so 01 is 1 and 00 is nothing, refused.
+  jobs=${RUN_ALL_JOBS#"${RUN_ALL_JOBS%%[!0]*}"}
   whole "$jobs" || {
-    printf 'run-all: RUN_ALL_JOBS must be a whole number above 0, not "%s"\n' "$jobs" >&2
+    printf 'run-all: RUN_ALL_JOBS must be a whole number above 0, not "%s"\n' "$RUN_ALL_JOBS" >&2
     exit 1
   }
 else
