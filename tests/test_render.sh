@@ -1278,7 +1278,6 @@ for lic in apache-2.0 none; do
   variant "$lic" --setup-override "TARGET_ROOT=$SCRATCH/elsewhere$n"
   assert_eq "$SCRATCH/elsewhere$n/widget" "$(record widget target)" "LICENSE=$lic: TARGET_ROOT moves the target"
   assert_eq "" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "  and, not a render field, changes nothing in it"
-  variant "$lic"
   DESC='Another line'
   variant "$lic"
   assert_eq "README.md" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "LICENSE=$lic: DESCRIPTION changes README.md"

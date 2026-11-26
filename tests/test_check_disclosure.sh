@@ -560,6 +560,56 @@ modes_refuse "twins under one folder, beside that folder's twin" "a/X and a/x: $
 assert_contains "$OUT" "A/ and a/: $TWIN" "  and names the folders' twins too"
 assert_not_contains "$OUT" "A/x and" "  and names no set twice"
 
+# --- each reader's edge (F9 of the tests lens) -------------------------------------
+# A `## ` line in a fence is no section: neither a heading in the order nor
+# the start of one.
+valid
+fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
+
+```
+## Inputs
+| x |
+```'
+passes "a contract whose Process holds a fenced ## Inputs line"
+# A row is bounded by pipes; the delimiter row's every cell is dashes.
+valid
+fixture_replace "$R/$C1" '| shared | `../../shared/answers.tsv` | all | the fields |' \
+  'shared | `../../shared/answers.tsv` | all | the fields |'
+refused "an Inputs row with no leading pipe" "a row without four cells"
+valid
+fixture_replace "$R/$C1" "$DELIM" '|---|---|x|y|'
+refused "a delimiter row whose last cells are not dashes" "the line after its header is not its delimiter row"
+# An earlier stage's output, named by the folder it is in: the stage must
+# exist, and its Outputs may name the file by its output/<name>/ path.
+valid
+fixture_replace "$R/$C2" '`../01-ask/output/<name>/confirmed.md`' '`../00-none/output/<name>/confirmed.md`'
+refused "an output of a stage folder that does not exist" \
+  "Inputs \`../00-none/output/<name>/confirmed.md\` does not resolve"
+valid
+fixture_replace "$R/$C1" '`answers.env`, `confirmed.md`' '`answers.env`, `output/<name>/confirmed.md`'
+passes "an earlier stage's Outputs naming the file by its output/<name>/ path"
+valid
+fixture_replace "$R/$C1" '| shared | `../../shared/answers.tsv` | all | the fields |' \
+  '| above | `../../../outside.md` | all | the fields |'
+refused "an input that climbs above the workspace" "Inputs \`../../../outside.md\` does not resolve"
+# A stage folder with no number orders before no stage: its input of an
+# output is refused, and of a tracked file in another stage judged with no
+# shell error.
+valid
+put stages/zz-x/CONTEXT.md '# zz-x' '' '## Inputs' '' "$HEADER" "$DELIM" \
+  '| 01-ask | `../01-ask/output/<name>/confirmed.md` | all | the answers |' \
+  '| 01-ask | `../01-ask/CONTEXT.md` | all | the contract |' '' '## Process' '' 'Do it.' '' '## Outputs' '' '`out.md`'
+put stages/zz-x/output/.gitignore '*' '!.gitignore'
+printf '| `stages/zz-x/` | [contract](stages/zz-x/CONTEXT.md) |\n' >>"$R/CONTEXT.md"
+refused "a stage folder with no number taking an output" "is an output of the same or a later stage"
+assert_not_contains "$OUT" "integer expression" "  and no comparison fails"
+# The tree's listing failing is a check that cannot run.
+valid
+fixture_failing "$R-stub" git '*ls-files -z -c -o --exclude-standard' 1
+OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/checks/disclosure 2>&1)
+assert_status 2 "$?" "the check cannot run when it cannot list the tree"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
+
 # --- paths are judged literally, never split or expanded -------------------------
 # A portable name can still hold a space or a . that a split or a pattern
 # would misread.
