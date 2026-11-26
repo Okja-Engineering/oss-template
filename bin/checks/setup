@@ -87,10 +87,17 @@ esac
 
 if get setup/questionnaire.md "$tmp/questionnaire"; then
   answers_questionnaire "$tmp/schema" >"$tmp/expected" || exit 2
-  if ! cmp -s "$tmp/expected" "$tmp/questionnaire"; then
-    printf 'setup/questionnaire.md is not what bin/ask questionnaire writes from shared/answers.tsv; run bin/ask questionnaire%s\n' "$(then_stage setup/questionnaire.md)"
-    refused=1
-  fi
+  # cmp's 1 is "they differ"; a higher status is no comparison, and the
+  # check cannot run (decision 228).
+  cmp -s "$tmp/expected" "$tmp/questionnaire"
+  case $? in
+    0) ;;
+    1)
+      printf 'setup/questionnaire.md is not what bin/ask questionnaire writes from shared/answers.tsv; run bin/ask questionnaire%s\n' "$(then_stage setup/questionnaire.md)"
+      refused=1
+      ;;
+    *) exit 2 ;;
+  esac
 else
   printf '  run bin/ask questionnaire to write it%s\n' "$(then_stage setup/questionnaire.md)"
 fi

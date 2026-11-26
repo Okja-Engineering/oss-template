@@ -426,11 +426,21 @@ render_walk() {
     rm -rf "$tmp"
     return 1
   fi
-  if ! cmp -s "$tmp/have" "$tmp/want"; then
-    comm -13 "$tmp/want" "$tmp/have" | sed 's/^/the target holds a file render did not write: /'
-    comm -23 "$tmp/want" "$tmp/have" | sed 's/^/the target lacks a file render wrote: /'
-    refused=1
-  fi
+  # cmp's 1 is "they differ"; a higher status is no comparison at all.
+  cmp -s "$tmp/have" "$tmp/want"
+  case $? in
+    0) ;;
+    1)
+      comm -13 "$tmp/want" "$tmp/have" | sed 's/^/the target holds a file render did not write: /'
+      comm -23 "$tmp/want" "$tmp/have" | sed 's/^/the target lacks a file render wrote: /'
+      refused=1
+      ;;
+    *)
+      printf 'the walk cannot compare the target'"'"'s files with the file list\n'
+      rm -rf "$tmp"
+      return 1
+      ;;
+  esac
   # awk's 1 is "no listed file under it"; a higher status is a list it
   # could not read, which ends the loop as a failure.
   if ! (
@@ -498,12 +508,25 @@ render_fingerprint() {
     rm -rf "$g"
     return 1
   fi
-  if ! GIT_DIR=$g/repo GIT_INDEX_FILE=$g/index git ls-files -z >"$g/index.list" ||
-    ! cmp -s "$g/paths" "$g/index.list"; then
-    printf 'the index git built from the target is not render'"'"'s file list\n'
+  if ! GIT_DIR=$g/repo GIT_INDEX_FILE=$g/index git ls-files -z >"$g/index.list"; then
+    printf 'cannot list the index git built from the target\n'
     rm -rf "$g"
     return 1
   fi
+  cmp -s "$g/paths" "$g/index.list"
+  case $? in
+    0) ;;
+    1)
+      printf 'the index git built from the target is not render'"'"'s file list\n'
+      rm -rf "$g"
+      return 1
+      ;;
+    *)
+      printf 'cannot compare the index git built from the target with render'"'"'s file list\n'
+      rm -rf "$g"
+      return 1
+      ;;
+  esac
   if ! tree=$(GIT_DIR=$g/repo GIT_INDEX_FILE=$g/index git write-tree); then
     printf 'git write-tree failed while fingerprinting the target\n'
     rm -rf "$g"
