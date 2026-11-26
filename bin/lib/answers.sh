@@ -109,7 +109,8 @@
 #                                    of `git rev-parse --show-toplevel` and
 #                                    the `worktree` entries of `git worktree
 #                                    list --porcelain -z` not marked `bare`
-#                                    or `prunable`; one that cannot be
+#                                    or `prunable`, read through a pipe, so
+#                                    it makes no file; one that cannot be
 #                                    entered is refused. Exit 0, or 1 with
 #                                    the reason out, or 2 when git cannot
 #                                    say. Run git_hermetic first
@@ -117,9 +118,14 @@
 #                                    a run's TARGET, exactly TARGET_ROOT with
 #                                    its `~` expanded, then `/NAME`, under
 #                                    the path rule answers_target holds it
-#                                    to, the root under answers_root_ok's;
-#                                    else the reason out, exit 1, or 2 when
-#                                    it cannot be judged
+#                                    to, the root under answers_root_ok's,
+#                                    and the target itself at or above none
+#                                    of those working trees: no working
+#                                    tree, resolved physically, nor any of
+#                                    its physical parents, is the same file
+#                                    as the target, one that cannot be
+#                                    entered refused; else the reason out,
+#                                    exit 1, or 2 when it cannot be judged
 #   answers_target_check FILE NAME   the run answers FILE's TARGET is still
 #                                    answers_target_for its TARGET_ROOT and
 #                                    NAME, under this HOME: that TARGET out,
@@ -364,42 +370,54 @@ answers_target_for() {
     *) printf '%s\n' "$fault" ;;
   esac
   [ "$st" = 0 ] || return "$st"
-  answers_root_ok "$root" || return
+  answers__trees "$root" "$root/$2" || return
   printf '%s/%s\n' "$root" "$2"
 }
 
 answers_root_ok() {
-  local root=$1 dir rec path flag list
-  local -a tops=()
-  path=$(git -C "$ANSWERS_WS" rev-parse --show-toplevel) || {
+  answers__trees "$1"
+}
+
+# answers__trees ROOT [TARGET]: answers_root_ok's rule for ROOT, and, given
+# TARGET, the target's too: no working tree of the workspace is at or under
+# TARGET. The worktrees are read from git through a pipe, with git's status
+# as the last record, so the rule makes no file (decision 227).
+answers__trees() {
+  local top
+  top=$(git -C "$ANSWERS_WS" rev-parse --show-toplevel) || {
     printf 'cannot find the workspace'"'"'s working tree\n'
     return 2
   }
-  tops+=("$path")
-  # The list is NUL-delimited, as a worktree's path may hold a newline, so
-  # it is read from a file, its status read first.
-  list=$(mktemp "${TMPDIR:-/tmp}/answers.XXXXXX") || {
-    printf 'cannot make a temporary file\n'
-    return 2
-  }
-  if ! git -C "$ANSWERS_WS" worktree list --porcelain -z >"$list"; then
-    rm -f "$list"
+  # The list is NUL-delimited, as a worktree's path may hold a newline.
+  # The judge reads it whole, so the writer's status is always 0 and the
+  # pipeline's is the judge's, whatever the caller's pipefail.
+  {
+    git -C "$ANSWERS_WS" worktree list --porcelain -z
+    printf 'git exited %d\0' "$?"
+  } | answers__judge "$top" "$@"
+}
+
+# answers__judge TOP ROOT [TARGET]: the judgement of answers__trees, the
+# worktree records on standard input.
+answers__judge() {
+  local root=$2 target=${3:-} dir rec path="" flag="" last=""
+  # tops: the working trees; pruned: the entries git marks prunable, which
+  # name no working tree it can see, yet may be one it cannot reach.
+  local -a tops=("$1") pruned=()
+  while IFS= read -r -d '' rec; do
+    last=$rec
+    case "$rec" in
+      'worktree '*) path=${rec#worktree } flag="" ;;
+      bare) flag=bare ;;
+      'prunable' | 'prunable '*) [ -n "$flag" ] || flag=pruned ;;
+      '') answers__entry ;;
+    esac
+  done
+  if [ "$last" != "git exited 0" ]; then
     printf 'cannot list the workspace'"'"'s worktrees\n'
     return 2
   fi
-  path="" flag=""
-  while IFS= read -r -d '' rec; do
-    case "$rec" in
-      'worktree '*) path=${rec#worktree } flag="" ;;
-      bare | 'prunable' | 'prunable '*) flag=skip ;;
-      '')
-        [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
-        path="" flag=""
-        ;;
-    esac
-  done <"$list"
-  rm -f "$list"
-  [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
+  answers__entry
   dir=$root
   while [ ! -d "$dir" ]; do
     dir=${dir%/*}
@@ -423,7 +441,60 @@ answers_root_ok() {
         exit 1
       }
     done
-  )
+  ) || return
+  # The root is outside every working tree, so the target is under none;
+  # it is above none, nor one itself, when none is at or under it. A target
+  # that is not there holds nothing.
+  [ -n "$target" ] && [ -e "$target" ] || return 0
+  # Each working tree and its parents, as git lists it and physically, a
+  # working tree that cannot be entered refused; a prunable entry's path as
+  # listed, as git may mark one prunable because it cannot reach it.
+  for path in "${tops[@]}" ${pruned[@]+"${pruned[@]}"}; do
+    answers__above "$target" "$path" || return
+  done
+  for path in "${tops[@]}"; do
+    (
+      CDPATH='' cd -P -- "$path" 2>/dev/null || {
+        printf 'TARGET %s: the working tree %s of this workspace cannot be entered, so whether the target holds it cannot be told\n' "$target" "$path"
+        exit 1
+      }
+      while :; do
+        if [ . -ef "$target" ]; then
+          printf 'TARGET %s is at or above %s, a working tree of this workspace; choose another TARGET_ROOT\n' "$target" "$path"
+          exit 1
+        fi
+        [ ! . -ef / ] || exit 0
+        cd -P .. 2>/dev/null || {
+          printf 'TARGET %s: the parent of %s cannot be entered, so whether the target holds it cannot be told\n' "$target" "$(pwd -P)"
+          exit 1
+        }
+      done
+    ) || return
+  done
+}
+
+# answers__entry: the worktree entry answers__judge has read, PATH and
+# FLAG, kept in its list, unless bare; then none.
+answers__entry() {
+  case "$path:$flag" in
+    :*) ;;
+    *:) tops+=("$path") ;;
+    *:pruned) pruned+=("$path") ;;
+  esac
+  path="" flag=""
+}
+
+# answers__above TARGET PATH: no parent of PATH, as written, PATH itself
+# included, is the same file as TARGET; else the reason out, exit 1.
+answers__above() {
+  local p=$2
+  while [ -n "$p" ]; do
+    if [ "$p" -ef "$1" ]; then
+      printf 'TARGET %s is at or above %s, a working tree of this workspace; choose another TARGET_ROOT\n' "$1" "$2"
+      return 1
+    fi
+    p=${p%/*}
+  done
 }
 
 answers_target_check() {

@@ -13,7 +13,8 @@
 # render.md's record; and nothing else (AC11). Everything is judged before anything is removed or
 # written: the answers against HEAD's schema; TARGET, still TARGET_ROOT
 # with its ~ expanded under this HOME, then /NAME (decision 227);
-# TARGET_ROOT outside every working tree of the workspace; the target
+# TARGET_ROOT outside every working tree of the workspace, and the target
+# none of them and above none; the target
 # absent, or an empty directory; the foundation rendered in a private
 # directory. A run already rendered needs --replace. A present target, the
 # one render.md records or one a killed render left with no render.md,

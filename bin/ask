@@ -24,7 +24,8 @@
 # run's given.env, else their defaults; NAME; and TARGET, exactly
 # TARGET_ROOT with its ~ expanded, then /NAME (decision 227), a TARGET_ROOT
 # that setup, run and confirm each hold outside every working tree of the
-# workspace, under git.sh's environment, as render does. A --redo keeps
+# workspace, and a TARGET that run and confirm hold to be none of them and
+# above none, under git.sh's environment, as render does. A --redo keeps
 # only what the operator gave, each run answer and override not given
 # again, and works every default out again, as setup does: a field given
 # replaces its value, and an override is changed by giving it again, the
