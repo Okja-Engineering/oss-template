@@ -315,7 +315,7 @@ confirmed widget
 render widget
 mkdir -p "$R/stages/03-verify/output/widget/judge" "$SCRATCH/stub$n"
 # mktemp: a stub in DIR that is mktemp, noting each path it makes, so a test
-# sees each one gone (macOS's mktemp does not heed TMPDIR); leftover prints
+# sees each one gone; leftover prints
 # each noted path still present.
 mkstub() {
   printf '#!/bin/sh\np=$(%s "$@") || exit\nprintf "%%s\\n" "$p" >>"%s"\nprintf "%%s\\n" "$p"\n' \
@@ -541,6 +541,28 @@ cpstub ': >"$last/extra"'
 OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" bin/render widget 2>&1)
 assert_status 1 "$?" "refused: a render the walk refuses, with a TMPDIR of its own"
 assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  leaves nothing in it"
+# Each temporary file is made in render's private directory, the first,
+# made under TMPDIR, on every platform: macOS's mktemp, given no template,
+# ignores TMPDIR.
+fresh
+confirmed widget
+mkdir -p "$SCRATCH/mkt$n" "$SCRATCH/tmpdir$n"
+mkstub "$SCRATCH/mkt$n"
+OUT=$(cd "$R" && PATH="$SCRATCH/mkt$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" bin/render widget 2>&1)
+assert_status 0 "$?" "a render recording each temporary file it makes"
+work=$(head -n 1 "$SCRATCH/made$n")
+assert_eq "$SCRATCH/tmpdir$n/" "${work%/*}/" "  makes its private directory under TMPDIR"
+assert_eq "" "$(sed 1d "$SCRATCH/made$n" | grep -v -F "$work/")" "  and every other temporary file in it"
+assert_eq "yes" "$([ "$(wc -l <"$SCRATCH/made$n")" -ge 4 ] && echo yes)" "  the libraries' among them"
+# A signal while render makes its private directory is held off until the
+# directory is recorded for cleanup, so it is never left behind.
+fresh
+confirmed widget
+mkdir -p "$SCRATCH/mkt$n" "$SCRATCH/tmpdir$n"
+printf '#!/bin/sh\n%s "$@" && kill -s TERM "$PPID"\n' "$(command -v mktemp)" >"$SCRATCH/mkt$n/mktemp"
+chmod +x "$SCRATCH/mkt$n/mktemp"
+OUT=$(cd "$R" && PATH="$SCRATCH/mkt$n:$PATH" TMPDIR="$SCRATCH/tmpdir$n" bin/render widget 2>&1)
+assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "a signal while render makes its private directory leaves nothing in TMPDIR"
 # waitstub TOOL PATTERN: a TOOL first on PATH that, called with arguments
 # matching PATTERN, says so in $SCRATCH/at$n and waits for $SCRATCH/go$n,
 # then runs the real TOOL. signalled SIGNAL ARGS...: bin/render ARGS as a
@@ -762,14 +784,18 @@ mkdir -p "$ROOT/.widget.render.4242/a/b" "$ROOT/.widget.render.17" "$ROOT/.widge
   "$ROOT/.other.render.5" "$ROOT/.widget.render.6.extra"
 printf 'half\n' >"$ROOT/.widget.render.4242/a/b/README.md"
 printf 'kept\n' >"$ROOT/.widget.render.99"
+mkdir -p "$SCRATCH/outside$n"
+printf 'kept\n' >"$SCRATCH/outside$n/x"
+ln -s "$SCRATCH/outside$n" "$ROOT/.widget.render.55"
 chmod 000 "$ROOT/.widget.render.4242/a/b" "$ROOT/.widget.render.4242/a"
 render widget
 assert_status 0 "$ST" "a render with a killed render's staging directories beside its target"
 assert_eq "gone gone" "$(gone "$ROOT/.widget.render.4242") $(gone "$ROOT/.widget.render.17")" \
   "  removes them, the chmod 000 one whole"
-assert_eq "present present present present" \
-  "$(gone "$ROOT/.widget.render.x1") $(gone "$ROOT/.other.render.5") $(gone "$ROOT/.widget.render.6.extra") $(gone "$ROOT/.widget.render.99")" \
-  "  and nothing else: another name, another run's, and a file"
+assert_eq "present present present present present" \
+  "$(gone "$ROOT/.widget.render.x1") $(gone "$ROOT/.other.render.5") $(gone "$ROOT/.widget.render.6.extra") $(gone "$ROOT/.widget.render.99") $(gone "$ROOT/.widget.render.55")" \
+  "  and nothing else: another name, another run's, a file and a symbolic link to a directory"
+assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  nor anything through the link"
 assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  and renders"
 # A leftover the removal helper cannot remove is refused, naming it, before
 # anything is written.
@@ -980,7 +1006,7 @@ fi
 # accepted: the default, beside a bare common directory, and beside a
 # prunable entry.
 fresh
-grep -v '^TARGET_ROOT=' "$R/setup/answers.env" >"$SCRATCH/setup$n" && mv "$SCRATCH/setup$n" "$R/setup/answers.env"
+rm -f "$R/setup/given.env"
 (cd "$R" && bin/ask setup >/dev/null)
 assert_eq "TARGET_ROOT=~/Development/Okja-Engineering" "$(grep '^TARGET_ROOT=' "$R/setup/answers.env")" \
   "setup gives TARGET_ROOT its default"

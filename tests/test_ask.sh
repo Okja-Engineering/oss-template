@@ -725,6 +725,54 @@ ask run widget --redo --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
 assert_status 0 "$ST" "a redo that moves TARGET_ROOT"
 assert_eq "gone" "$(gone "$ROOT/.widget.render.4242")" "  removes a killed render's staging directory under the old one"
 assert_eq "present" "$(gone "$ROOT/.widget.render.x1")" "  and nothing else there"
+# The answers file is staged before anything is removed, too: an entry in
+# the way of its temporary file alone, whose name is bin/ask's PID, refuses
+# a redo with the target and the run's files as they were.
+rendered
+before=$(run_state)
+OUT=$(cd "$R" && sh -c ': >"$1/answers.env.tmp.$$" && shift && exec bin/ask "$@"' sh "$OUTD" \
+  run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+ST=$?
+assert_status 1 "$ST" "refused: a redo whose answers file's temporary name is taken"
+assert_contains "$OUT" "is in the way" "  and the refusal says so"
+assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with the target as it was"
+rm -f "$OUTD"/answers.env.tmp.*
+assert_eq "$before" "$(run_state)" "  and the run's files as they were"
+# A signal while the staged files are renamed into place is held off, so
+# each file is the old one or the new, together.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$SCRATCH/mvstub$n"
+printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
+  "$(command -v mv)" >"$SCRATCH/mvstub$n/mv"
+chmod +x "$SCRATCH/mvstub$n/mv"
+OUT=$(cd "$R" && PATH="$SCRATCH/mvstub$n:$PATH" bin/ask run widget --redo 'TITLE=C' 2>&1)
+assert_status 0 "$?" "a TERM while a redo renames its files into place is held off"
+assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  and the answers file is the new one"
+assert_contains "$(cat "$OUTD/given.env")" "TITLE=C" "  as given.env is"
+assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
+# A given file names each field once.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+printf 'DESCRIPTION=B\nTITLE=A\nTITLE=B\n' >"$OUTD/given.env"
+rrefused "a given.env naming a field twice" "given.env:3: TITLE is given twice" run widget --redo
+fresh
+mkdir -p "$R/setup" && printf 'OWNER=a\nOWNER=b\n' >"$R/setup/given.env"
+refused "a setup/given.env naming a field twice" "setup/given.env:2: OWNER is given twice" setup
+# A given file left with nothing is removed, never written empty: setup's,
+# and a run's once the schema drops each field it held.
+fresh
+mkdir -p "$R/setup" && printf 'STALE=1\n' >"$R/setup/given.env"
+ask setup
+assert_status 0 "$ST" "setup beside a setup/given.env holding only a stale field"
+assert_eq "gone" "$(gone "$R/setup/given.env")" "  removes it"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+grep -v -e '^TITLE' -e '^DESCRIPTION' -e '^SUMMARY' "$R/shared/answers.tsv" >"$SCRATCH/schema$n" &&
+  mv "$SCRATCH/schema$n" "$R/shared/answers.tsv"
+ask run widget --redo
+assert_status 0 "$ST" "a redo once the schema drops every field given.env holds"
+assert_eq "gone" "$(gone "$OUTD/given.env")" "  removes given.env"
 
 
 
