@@ -294,8 +294,8 @@ for sig in HUP INT TERM; do
   st=$?
   took=$((SECONDS - t0))
   assert_eq "$((128 + $(kill -l "$sig")))" "$st" "SIG$sig ends the run with 128 and its number"
-  # Its workers reaped first, so a group of none but their zombies, which
-  # Linux still counts, is not waited on to the bound.
+  # The groups are waited on only while they hold a process, never to the
+  # bound.
   assert_eq "within 30s" "$([ "$took" -lt 30 ] && echo "within 30s" || echo "${took}s")" "  and ends promptly"
   assert_eq "yes" "$([ -e "$SLOW_PID.cleaned" ] && echo yes || echo no)" \
     "  only once the running suite has ended, its EXIT trap done"

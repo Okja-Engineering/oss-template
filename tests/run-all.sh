@@ -59,15 +59,15 @@ pids=""
 trap 'rm -rf "$tmp"' EXIT
 # stop STATUS: end each worker's process group, its suites with it, and exit
 # only once each group is empty, a suite's EXIT trap done, so no suite run-all
-# started outlives it: the workers reaped first, then each group waited on,
-# for a minute at most, then killed.
+# started outlives it: each group, its worker among it, waited on for a
+# minute at most, then killed. A worker gone but not reaped does not hold
+# its group open, on macOS or Linux.
 stop() {
   local p i=0
   trap '' INT TERM HUP
   for p in $pids; do
     kill -TERM -- "-$p" 2>/dev/null
   done
-  wait
   for p in $pids; do
     while kill -0 -- "-$p" 2>/dev/null; do
       if [ "$i" -ge 600 ]; then
