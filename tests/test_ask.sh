@@ -339,6 +339,36 @@ ask run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=acme
 assert_status 0 "$ST" "run with --setup-override OWNER=acme beside a setup that gave HOLDER"
 assert_eq "HOLDER=Someone" "$(grep '^HOLDER=' "$ANS")" "  keeps the setup field given"
 assert_eq "TARGET_ROOT=$ROOT" "$(grep '^TARGET_ROOT=' "$ANS")" "  each of them"
+# A run takes its setup values only from a setup/answers.env that is what
+# bin/ask setup writes from setup/given.env, as bin/check setup holds it,
+# with its words and route; a setup/given.env that is missing included
+# (answers' R5 of S2's fourth ship gate). Followed, the route lets it run.
+ready
+fixture_replace "$R/setup/answers.env" "OWNER=Okja-Engineering" "OWNER=acme"
+rrefused "a run beside a setup/answers.env edited by hand" \
+  "setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup" \
+  run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_eq "gone" "$(gone "$OUTD")" "  and makes no run folder"
+ask setup
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 0 "$ST" "  and, bin/ask setup run as routed, the run goes on"
+ready
+ask setup OWNER=acme
+rm "$R/setup/given.env"
+rrefused "a run beside a setup/answers.env whose setup/given.env is missing" \
+  "setup/given.env is missing, so bin/ask setup would set each field to its default: restore setup/given.env, or give each field again with bin/ask setup FIELD=value..." \
+  run widget 'TITLE=A' 'DESCRIPTION=B'
+ask setup OWNER=acme "TARGET_ROOT=$ROOT"
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 0 "$ST" "  and, each field given again, the run goes on"
+assert_eq "OWNER=acme" "$(grep '^OWNER=' "$ANS")" "  with the value given"
+# The comparison failing is no pass and no refusal of the file.
+ready
+fixture_failing "$SCRATCH/cmp$n" cmp '*setup/answers.env*' 1 2
+OUT=$(cd "$R" && PATH="$SCRATCH/cmp$n:$PATH" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' 2>&1)
+assert_status 1 "$?" "refused: a run whose comparison of setup/answers.env fails"
+assert_contains "$OUT" "cannot compare setup/answers.env with what bin/ask setup writes" "  saying so"
+assert_eq "gone" "$(gone "$OUTD")" "  and makes no run folder"
 
 # A run records what the operator gave in its given.env, written in the step
 # that writes answers.env; a redo keeps only that and works each default out
@@ -1191,8 +1221,11 @@ ready
 rrefused "a run overriding TARGET_ROOT to inside the workspace" "$INSIDE" \
   run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override "TARGET_ROOT=$R/stages/01-ask/output"
 ready
-sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$R/stages/01-ask/output|" "$R/setup/answers.env" >"$SCRATCH/setup$n"
-mv "$SCRATCH/setup$n" "$R/setup/answers.env"
+# Both setup files, so setup/answers.env is what setup/given.env gives.
+for f in answers given; do
+  sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$R/stages/01-ask/output|" "$R/setup/$f.env" >"$SCRATCH/setup$n"
+  mv "$SCRATCH/setup$n" "$R/setup/$f.env"
+done
 rrefused "a run under a setup/answers.env edited by hand to a TARGET_ROOT inside the workspace" "$INSIDE" \
   run widget 'TITLE=A' 'DESCRIPTION=B'
 assert_contains "$OUT" "give TARGET_ROOT again, with --setup-override or with bin/ask setup" "  naming both ways to change it"
