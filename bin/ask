@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Stage 01's script (AC7): it writes the answers, from the field schema
 # shared/answers.tsv, through bin/lib/answers.sh. A refusal writes nothing,
-# a folder it made for its files removed again, and removes nothing unless
-# a removal itself is what failed, or a rename after a redo's removals,
-# which names what they removed and the route: the redo again.
+# a folder it made for its files removed again, with any of them a rename
+# put there, and removes nothing unless a removal itself is what failed, or
+# a rename after a redo's removals, which names what they removed and the
+# route: the redo again. It runs on git 2.36 or later, as render does.
 #
 # usage:
 #   bin/ask setup [FIELD=value...]
