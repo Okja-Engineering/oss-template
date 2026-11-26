@@ -65,7 +65,9 @@
 #                   which links_md sets, counts its lines); "fence" for a
 #                   fence line or one inside a fence, which a line of the
 #                   opening fence's character, at least as many, closes,
-#                   with nothing after it but blanks (CommonMark 4.5);
+#                   with nothing after it but blanks, a backtick opener
+#                   whose info string holds a backtick opening none
+#                   (CommonMark 4.5);
 #                   "blank", "atx", "under" (a line
 #                   of `=` or of `-`: a setext underline after "text", else
 #                   a thematic break), "break", "item" (a list item or a
@@ -88,7 +90,9 @@ function md_block(l,   k, s) {
       if (RLENGTH >= md_fl) md_fence = 0
     }
   }
-  else if (match(s, /^(```+|~~~+)/)) { md_fence = 1; md_fc = substr(s, 1, 1); md_fl = RLENGTH; k = "fence" }
+  else if (match(s, /^(```+|~~~+)/) && !(substr(s, 1, 1) == "`" && index(substr(s, RLENGTH + 1), "`"))) {
+    md_fence = 1; md_fc = substr(s, 1, 1); md_fl = RLENGTH; k = "fence"
+  }
   else if (l ~ /^[ \t]*$/) k = "blank"
   else if (l ~ /^ ? ? ?#+([ \t]|$)/) k = "atx"
   else if (l ~ /^ ? ? ?(=+|-+)[ \t]*$/) k = "under"
