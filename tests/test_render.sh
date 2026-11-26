@@ -272,10 +272,12 @@ confirmed widget
 render widget
 refused "a second render without --replace" "--replace" widget
 refused "--replace without --remove while the target is present" "--remove" widget --replace
-mkdir -p "$ROOT/other"
+mkdir -p "$ROOT/other" "$ROOT/.widget.render.4242"
 refused "--replace --remove naming another path" "is not the run's target $ROOT/widget" widget --replace --remove "$ROOT/other"
 assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  with the target not removed"
 assert_eq "present" "$(gone "$ROOT/other")" "  nor the other path"
+assert_eq "present" "$(gone "$ROOT/.widget.render.4242")" "  nor, judged before anything is removed, a leftover staging directory"
+rmdir "$ROOT/.widget.render.4242"
 # render.md edited to name another path: the run's TARGET is the one root.
 sed "s|^target: .*|target: $ROOT/other|" "$R/stages/02-render/output/widget/render.md" >"$SCRATCH/r$n" &&
   mv "$SCRATCH/r$n" "$R/stages/02-render/output/widget/render.md"

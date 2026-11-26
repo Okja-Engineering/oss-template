@@ -487,6 +487,10 @@ for how in outside dotdot link; do
     ask run widget --redo 'TITLE=C'
     assert_not_contains "$OUT" "--remove \"$P\"" "a TARGET edited by hand $how TARGET_ROOT, render.md $md: no route removes it"
     assert_eq "present" "$(gone "$O/file")" "  and it is left"
+    if [ "$md" = none ]; then
+      assert_status 0 "$ST" "  and the redo, the route confirm and render name, rewrites the answers"
+      assert_eq "TARGET=$ROOT/widget" "$(grep '^TARGET=' "$ANS")" "  with TARGET as TARGET_ROOT, then /NAME"
+    fi
     sed "s|^TARGET=.*|TARGET=$P|" "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
     if [ "$md" = edited ]; then
       mkdir -p "$R/stages/02-render/output/widget"
