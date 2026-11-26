@@ -51,9 +51,10 @@
 #
 # Every file is written sorted where it is a list of fields, with LF endings,
 # through a temporary file beside it, which a failure or a signal removes.
-# Each file a command writes, renames over or removes is absent, or a
-# regular file and not a symbolic link, or the command refuses before it
-# stages or removes anything (decision 230).
+# Each file a command writes, renames over, removes or reads as a record,
+# render.md and setup's files a run reads included, is absent, or a regular
+# file and not a symbolic link, or the command refuses before it stages or
+# removes anything (decision 230).
 # Exit 0 when done, 1 on a refusal, 2 on a usage error, or when the shell's
 # signals cannot be worked out (bin/lib/discard.sh).
 set -u
@@ -252,8 +253,8 @@ kept() {
 }
 
 # given FILE LABEL: in GIVEN, the answers lines FILE records as given, read
-# through answers_given; none when FILE is absent. `files` has judged FILE
-# absent or a regular file first.
+# through answers_given; none when FILE is absent. Each caller has judged
+# FILE through `files` first, so it is absent or a regular file.
 given() {
   GIVEN=""
   present "$1" || return 0
@@ -343,6 +344,12 @@ cmd_run() {
     1) refuse "shared/answers.tsv has no TARGET_ROOT" ;;
     *) refuse "cannot read TARGET_ROOT's row of shared/answers.tsv" ;;
   esac
+  outd=$ws/stages/01-ask/output/$name
+  rel=stages/01-ask/output/$name
+  render_md=$ws/stages/02-render/output/$name/render.md
+  # Each file the run writes, removes, or reads as a record (decision 230).
+  files "$SETUP" "$SETUP_GIVEN" "$outd/answers.env" "$outd/given.env" "$outd/setup.override.env" \
+    "$outd/confirmed.md" "$render_md"
   [ -f "$SETUP" ] || refuse "setup/answers.env is missing; run bin/ask setup"
   fault=$(answers_validate "$SCHEMA" "$SETUP" setup setup/answers.env)
   case $? in
@@ -351,10 +358,6 @@ cmd_run() {
     *) refuse "cannot judge setup/answers.env:" "$fault" ;;
   esac
   setup_have=$(answers_read "$SETUP" setup/answers.env) || refuse "$setup_have"
-  outd=$ws/stages/01-ask/output/$name
-  rel=stages/01-ask/output/$name
-  render_md=$ws/stages/02-render/output/$name/render.md
-  files "$outd/answers.env" "$outd/given.env" "$outd/setup.override.env"
   if [ -f "$outd/answers.env" ]; then
     [ "$redo" = 1 ] ||
       refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
@@ -516,7 +519,7 @@ cmd_confirm() {
   schema_ok
   fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
   outd=$ws/stages/01-ask/output/$name
-  files "$outd/confirmed.md"
+  files "$outd/confirmed.md" "$outd/answers.env"
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
   fault=$(answers_target_check "$outd/answers.env" "$name")
   case $? in
