@@ -1475,8 +1475,13 @@ for lic in apache-2.0 none; do
   rm -rf "$SCRATCH/base" && cp -R "$ROOT/widget" "$SCRATCH/base"
   variant "$lic"
   assert_eq "" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "LICENSE=$lic: the same answers change nothing"
+  # OWNER is no render field, but HOLDER's default, {{OWNER}}, is worked out
+  # again from the override, as setup works it out (decision 229), so it
+  # reaches what HOLDER reaches.
   variant "$lic" --setup-override OWNER=acme
-  assert_eq "" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "LICENSE=$lic: OWNER, not a render field, changes nothing"
+  if [ "$lic" = none ]; then want=LICENSE; else want=""; fi
+  assert_eq "$want" "$(changed "$SCRATCH/base" "$SCRATCH/v")" \
+    "LICENSE=$lic: OWNER, not a render field, changes only what HOLDER's default reaches: ${want:-nothing}"
   variant "$lic" VISIBILITY=private
   assert_eq "" "$(changed "$SCRATCH/base" "$SCRATCH/v")" "LICENSE=$lic: VISIBILITY, not a render field, changes nothing"
   variant "$lic" --setup-override "TARGET_ROOT=$SCRATCH/elsewhere$n"

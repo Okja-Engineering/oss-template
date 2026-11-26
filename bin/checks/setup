@@ -7,7 +7,10 @@
 # questionnaire other than what `bin/ask questionnaire` writes from that
 # schema, a setup file that bin/lib/answers.sh's validator rejects, and one
 # other than what `bin/ask setup` works out from setup/given.env, the fields
-# the operator gave (decision 229).
+# the operator gave, routed to restore setup/given.env when it is missing and
+# to stage it when it is not staged, and a setup/given.env holding a field
+# that is not a setup field, or out of the sorted order setup writes
+# (decision 229).
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -35,6 +38,32 @@ get() {
       ;;
     *) exit 2 ;;
   esac
+}
+
+# judge_given: each field $given records is a setup field of the schema,
+# and its lines are in the order bin/ask setup writes them, sorted; else a
+# refusal naming the step that mends it (answers' NIT 3 of S2's third).
+judge_given() {
+  local line n=0 field scope order
+  [ -n "$given" ] || return 0
+  while IFS= read -r line; do
+    n=$((n + 1))
+    field=${line%%=*}
+    scope=$(answers_col "$tmp/schema" "$field" scope)
+    case $? in
+      0 | 1) ;;
+      *) exit 2 ;;
+    esac
+    if [ "$scope" != setup ]; then
+      printf 'setup/given.env:%d: %s is not a setup field of shared/answers.tsv; run bin/ask setup, which drops it\n' "$n" "$field"
+      refused=1
+    fi
+  done <<<"$given"
+  order=$(sort <<<"$given") || exit 2
+  if [ "$order" != "$given" ]; then
+    printf 'setup/given.env is not in the order bin/ask setup writes; run bin/ask setup, which sorts it\n'
+    refused=1
+  fi
 }
 
 get shared/answers.tsv "$tmp/schema" || exit 1
@@ -70,7 +99,7 @@ if get setup/answers.env "$tmp/answers"; then
   if [ "$valid" = 1 ]; then
     # setup/answers.env is what bin/ask setup works out from what the
     # operator gave, setup/given.env, none when it is absent (decision 229).
-    given=""
+    given="" have_given=1
     tree_cat "$src" setup/given.env >"$tmp/given"
     case $? in
       0)
@@ -83,8 +112,9 @@ if get setup/answers.env "$tmp/answers"; then
             ;;
           *) exit 2 ;;
         esac
+        judge_given
         ;;
-      1) ;;
+      1) have_given=0 ;;
       *) exit 2 ;;
     esac
     want=$(answers_setup "$tmp/schema" "$given")
@@ -101,8 +131,25 @@ if get setup/answers.env "$tmp/answers"; then
     case $? in
       0) ;;
       1)
-        printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup\n'
         refused=1
+        # The route keeps what the operator gave: bin/ask setup alone,
+        # without setup/given.env, would set every field to its default.
+        unstaged=0
+        if [ "$have_given" = 0 ] && [ "$src" = index ]; then
+          tree_cat worktree setup/given.env >/dev/null
+          case $? in
+            0) unstaged=1 ;;
+            1) ;;
+            *) exit 2 ;;
+          esac
+        fi
+        if [ "$have_given" = 1 ]; then
+          printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup\n'
+        elif [ "$unstaged" = 1 ]; then
+          printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is not staged; stage it with setup/answers.env\n'
+        else
+          printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is missing, so bin/ask setup would set each field to its default: restore setup/given.env, or give each field again with bin/ask setup FIELD=value...\n'
+        fi
         ;;
       *) exit 2 ;;
     esac

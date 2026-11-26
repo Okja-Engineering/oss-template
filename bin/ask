@@ -15,10 +15,12 @@
 # them: each field given, else its default, worked out again (decision 229).
 # `questionnaire` writes setup/questionnaire.md from the schema.
 #
-# `run` writes stages/01-ask/output/NAME/answers.env: the setup fields from
-# setup/answers.env, each FIELD=value after --setup-override replacing one
-# for this run only and recorded in the run's setup.override.env, never in
-# setup/answers.env (decision 103); the run fields given, recorded in the
+# `run` writes stages/01-ask/output/NAME/answers.env: the setup fields, each
+# FIELD=value after --setup-override replacing one for this run only and
+# recorded in the run's setup.override.env, never in setup/answers.env
+# (decision 103), each setup/given.env records from setup/answers.env, and
+# each other worked out again from its default, as setup does (decision
+# 229); the run fields given, recorded in the
 # run's given.env, else their defaults; NAME; and TARGET, exactly
 # TARGET_ROOT with its ~ expanded, then /NAME (decision 227), a TARGET_ROOT
 # that setup, run and confirm each hold outside every working tree of the
@@ -295,7 +297,7 @@ cmd_questionnaire() {
 
 cmd_run() {
   local name redo=0 remove="" have_remove=0 to=run arg fault field fields value
-  local out="" run_pairs override_pairs given_pairs setup_have outd rel render_md old_target="" target
+  local out="" run_pairs override_pairs given_pairs setup_have setup_pairs outd rel render_md old_target="" target
   local old_answers="" old_overrides="" old_given="" line
   local answers_text override_text given_text
   local -a run_args=() override_args=()
@@ -394,23 +396,37 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
   kept "$old_given" "$run_pairs" run "$rel/given.env"
   given_pairs=$KEPT
 
-  # The setup fields, each overridden or from setup/answers.env; then the
-  # run fields, each given or its default; then TARGET.
+  # The setup fields: each overridden, or recorded in setup/given.env and
+  # read from setup/answers.env, or else worked out again from its default
+  # and the values before it, as bin/ask setup works it out, so an override
+  # moves each default made from it (decision 229). Then the run fields,
+  # each given or its default; then TARGET.
+  given "$SETUP_GIVEN" setup/given.env
   fields=$(answers_fields "$SCHEMA" setup) || refuse "cannot read the setup fields of shared/answers.tsv"
+  setup_pairs=""
   while IFS= read -r field; do
     [ -n "$field" ] || continue
     value=$(answers_get - "$field" <<<"$override_pairs")
     case $? in
       0) ;;
       1)
+        answers_get - "$field" <<<"$GIVEN" >/dev/null
+        case $? in
+          0) ;;
+          1) continue ;;
+          *) refuse "cannot read setup/given.env's fields" ;;
+        esac
         pick "$setup_have" "$field" setup/answers.env
         value=$PICKED
         ;;
       *) refuse "cannot read the overrides" ;;
     esac
-    out="$out$field=$value
+    setup_pairs="$setup_pairs$field=$value
 "
   done <<<"$fields"
+  out=$(answers_derive "$SCHEMA" setup "$setup_pairs" "") || refuse "the answers are not written:" "$out"
+  out="$out
+"
   value=$(answers_derive "$SCHEMA" run "NAME=$name
 $given_pairs" "$out") || refuse "the answers are not written:" "$value"
   out="$out$value

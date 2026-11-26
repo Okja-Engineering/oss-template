@@ -322,8 +322,17 @@ answers_check() {
       expanded=$(answers_path "$v") ||
         { answers__no "$field" "a path starting with ~ needs HOME, which is not set"; return; }
       # The expansion meets the value rule and the path rule a TARGET meets.
-      [ "$expanded" = "$v" ] || answers__value "$field, its ~ expanded," "$expanded" || return
-      answers__abs "$field" "$expanded" || return
+      # What the value holds after ~/ is judged as the value's; the rest,
+      # HOME's, is named by the expansion (answers' NIT 1 of S2's third).
+      if [ "$expanded" = "$v" ]; then
+        answers__abs "$field" "$v" || return
+      else
+        answers__value "$field, its ~ expanded from HOME" "$expanded" || return
+        case "$v" in
+          '~/'*) answers__abs "$field" "/${v#'~/'}" || return ;;
+        esac
+        answers__abs "$field, its ~ expanded to $expanded" "$expanded" || return
+      fi
       ;;
     *)
       answers__no "$field" "the type $type is not one this validator knows"
