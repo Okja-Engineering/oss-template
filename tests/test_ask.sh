@@ -120,6 +120,11 @@ ask setup HOLDER=Someone
 assert_eq "HOLDER=Someone
 OWNER=other" "$(cat "$R/setup/given.env" 2>/dev/null)" "  and setup/given.env keeps every field given"
 fresh
+ask setup HOLDER=Someone
+ask setup OWNER=acme
+assert_eq "HOLDER=Someone
+OWNER=acme" "$(cat "$R/setup/given.env" 2>/dev/null)" "  sorted, a field given after one it sorts before"
+fresh
 ask setup
 assert_eq "gone" "$(gone "$R/setup/given.env")" "setup given nothing writes no setup/given.env"
 printf 'OWNER=acme\n' >"$R/setup/given.env"
@@ -291,7 +296,7 @@ line" "$(printf '%s/home\302\205' "$SCRATCH")" "$(printf '%s/bad\377' "$SCRATCH"
   rm -rf "$R/stages/01-ask/output/widget"
   OUT=$(cd "$R" && HOME=$home bin/ask run widget 'TITLE=A title' 'DESCRIPTION=One line' 2>&1)
   assert_status 1 "$?" "refused: run under a HOME the value rule refuses: $(printf '%s' "$home" | od -An -c | tr -s ' ' | tail -c 24)"
-  assert_contains "$OUT" "TARGET_ROOT, its ~ expanded," "  and the refusal says so"
+  assert_contains "$OUT" "TARGET_ROOT, its ~ expanded from HOME:" "  and the refusal says so"
   assert_eq "absent" "$([ -e "$R/stages/01-ask/output/widget/answers.env" ] && echo present || echo absent)" \
     "  and writes no answers file"
 done
@@ -305,6 +310,27 @@ assert_eq "HOLDER=Acme & Co" "$(grep '^HOLDER=' "$ANS")" "  each field it names"
 assert_eq "HOLDER=Acme & Co
 OWNER=acme" "$(cat "$OUTD/setup.override.env" 2>/dev/null)" "  recorded in the run's setup.override.env"
 assert_eq "$before" "$(state)" "  and leaves setup/answers.env untouched"
+# A run works out again, from the effective setup values, its overrides
+# included, each setup field setup/given.env does not record as given, as
+# bin/ask setup does (decision 229; answers' S1 of S2's third ship gate), in
+# AC29's shape: setup given nothing, the fixture's values as overrides.
+fresh
+ask setup
+mkdir -p "$SCRATCH/home$n/Development/acme"
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=acme 2>&1)
+assert_status 0 "$?" "run with --setup-override OWNER=acme beside a setup given nothing"
+ANS="$R/stages/01-ask/output/widget/answers.env"
+assert_eq "HOLDER=acme" "$(grep '^HOLDER=' "$ANS")" "  works HOLDER out from the override"
+assert_eq "TARGET_ROOT=~/Development/acme" "$(grep '^TARGET_ROOT=' "$ANS")" "  and TARGET_ROOT"
+assert_eq "TARGET=$SCRATCH/home$n/Development/acme/widget" "$(grep '^TARGET=' "$ANS")" "  and TARGET from it"
+assert_eq "OWNER=acme" "$(cat "$R/stages/01-ask/output/widget/setup.override.env" 2>/dev/null)" \
+  "  recording only the override"
+ready
+ask setup HOLDER=Someone
+ask run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override OWNER=acme
+assert_status 0 "$ST" "run with --setup-override OWNER=acme beside a setup that gave HOLDER"
+assert_eq "HOLDER=Someone" "$(grep '^HOLDER=' "$ANS")" "  keeps the setup field given"
+assert_eq "TARGET_ROOT=$ROOT" "$(grep '^TARGET_ROOT=' "$ANS")" "  each of them"
 
 # A run records what the operator gave in its given.env, written in the step
 # that writes answers.env; a redo keeps only that and works each default out
@@ -498,7 +524,7 @@ assert_eq "DESCRIPTION=B" "$(grep '^DESCRIPTION=' "$ANS")" "  and keeps a run an
 assert_eq "VISIBILITY=private" "$(grep '^VISIBILITY=' "$ANS")" "  even one that has a default"
 assert_eq "OWNER=acme" "$(grep '^OWNER=' "$ANS")" "  and keeps an override not given again"
 assert_eq "OWNER=acme" "$(cat "$OUTD/setup.override.env" 2>/dev/null)" "  still recorded in setup.override.env"
-assert_eq "HOLDER=Okja-Engineering" "$(grep '^HOLDER=' "$ANS")" "  and a setup field not overridden comes from setup"
+assert_eq "HOLDER=acme" "$(grep '^HOLDER=' "$ANS")" "  and a setup default not given is worked out from the override"
 ask run widget --redo --setup-override OWNER=Okja-Engineering
 assert_status 0 "$ST" "--redo giving an override again"
 assert_eq "OWNER=Okja-Engineering" "$(grep '^OWNER=' "$ANS")" "  changes it"
@@ -765,6 +791,16 @@ ask run widget --redo --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
 assert_status 0 "$ST" "a redo that moves TARGET_ROOT"
 assert_eq "gone" "$(gone "$ROOT/.widget.render.4242")" "  removes a killed render's staging directory under the old one"
 assert_eq "present" "$(gone "$ROOT/.widget.render.x1")" "  and nothing else there"
+# The old TARGET_ROOT is the old answers file's, so a root moved by
+# bin/ask setup, not by an override, strands none either (answers' R3, k22).
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$ROOT/.widget.render.4242" "$SCRATCH/moved$n"
+ask setup "TARGET_ROOT=$SCRATCH/moved$n"
+ask run widget --redo
+assert_status 0 "$ST" "a redo after bin/ask setup moves TARGET_ROOT"
+assert_eq "TARGET=$SCRATCH/moved$n/widget" "$(grep '^TARGET=' "$ANS")" "  renders under the new root"
+assert_eq "gone" "$(gone "$ROOT/.widget.render.4242")" "  and removes a killed render's staging directory under the old one"
 # One the removal helper cannot remove is refused, naming it (removal M6's
 # a10 of S2's third ship gate).
 ready

@@ -221,6 +221,14 @@ no TARGET_ROOT '~/' "no empty, . or .. component"
 no TARGET_ROOT '~/./x' "no empty, . or .. component"
 out=$(HOME=/ answers_check "$S" TARGET_ROOT '~/x' 2>&1)
 assert_status 1 "$?" "refused: TARGET_ROOT=~/x with HOME /, which expands to //x"
+# The refusal names the expansion it judged, so a HOME of / or one ending in
+# / is seen as the cause (answers' NIT 1 of S2's third ship gate).
+assert_contains "$out" "TARGET_ROOT, its ~ expanded to //x: a path holds no empty" "  naming the expansion"
+out=$(HOME=/h/ answers_check "$S" TARGET_ROOT '~/x' 2>&1)
+assert_status 1 "$?" "refused: TARGET_ROOT=~/x with HOME /h/, which expands to /h//x"
+assert_contains "$out" "TARGET_ROOT, its ~ expanded to /h//x: a path holds no empty" "  naming the expansion"
+out=$(HOME=/h answers_check "$S" TARGET_ROOT '~/./x' 2>&1)
+assert_contains "$out" "TARGET_ROOT: a path holds no empty" "  and a component the value itself holds is the value's"
 out=$(unset HOME; answers_check "$S" TARGET_ROOT '~/x' 2>&1)
 assert_status 1 "$?" "refused: TARGET_ROOT=~/x with HOME unset"
 assert_contains "$out" "HOME" "  and the refusal names HOME"
@@ -233,7 +241,7 @@ assert_status 1 "$?" "  nor with HOME empty"
 for home in "$(printf '/h/new\nline')" "$(printf '/h/c1\302\205')" "$(printf '/h/bad\377')" '/h/{{OWNER}}'; do
   out=$(HOME=$home answers_check "$S" TARGET_ROOT '~/x' 2>&1)
   assert_status 1 "$?" "refused: TARGET_ROOT=~/x under a HOME the value rule refuses: $(printf '%s' "$home" | od -An -c | tr -s ' ' | tail -c 20)"
-  assert_contains "$out" "TARGET_ROOT, its ~ expanded," "  and the refusal names the expansion"
+  assert_contains "$out" "TARGET_ROOT, its ~ expanded from HOME: the value" "  and the refusal names the expansion"
 done
 out=$(HOME='/h/plain' answers_check "$S" TARGET_ROOT '~/x' 2>&1)
 assert_status 0 "$?" "  and a HOME it accepts is accepted"
@@ -307,6 +315,24 @@ assert_eq "$out" "$(printf '%s\n' "$out" | LC_ALL=C sort)" "  sorted"
 out=$(answers_setup "$S" "$(printf 'OWNER=acme\nPEOPLE=A\nTEAM=octo')" 2>&1)
 assert_status 1 "$?" "answers_setup refuses a given value its check refuses"
 assert_contains "$out" "give TEAM again" "  and says to give it again"
+# A given file's field is a field name: a lowercase key is no FIELD=value
+# line (answers' R4, v06).
+printf 'owner=acme\n' >"$SCRATCH/lower.env"
+out=$(answers_given "$SCRATCH/lower.env" given.env 2>&1)
+assert_status 1 "$?" "answers_given refuses a key that is not a field name"
+assert_contains "$out" "given.env:1: not a FIELD=value line: owner=acme" "  naming the line"
+# A run default made from a setup field is worked out from the setup values
+# it is given as its base (answers' R4, v12).
+S2="$SCRATCH/based.tsv"
+{
+  row field scope type render selects pattern default question
+  row NAME run name no - - - 'What is the repository called?'
+  row OWNER setup owner no - - Okja-Engineering 'Which GitHub account owns the repositories?'
+  row BYLINE run text no - - 'By {{OWNER}}' 'Whose is it?'
+} >"$S2"
+out=$(answers_derive "$S2" run 'NAME=widget' "$(printf 'OWNER=acme\n')" 2>&1)
+assert_status 0 "$?" "answers_derive with a run default made from a setup field"
+assert_contains "$out" "BYLINE=By acme" "  works it out from the base's setup value"
 
 mkdir "$SCRATCH/cwd"
 printf 'TITLE=$(touch made-by-value)\nCODE=`touch made-by-backticks`\n' >"$SCRATCH/cwd/answers.env"

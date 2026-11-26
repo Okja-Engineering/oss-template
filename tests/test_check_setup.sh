@@ -95,6 +95,7 @@ run
 assert_status 0 "$ST" "passes: setup/answers.env and setup/given.env as bin/ask setup writes them"
 assert_contains "$OUT" "setup/given.env" "  and it says it examined setup/given.env"
 valid
+(cd "$R" && bin/ask setup TARGET_ROOT=/srv/targets >/dev/null)
 fixture_replace "$R/setup/answers.env" "OWNER=Okja-Engineering" "OWNER=acme"
 fixture_commit "$R" "test: an owner edited by hand"
 refused "a setup/answers.env edited by hand, away from what was given" "run bin/ask setup"
@@ -170,5 +171,35 @@ assert_status 0 "$ST" "range mode judges HEAD, not an uncommitted edit"
 git -C "$R" add setup/answers.env
 run --staged
 assert_status 1 "$ST" "staged mode judges the index"
+
+# setup/given.env's fields are judged: each a setup field of the schema, in
+# the order bin/ask setup writes them; and a given.env that is missing, or
+# not staged, is named with the step that helps (answers' NIT 3 of S2's
+# third ship gate).
+valid
+printf 'BOGUS=1\n' >"$R/setup/given.env"
+fixture_commit "$R" "test: an unknown field given"
+refused "a setup/given.env holding an unknown field" "setup/given.env:1: BOGUS is not a setup field"
+valid
+printf 'NAME=widget\n' >"$R/setup/given.env"
+fixture_commit "$R" "test: a run field given"
+refused "a setup/given.env holding a run field" "setup/given.env:1: NAME is not a setup field"
+valid
+(cd "$R" && bin/ask setup OWNER=acme TARGET_ROOT=/srv/targets >/dev/null)
+printf 'TARGET_ROOT=/srv/targets\nOWNER=acme\n' >"$R/setup/given.env"
+fixture_commit "$R" "test: given.env out of order"
+refused "a setup/given.env out of order" "setup/given.env is not in the order bin/ask setup writes"
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+fixture_remove "$R/setup/given.env"
+fixture_commit "$R" "test: given.env removed"
+refused "a setup/answers.env whose setup/given.env is gone, routed" "setup/given.env is missing"
+assert_contains "$OUT" "give each field again" "  naming the step that keeps the values"
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+git -C "$R" add setup/answers.env
+run --staged
+assert_status 1 "$ST" "refused: a staged setup/answers.env whose setup/given.env is not staged"
+assert_contains "$OUT" "setup/given.env is not staged" "  naming the step: stage it"
 
 assert_done
