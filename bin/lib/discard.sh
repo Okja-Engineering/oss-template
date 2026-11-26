@@ -1,19 +1,21 @@
 # shellcheck shell=bash
-# The shared discard (AC9; decisions 118, 123, 134, 136, 140, 149, 227) and
-# its removal helper (decisions 203, 211). `bin/ask --redo` and
+# The shared discard (AC9; decisions 118, 123, 134, 136, 140, 149, 227)
+# and its removal helper (decisions 203, 211). `bin/ask --redo` and
 # `bin/render --replace` call it, and verify's leftovers will.
 #
-#   discard_target PATH NAME RECORDED TARGET
-#       remove PATH, the words of the operator's checkpoint, only when PATH
-#       and RECORDED are absolute, PATH equals RECORDED byte for byte,
-#       RECORDED equals TARGET, and its last component is NAME and not a
-#       symbolic link. RECORDED is the target the run's render.md records,
-#       or, with no render.md, the run's TARGET; TARGET is the run's
-#       recorded TARGET, which bin/ask wrote as TARGET_ROOT, `~` expanded,
-#       then /NAME. So both callers use one root, the parent of the
-#       recorded target. A PATH already gone is nothing to remove. Exit 0
-#       when PATH is gone, 1 on a refusal, with the reason out.
-#   discard_check PATH NAME RECORDED TARGET
+#   discard_target PATH ANSWERS NAME RENDER_MD
+#       remove PATH, the words of the operator's checkpoint, only when it is
+#       the run's target, which the discard derives itself and trusts from
+#       no caller: the TARGET_ROOT of the run's answers file ANSWERS, under
+#       the path rule, its `~` expanded under this HOME, then /NAME
+#       (answers_target_check). The answers file's TARGET must be that path,
+#       and so must the target RENDER_MD names when it is a file, the run's
+#       render.md; PATH must equal it byte for byte and not be a symbolic
+#       link. So no TARGET or render.md edited by hand points the discard
+#       outside TARGET_ROOT: by another root, a `..` component or a link on
+#       the way. A PATH already gone is nothing to remove. Exit 0 when PATH
+#       is gone, 1 on a refusal, with the reason out.
+#   discard_check PATH ANSWERS NAME RENDER_MD
 #       discard_target's judgement alone, removing nothing, so a caller can
 #       refuse before it changes anything.
 #   discard_remove PATH
@@ -24,7 +26,7 @@
 #       `rm`, called by name, and assert it gone. Exit 0 when PATH is gone,
 #       1 when it remains, naming it.
 #
-# The caller exports LC_ALL=C.
+# Source bin/lib/answers.sh first. The caller exports LC_ALL=C.
 
 discard_target() {
   discard_check "$@" || return 1
@@ -34,31 +36,23 @@ discard_target() {
 }
 
 discard_check() {
-  local path=$1 name=$2 recorded=$3 target=$4
-  case "$path" in
-    /*) ;;
-    *)
-      printf 'remove %s: it is not an absolute path\n' "$path"
-      return 1
-      ;;
-  esac
-  case "$recorded" in
-    /*) ;;
-    *)
-      printf 'remove %s: the recorded target %s is not an absolute path\n' "$path" "$recorded"
-      return 1
-      ;;
-  esac
-  if [ "$path" != "$recorded" ]; then
-    printf 'remove %s: it is not the target render.md names, %s\n' "$path" "$recorded"
+  local path=$1 answers=$2 name=$3 render_md=$4 target recorded
+  if ! target=$(answers_target_check "$answers" "$name"); then
+    printf 'remove %s: %s\n' "$path" "$target"
     return 1
   fi
-  if [ "$recorded" != "$target" ]; then
-    printf 'remove %s: render.md names it, but the run'"'"'s TARGET is %s\n' "$path" "$target"
-    return 1
+  if [ -f "$render_md" ]; then
+    if ! recorded=$(answers_record "$render_md" target); then
+      printf 'remove %s: %s names no target\n' "$path" "$render_md"
+      return 1
+    fi
+    if [ "$recorded" != "$target" ]; then
+      printf 'remove %s: render.md names %s, not the run'"'"'s target %s\n' "$path" "$recorded" "$target"
+      return 1
+    fi
   fi
-  if [ "${path##*/}" != "$name" ]; then
-    printf 'remove %s: its last component is not the run name %s\n' "$path" "$name"
+  if [ "$path" != "$target" ]; then
+    printf 'remove %s: it is not the run'"'"'s target %s\n' "$path" "$target"
     return 1
   fi
   if [ -L "$path" ]; then

@@ -64,12 +64,13 @@
 #                                    once expanded; exit 0 or 1
 #   answers_target_for TARGET_ROOT NAME
 #                                    a run's TARGET, exactly TARGET_ROOT with
-#                                    its `~` expanded, then `/NAME`; exit 1
-#                                    when `~` cannot be expanded
+#                                    its `~` expanded, then `/NAME`, under
+#                                    the path rule answers_target holds it
+#                                    to; else the reason out, exit 1
 #   answers_target_check FILE NAME   the run answers FILE's TARGET is still
 #                                    answers_target_for its TARGET_ROOT and
-#                                    NAME, under this HOME; else the reason
-#                                    out, exit 1
+#                                    NAME, under this HOME: that TARGET out,
+#                                    exit 0; else the reason out, exit 1
 #   answers_record FILE KEY          the value of a run record's `KEY: `
 #                                    line (confirmed.md, render.md); exit 1
 #                                    when FILE has none
@@ -259,8 +260,15 @@ answers_target() {
 }
 
 answers_target_for() {
-  local root
-  root=$(answers_path "$1") || return 1
+  local root fault
+  root=$(answers_path "$1") || {
+    printf 'TARGET_ROOT %s gives no target: it starts with ~, and HOME is not set\n' "$1"
+    return 1
+  }
+  fault=$(answers_target "$root/$2") || {
+    printf 'TARGET_ROOT %s, then /%s, gives no target: %s\n' "$1" "$2" "$fault"
+    return 1
+  }
   printf '%s/%s\n' "$root" "$2"
 }
 
@@ -268,9 +276,11 @@ answers_target_check() {
   local target root want
   target=$(answers_get "$1" TARGET) || { printf 'the answers hold no TARGET\n'; return 1; }
   root=$(answers_get "$1" TARGET_ROOT) || { printf 'the answers hold no TARGET_ROOT\n'; return 1; }
-  want=$(answers_target_for "$root" "$2") ||
-    { printf 'TARGET_ROOT %s cannot be expanded: HOME is not set\n' "$root"; return 1; }
-  [ "$target" = "$want" ] && return 0
+  want=$(answers_target_for "$root" "$2") || { printf '%s\n' "$want"; return 1; }
+  if [ "$target" = "$want" ]; then
+    printf '%s\n' "$want"
+    return 0
+  fi
   printf 'TARGET %s is not TARGET_ROOT %s, expanded here, then /%s, which is %s\n' "$target" "$root" "$2" "$want"
   return 1
 }

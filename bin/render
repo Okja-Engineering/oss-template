@@ -122,9 +122,8 @@ named=$(answers_record "$outd/confirmed.md" answers) || named=""
 fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env") ||
   refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault"
 [ "$(answers_get "$work/answers.env" NAME)" = "$name" ] || refuse "$outd/answers.env names another run"
-fault=$(answers_target_check "$work/answers.env" "$name") ||
-  refuse "$outd/answers.env: $fault; change the answers with bin/ask run $name --redo"
-target=$(answers_get "$work/answers.env" TARGET)
+target=$(answers_target_check "$work/answers.env" "$name") ||
+  refuse "$outd/answers.env: $target; change the answers with bin/ask run $name --redo"
 root=${target%/*}
 
 # Where it goes, and what is in the way.
@@ -133,15 +132,17 @@ render_md=stages/02-render/output/$name/render.md
 if present "$render_md" && [ ! -f "$render_md" ]; then
   refuse "$render_md is not a file; it is left alone"
 fi
-recorded=$target
-if [ -f "$render_md" ]; then
-  [ "$replace" = 1 ] ||
-    refuse "the run $name is rendered already; render it again with --replace, at stage 02's checkpoint"
-  recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
+if [ -f "$render_md" ] && [ "$replace" = 0 ]; then
+  refuse "the run $name is rendered already; render it again with --replace, at stage 02's checkpoint"
 fi
+# A present target is removed only through the discard, which derives the
+# run's target itself (decision 227), so the route names it only when the
+# discard would take it.
 if [ "$have_remove" = 1 ]; then
-  fault=$(discard_check "$remove" "$name" "$recorded" "$target") || refuse "$fault"
+  fault=$(discard_check "$remove" "$work/answers.env" "$name" "$render_md") || refuse "$fault"
 elif present "$target" && ! empty_dir "$target"; then
+  fault=$(discard_check "$target" "$work/answers.env" "$name" "$render_md") ||
+    refuse "the target $target is present, and --replace may not remove it: $fault; it is left alone"
   refuse "the target $target is present: with the operator's yes to \"remove $target\", run bin/render $name --replace --remove \"$target\"; without it, it is left alone"
 elif [ "$replace" = 1 ] && [ ! -f "$render_md" ]; then
   refuse "--replace: there is no render of $name to replace; run bin/render $name"
@@ -183,7 +184,7 @@ stage=$root/.$name.render.$$
 # outputs, then its render.md, so a failure leaves a render.md asking for
 # --replace again, and one after leaves the run unrendered.
 if [ "$have_remove" = 1 ]; then
-  fault=$(discard_target "$remove" "$name" "$recorded" "$target") || refuse "$fault"
+  fault=$(discard_target "$remove" "$work/answers.env" "$name" "$render_md") || refuse "$fault"
 fi
 if [ "$replace" = 1 ]; then
   fault=$(discard_remove "stages/03-verify/output/$name") || refuse "$fault"

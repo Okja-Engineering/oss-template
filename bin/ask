@@ -23,11 +23,12 @@
 # not given again, as setup keeps what it is not given: a field given
 # replaces its value, and an override is changed by giving it again, the
 # setup value making it harmless (decision 229). An existing run needs
-# --redo, and a target present
-# needs --remove naming it: --remove PATH discards the target render.md
-# names, or, with no render.md, the run's TARGET, through the shared
-# discard, bin/lib/discard.sh, after the operator's yes at stage 01's
-# checkpoint (AC9, decisions 123, 134, 149, 203, 227), and --redo clears the
+# --redo, and a target present needs --remove naming it: --remove PATH
+# discards the run's target, which the shared discard, bin/lib/discard.sh,
+# derives itself from the old answers file's TARGET_ROOT and NAME, after the
+# operator's yes at stage 01's checkpoint (AC9, decisions 123, 134, 149,
+# 203, 227); a present target it would not take is refused, never routed
+# to --remove. --redo clears the
 # run's 03 and 02 outputs and then its confirmation, so a clear that fails
 # leaves the run confirmed and its files in step.
 #
@@ -210,8 +211,12 @@ cmd_run() {
   if [ -f "$outd/answers.env" ]; then
     [ "$redo" = 1 ] ||
       refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
-    old_target=$(answers_get "$outd/answers.env" TARGET) ||
+    answers_get "$outd/answers.env" TARGET >/dev/null ||
       refuse "stages/01-ask/output/$name/answers.env holds no TARGET"
+    # The old target, as the discard derives it: the old TARGET_ROOT, from
+    # this answers file before it is replaced, then /NAME (decision 227).
+    old_target=$(answers_target_for "$(answers_get "$outd/answers.env" TARGET_ROOT)" "$name") ||
+      refuse "stages/01-ask/output/$name/answers.env: $old_target"
     old_answers=$(cat "$outd/answers.env") || refuse "cannot read stages/01-ask/output/$name/answers.env"
     if [ -f "$outd/setup.override.env" ]; then
       old_overrides=$(cat "$outd/setup.override.env") ||
@@ -281,7 +286,7 @@ $(answers_fields "$SCHEMA" run)
 EOF
   [ -z "$faults" ] || refuse "the answers are not written:" "$faults"
   target=$(answers_target_for "$(printf '%s' "$out" | answers_get - TARGET_ROOT)" "$name") ||
-    refuse "TARGET_ROOT starts with ~, and HOME is not set"
+    refuse "$target"
   out="${out}TARGET=$target
 "
   # What the run writes, made before anything is removed.
@@ -289,16 +294,23 @@ EOF
     refuse "cannot sort the answers"
   fi
 
-  # The target the discard may remove: the one render.md records, or, with
-  # no render.md, the run's TARGET.
+  # The old target, and the one render.md records: present, either is
+  # removed only through the discard, which derives the run's target from
+  # the old answers file itself, so the route names it only when the
+  # discard would take it.
   recorded=$old_target
   if [ -f "$render_md" ]; then
     recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
   fi
   if [ "$have_remove" = 1 ]; then
-    fault=$(discard_check "$remove" "$name" "$recorded" "$old_target") || refuse "$fault"
-  elif [ -n "$recorded" ] && present "$recorded"; then
-    refuse "the target $recorded is present: with the operator's yes to \"remove $recorded\", run bin/ask run $name --redo --remove \"$recorded\" and the answers"
+    fault=$(discard_check "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
+  else
+    for value in "$recorded" "$old_target"; do
+      if [ -z "$value" ] || ! present "$value"; then continue; fi
+      fault=$(discard_check "$value" "$outd/answers.env" "$name" "$render_md") ||
+        refuse "the target $value is present, and a redo may not remove it: $fault; it is left alone"
+      refuse "the target $value is present: with the operator's yes to \"remove $value\", run bin/ask run $name --redo --remove \"$value\" and the answers"
+    done
   fi
   if present "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
     refuse "the target $target is present, and no --remove names it; it is left alone"
@@ -306,7 +318,7 @@ EOF
 
   # Remove, then write.
   if [ "$have_remove" = 1 ]; then
-    fault=$(discard_target "$remove" "$name" "$recorded" "$old_target") || refuse "$fault"
+    fault=$(discard_target "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
   fi
   if [ "$redo" = 1 ]; then
     # What derives from the confirmation goes first, so a clear that fails
