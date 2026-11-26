@@ -649,7 +649,8 @@ answers_setup() {
     printf '%s\n' "$out"
     return "$st"
   fi
-  [ -z "$out" ] || sort <<<"$out"
+  # A sort that fails is a text not worked out, 2, never a refusal.
+  [ -z "$out" ] || sort <<<"$out" || return 2
 }
 
 answers_setup_stale() {

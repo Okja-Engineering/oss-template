@@ -1035,14 +1035,15 @@ assert_status 1 "$ST" "refused: setup whose setup fields cannot be read"
 assert_contains "$OUT" "cannot read the setup fields" "  and the refusal says so"
 assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
 # A default that cannot be worked out is refused, never written empty: in
-# setup, the first schema cell read is OWNER's default; in run, the 41st is
-# VISIBILITY's, and the 42nd the one answers_default works it out from.
+# setup, the first schema cell read is OWNER's default; in run, the 54th is
+# VISIBILITY's, and the 55th the one answers_default works it out from, the
+# reads of what bin/ask setup writes, which a run compares, before them.
 fresh
 asked awk '*col\[$i] = i*' 1 setup
 assert_status 1 "$ST" "refused: setup whose default cannot be read"
 assert_contains "$OUT" "OWNER: cannot read its default" "  and the refusal says so"
 assert_eq "absent" "$(state)" "  and no setup/answers.env is written"
-for at in "41 VISIBILITY: cannot read its default" "42 VISIBILITY: cannot work out its default"; do
+for at in "54 VISIBILITY: cannot read its default" "55 VISIBILITY: cannot work out its default"; do
   ready
   asked awk '*col\[$i] = i*' "${at%% *}" run widget 'TITLE=A' 'DESCRIPTION=B'
   assert_status 1 "$ST" "refused: run whose default cannot be read, at read ${at%% *}"
@@ -1053,32 +1054,33 @@ ready
 asked awk '*BEGIN { print ENVIRON\["H"] }*' 1 questionnaire
 assert_status 1 "$ST" "refused: a questionnaire whose text cannot be made"
 assert_eq "gone" "$(gone "$R/setup/questionnaire.md")" "  and writes none"
-for at in "1 cannot read the fields of the schema" "2 cannot read the setup fields" "3 cannot read the setup fields" \
-  "4 cannot read the run fields"; do
+for at in "1 cannot read the fields of the schema" "2 cannot read the setup fields" \
+  "3 cannot work out what bin/ask setup writes" "5 cannot read the run fields"; do
   ready
   asked awk '*ENVIRON\["S"] == ""*' "${at%% *}" run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
   assert_status 1 "$ST" "refused: run whose schema's fields cannot be read, at read ${at%% *}"
   assert_contains "$OUT" "${at#* }" "  and the refusal says so"
   assert_eq "absent" "$(run_state)" "  and no answers file is written"
 done
-# answers_get's reads, in order: per setup field, its override, then
+# answers_get's reads, in order: those working out what bin/ask setup
+# writes, which a run compares first; then per setup field, its override, then
 # whether setup/given.env records it, then, if so, its setup value; per
 # setup field and per run field, what was given; then TARGET_ROOT.
 # A read that fails, exiting 2, is never read as a field the file lacks
 # (decision 228).
 export FAIL_STATUS=2
 ready
-asked awk '*!found && i > 1*' 2 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+asked awk '*!found && i > 1*' 6 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
 assert_status 1 "$ST" "refused: run whose setup/given.env's fields cannot be read"
 assert_contains "$OUT" "cannot read setup/given.env's fields" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
 ready
-asked awk '*!found && i > 1*' 5 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+asked awk '*!found && i > 1*' 9 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
 assert_status 1 "$ST" "refused: run whose setup value cannot be read"
 assert_contains "$OUT" "cannot read TARGET_ROOT from setup/answers.env" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
 ready
-asked awk '*!found && i > 1*' 18 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+asked awk '*!found && i > 1*' 22 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
 assert_status 1 "$ST" "refused: run whose TARGET_ROOT cannot be read back"
 assert_contains "$OUT" "cannot read TARGET_ROOT from this run's answers.env" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
@@ -1120,8 +1122,16 @@ asked date '-u *' 1 confirm widget --by 'A Person'
 assert_status 1 "$ST" "refused: confirm whose time cannot be read"
 assert_contains "$OUT" "cannot read the time" "  and the refusal says so"
 assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
+# The first argument-less sort is what bin/ask setup writes, which a run
+# compares with setup/answers.env: failing, it is no text, never a refusal
+# of setup/given.env; the second is the run's answers.
 ready
 asked sort '' 1 run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: run whose setup text cannot be sorted"
+assert_contains "$OUT" "cannot work out what bin/ask setup writes" "  and the refusal says so"
+assert_not_contains "$OUT" "gives no setup/answers.env" "  never a refusal of setup/given.env"
+ready
+asked sort '' 2 run widget 'TITLE=A' 'DESCRIPTION=B'
 assert_status 1 "$ST" "refused: run whose answers cannot be sorted"
 assert_contains "$OUT" "cannot sort the answers" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
