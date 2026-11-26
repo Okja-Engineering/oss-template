@@ -1237,6 +1237,43 @@ for case in '.GIT.tmpl:renders .GIT, an entry named .git' '.git.tmpl:renders .gi
   confirmed widget
   refused "foundation/$file" "foundation/$file: ${case#*:}" widget
 done
+# The judgement is of the final names, .tmpl off and the variant resolved,
+# each refused, 1, with its own reason and nothing written (render R2 of
+# S2's fourth ship gate): p23's . and .. names, p22's name that is a file
+# and a directory above another, and p18's selected names.
+for case in '..tmpl:renders ., a . or .. component' '...tmpl:renders .., a . or .. component' \
+  'sub/..tmpl:renders sub/., a . or .. component' 'sub/...tmpl:renders sub/.., a . or .. component'; do
+  file=${case%%:*}
+  fresh
+  put "foundation/$file" 'x'
+  fixture_commit "$R" "test: foundation/$file"
+  confirmed widget
+  refused "foundation/$file" "foundation/$file: ${case#*:}" widget
+  assert_eq "" "$(left)" "  with nothing written"
+done
+for clash in README.md/x LICENSE/x; do
+  fresh
+  put "foundation/$clash" 'x'
+  fixture_commit "$R" "test: foundation/$clash"
+  confirmed widget
+  refused "foundation/$clash, under a name render writes as a file" \
+    "foundation renders ${clash%/x} as a file and as a directory, above $clash" widget
+  assert_eq "" "$(left)" "  with nothing written"
+done
+for case in '.GIT:renders .GIT, an entry named .git' 'sub/.git:renders sub/.git, an entry named .git' \
+  'LICENSE/:renders no name, an empty final component'; do
+  sel=${case%%:*}
+  fresh
+  awk -F '\t' -v OFS='\t' -v s="$sel" '$1 == "LICENSE" { $5 = s } { print }' "$R/shared/answers.tsv" >"$R/x$n" &&
+    mv "$R/x$n" "$R/shared/answers.tsv"
+  mkdir -p "$(dirname "$R/foundation/$sel.x")"
+  mv "$R/foundation/LICENSE.apache-2.0" "$R/foundation/$sel.apache-2.0"
+  mv "$R/foundation/LICENSE.none.tmpl" "$R/foundation/$sel.none.tmpl"
+  fixture_commit "$R" "test: LICENSE selects $sel"
+  confirmed widget
+  refused "a selected path $sel" "foundation/$sel.apache-2.0: ${case#*:}" widget
+  assert_eq "" "$(left)" "  with nothing written"
+done
 
 # --- render's private directory, render.md's temporary file and its last line --------------------
 # A relative TMPDIR: the private directory is still absolute, so render
