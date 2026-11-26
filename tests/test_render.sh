@@ -931,6 +931,15 @@ failing awk '*!found && i > 1*' 5
 stage_refused "the read of a render field's value fails" "cannot read the render fields"
 failing tail '-c 1 *'
 stage_refused "a template's last byte cannot be read" "cannot read foundation/"
+# Each read of a file's bytes from HEAD: a template, a verbatim file, a link.
+failing git 'cat-file blob *:foundation/README.md.tmpl'
+stage_refused "a template's bytes cannot be read" "cannot read foundation/ at HEAD"
+failing git 'cat-file blob *:foundation/tool'
+stage_refused "a verbatim file's bytes cannot be read" "cannot read foundation/ at HEAD"
+failing git 'cat-file blob *:foundation/readme-link'
+stage_refused "a link's target cannot be read" "cannot read foundation/ at HEAD"
+failing git '-C * rev-parse --show-toplevel'
+stage_refused "the workspace's working tree cannot be found" "cannot find the workspace's working tree"
 # Every argument-less sort, in order: the file list, then the walk's have and
 # want (render p07 and conformance p3 of S2's second ship gate).
 failing sort '' 1
@@ -990,16 +999,39 @@ assert_status 0 "$ST" "a directory named like a variant renders"
 assert_eq "Notes." "$(cat "$ROOT/widget/LICENSE.extra/notes.md" 2>/dev/null)" "  its files copied verbatim"
 # Render's file list is sorted: doc.md, then doc.tmpl's doc, in tree order,
 # are doc and doc.md in the list git builds the fingerprint from.
+# The same render holds the edges of a file's bytes: a link whose target
+# ends in x, an empty template, and a `- {{FIELD}}` line whose field is text,
+# not a list. It runs under an operator's git environment that would make
+# sha256 repositories from a template ignoring every path; the fingerprint is
+# still the sha1 tree id.
 fresh
 put foundation/doc.md 'Doc.'
 put foundation/doc.tmpl '{{NAME}}'
+ln -s box "$R/foundation/box-link"
+: >"$R/foundation/empty.md.tmpl"
+put foundation/holder.md.tmpl '- {{HOLDER}}'
 fixture_commit "$R" "test: a file and a template whose names sort apart"
-confirmed widget
-render widget
+confirmed widget --setup-override 'HOLDER=Acme, Inc'
+mkdir -p "$SCRATCH/tpl$n/info"
+printf '*\n' >"$SCRATCH/tpl$n/info/exclude"
+OUT=$(cd "$R" && GIT_DEFAULT_HASH=sha256 GIT_TEMPLATE_DIR="$SCRATCH/tpl$n" bin/render widget 2>&1)
+ST=$?
 assert_status 0 "$ST" "a file and a template whose rendered names sort apart render"
 assert_eq "doc
 doc.md" "$(grep -E -x 'doc|doc\.md' "$R/stages/02-render/output/widget/render.md")" \
   "  and render.md lists them sorted"
+assert_eq "box" "$(readlink "$ROOT/widget/box-link")" "a link's target ending in x is kept whole"
+assert_eq "0" "$(wc -c <"$ROOT/widget/empty.md" | tr -d ' ')" "an empty template renders empty"
+assert_eq "- Acme, Inc" "$(cat "$ROOT/widget/holder.md")" "a '- {{TEXT}}' line is not split at its commas"
+assert_eq "$(tree_id "$ROOT/widget")" "$(record widget fingerprint)" \
+  "the fingerprint is the sha1 tree id under an operator's sha256 default and template"
+# Two sources for one path: a file and a template that renders to it.
+fresh
+put foundation/doc.md 'Doc.'
+put foundation/doc.md.tmpl '{{NAME}}'
+fixture_commit "$R" "test: a file and a template for the same path"
+confirmed widget
+refused "a file and a template for the same path" "foundation/doc.md.tmpl: a second source for doc.md" widget
 
 # --- TARGET_ROOT outside every working tree of the workspace ----------------------------------
 # outside_refused DESCRIPTION NEEDLE ROOT [DIR]: a run whose TARGET_ROOT is

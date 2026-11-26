@@ -232,6 +232,16 @@ fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)
       "Agent guards"'
 fixture_commit "$R" "test: a deny entry only the heading holds"
 refused "a deny entry the section's heading alone holds" "the deny entry Agent guards is not listed"
+# A deny entry holding an escaped quote is one entry, and those after it are
+# read.
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Bash(echo \"x\")",
+      "Read(**/secrets/**)"'
+fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
+- `Bash(echo \"x\")`'
+fixture_commit "$R" "test: a deny entry holding an escaped quote"
+refused "an unlisted deny entry after one holding an escaped quote" "the deny entry Read(**/secrets/**) is not listed"
 valid
 fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
       "Read(**/secrets/**)"'
@@ -329,6 +339,7 @@ cannot_run() { # TOOL PATTERN NTH WHAT
   assert_status 2 "$ST" "the check cannot run when it cannot read $4"
   assert_contains "$OUT" "FAIL trace (could not run)" "  and bin/check says so"
 }
+cannot_run git 'ls-files -z -c -o --exclude-standard' 1 "the tree's listing"
 cannot_run sed 's/^\[^*' 1 "the tree's paths"
 cannot_run awk '*$0 == "AGENTS.md"*' 1 "the agent files"
 cannot_run awk '*$1 == ENVIRON\["N"]*' 1 "a rule line's links"
