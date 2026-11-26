@@ -189,7 +189,7 @@ links_md() {
   # awk's status is the pipeline's, never the caller's pipefail's.
   (
     set +o pipefail
-    printf '%s' "$text" | awk -v md_fm="${fm:-0}" "${@:1:$#-1}" "$LINKS_MD_AWK${!#}"
+    printf '%s' "$text" | awk -v md_fm="${fm:-0}" "${@:1:$#-1}" "$LINKS_MD_AWK${*:$#}"
   )
 }
 

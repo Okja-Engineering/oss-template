@@ -54,7 +54,8 @@
 # Each file a command writes, renames over or removes is absent, or a
 # regular file and not a symbolic link, or the command refuses before it
 # stages or removes anything (decision 230).
-# Exit 0 when done, 1 on a refusal, 2 on a usage error.
+# Exit 0 when done, 1 on a refusal, 2 on a usage error, or when the shell's
+# signals cannot be worked out (bin/lib/discard.sh).
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -64,6 +65,12 @@ ws=$(CDPATH='' cd -- "$here/.." && pwd)
 . "$here/lib/answers.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/discard.sh
 . "$here/lib/discard.sh"
+# The signals a run holds off, worked out as discard.sh is sourced; with
+# none, nothing is made (decision 226).
+if [ -z "$DISCARD_SIGNALS" ]; then
+  printf 'bin/ask: cannot work out the signals to hold off from the shell'"'"'s trap -l; nothing is done\n' >&2
+  exit 2
+fi
 # shellcheck source-path=SCRIPTDIR source=lib/git.sh
 . "$here/lib/git.sh"
 

@@ -45,13 +45,17 @@
 # records it for that cleanup, and while it renames what it wrote into
 # place, and holds them off through that cleanup, so a second signal never
 # ends it partway. DISCARD_SIGNALS is worked out as this library is sourced,
-# from the shell's own `kill -l`: the number of every signal it lists but
+# from the shell's own `trap -l`, which lists each number with its name in
+# any shell mode, as `kill -l` does not with POSIXLY_CORRECT set: the
+# number of every signal it lists but
 # those whose default action never ends a process, CHLD, CLD, CONT, STOP,
 # TSTP, TTIN, TTOU, URG, WINCH and INFO, and KILL, which no process can
 # catch. So it is every catchable signal that ends a process by default,
 # PROF, XCPU, ABRT, SYS and the rest, and on Linux PWR, STKFLT and the
 # real-time signals, which bash traps by number; and, on macOS, IO, which is
-# ignored there by default and is held too.
+# ignored there by default and is held too. A listing that gives no set,
+# or one without HUP, INT and TERM, leaves DISCARD_SIGNALS empty, and each
+# caller then exits 2 before it makes anything.
 #   discard_traps   each of DISCARD_SIGNALS exits 128 plus its number, so
 #                   the caller's EXIT trap runs
 #   discard_hold    each of DISCARD_SIGNALS ignored, by this shell and the
@@ -61,21 +65,28 @@
 
 DISCARD_SIGNALS=""
 discard__signals() {
-  local w n=""
-  for w in $(kill -l); do
+  local w n="" set="" names=" "
+  for w in $(trap -l); do
     case "$w" in
       *')') n=${w%')'} ;;
       SIG*)
         case "${w#SIG}" in
           CHLD | CLD | CONT | STOP | TSTP | TTIN | TTOU | URG | WINCH | INFO | KILL) ;;
-          *) [ -z "$n" ] || DISCARD_SIGNALS="$DISCARD_SIGNALS $n" ;;
+          *) [ -z "$n" ] || set="$set $n" names="$names${w#SIG} " ;;
         esac
         n=""
         ;;
     esac
   done
+  for w in HUP INT TERM; do
+    case "$names" in
+      *" $w "*) ;;
+      *) return 1 ;;
+    esac
+  done
+  DISCARD_SIGNALS=$set
 }
-discard__signals
+discard__signals || DISCARD_SIGNALS=""
 
 discard_traps() {
   local s
