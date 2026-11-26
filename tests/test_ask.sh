@@ -254,6 +254,14 @@ ask run widget --redo 'TITLE=C'
 assert_status 1 "$ST" "refused: a redo whose render.md names no target"
 assert_contains "$OUT" "render.md names no target" "  and the refusal says so"
 assert_eq "TITLE=A" "$(grep '^TITLE=' "$ANS")" "  and the answers are as they were"
+# Its route is the step that works, removing render.md by hand, not moving
+# away a target it does not name (render's NIT 1 of S2's fourth ship gate);
+# followed, the redo goes on.
+assert_contains "$OUT" "the operator may remove render.md by hand" "  naming the step that works"
+assert_not_contains "$OUT" "move that target away" "  and no step that does not"
+rm "$R/stages/02-render/output/widget/render.md"
+ask run widget --redo 'TITLE=C'
+assert_status 0 "$ST" "  and, render.md removed by hand, the redo goes on"
 ready
 mkdir -p "$OUTD"
 printf 'OWNER=stale\n' >"$OUTD/setup.override.env"
@@ -1160,6 +1168,17 @@ rendered
 mkdir -p "$ROOT/other"
 rrefused "--remove naming another path, the target present" "remove $ROOT/other: it is not the run's target $ROOT/widget" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
+# A --remove refusal names the way out (answers' NIT 1 of S2's fourth ship
+# gate).
+assert_contains "$OUT" "without --remove, bin/ask run widget --redo names the way" "  naming the way out"
+# r06: with the old and new targets both present, the new one is named
+# first, so the old one's --remove route is never followed only to be
+# refused for the new one.
+rendered
+mkdir -p "$SCRATCH/moved$n/widget"
+rrefused "a redo whose old and new targets are both present" "the target $SCRATCH/moved$n/widget is present" \
+  run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+assert_not_contains "$OUT" "--remove" "  and the old target's route waits for the new one"
 
 # --- TARGET_ROOT outside every working tree of the workspace (decision 227) ---------------
 # The root rule is the one target rule's: setup, run, confirm and the
@@ -1176,6 +1195,19 @@ sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$R/stages/01-ask/output|" "$R/setup/answers.e
 mv "$SCRATCH/setup$n" "$R/setup/answers.env"
 rrefused "a run under a setup/answers.env edited by hand to a TARGET_ROOT inside the workspace" "$INSIDE" \
   run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_contains "$OUT" "give TARGET_ROOT again, with --setup-override or with bin/ask setup" "  naming both ways to change it"
+# R3: a kept override's TARGET_ROOT, now a working tree of the workspace, is
+# routed to the one leg that changes it, --setup-override, as bin/ask setup
+# does not (answers' R3 of S2's fourth ship gate); followed, the redo goes on.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override "TARGET_ROOT=$SCRATCH/kept$n"
+git -C "$R" worktree add -q --detach "$SCRATCH/kept$n" >/dev/null 2>&1
+rrefused "a redo whose kept override's TARGET_ROOT is now a working tree" \
+  "give TARGET_ROOT again after --setup-override" run widget --redo 'TITLE=C'
+assert_not_contains "$OUT" "bin/ask setup" "  and not bin/ask setup, which cannot change it"
+ask run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+assert_status 0 "$ST" "  and, TARGET_ROOT given again after --setup-override, the redo goes on"
+git -C "$R" worktree remove --force "$SCRATCH/kept$n"
 # q04: the run's answers edited by hand to a TARGET_ROOT holding the run's
 # own folder, then confirm, and the --remove route to that folder.
 ready
@@ -1271,6 +1303,10 @@ if [ "$(id -u)" != 0 ]; then
   chmod 000 "$R/stages/02-render/output/widget"
   rrefused "a redo whose render.md cannot be told there" "cannot tell whether stages/02-render/output/widget/render.md is there" \
     run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+  # Its way out is the search it lacks, not a removal by hand of a file it
+  # cannot see (call Q6 of S2's fourth ship gate).
+  assert_contains "$OUT" "give its owner search permission on the directories above it" "  naming the way out"
+  assert_not_contains "$OUT" "by hand" "  and no step by hand"
   chmod 755 "$R/stages/02-render/output/widget"
   # The sweep under the old TARGET_ROOT: a root it cannot list is refused.
   rendered

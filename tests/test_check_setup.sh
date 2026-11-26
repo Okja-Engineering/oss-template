@@ -202,4 +202,48 @@ run --staged
 assert_status 1 "$ST" "refused: a staged setup/answers.env whose setup/given.env is not staged"
 assert_contains "$OUT" "setup/given.env is not staged" "  naming the step: stage it"
 
+# In staged mode each route ends in the index the check judges: the step
+# that mends the file, then staging what it writes (answers' R4 of S2's
+# fourth ship gate). In tree mode the step alone.
+staged_route() { # DESCRIPTION NEEDLE
+  git -C "$R" add -A
+  run --staged
+  assert_status 1 "$ST" "refused, staged: $1"
+  assert_contains "$OUT" "$2" "  and the route stages what it writes: $2"
+  run
+  assert_status 1 "$ST" "refused, in the tree: $1"
+  assert_not_contains "$OUT" "then stage" "  and the route is the step alone"
+}
+valid
+printf 'BOGUS=1\n' >"$R/setup/given.env"
+staged_route "a setup/given.env holding an unknown field" \
+  "run bin/ask setup, which drops it, then stage setup/given.env and setup/answers.env"
+valid
+(cd "$R" && bin/ask setup OWNER=acme TARGET_ROOT=/srv/targets >/dev/null)
+printf 'TARGET_ROOT=/srv/targets\nOWNER=acme\n' >"$R/setup/given.env"
+staged_route "a setup/given.env out of order" \
+  "run bin/ask setup, which sorts it, then stage setup/given.env and setup/answers.env"
+valid
+fixture_append "$R/setup/questionnaire.md" "A line added by hand."
+staged_route "a questionnaire edited by hand" \
+  "run bin/ask questionnaire, then stage setup/questionnaire.md"
+valid
+fixture_remove "$R/setup/questionnaire.md"
+staged_route "a missing questionnaire" \
+  "run bin/ask questionnaire to write it, then stage setup/questionnaire.md"
+valid
+fixture_remove "$R/setup/answers.env"
+staged_route "a missing setup file" \
+  "run bin/ask setup to write it, then stage setup/given.env and setup/answers.env"
+valid
+(cd "$R" && bin/ask setup TARGET_ROOT=/srv/targets >/dev/null)
+fixture_replace "$R/setup/answers.env" "OWNER=Okja-Engineering" "OWNER=acme"
+staged_route "a setup/answers.env edited by hand" \
+  "run bin/ask setup, then stage setup/given.env and setup/answers.env"
+valid
+(cd "$R" && bin/ask setup OWNER=acme >/dev/null)
+fixture_remove "$R/setup/given.env"
+staged_route "a setup/answers.env whose setup/given.env is gone" \
+  "give each field again with bin/ask setup FIELD=value..., then stage setup/given.env and setup/answers.env"
+
 assert_done

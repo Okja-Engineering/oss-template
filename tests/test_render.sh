@@ -1092,6 +1092,13 @@ assert_status 1 "$?" "refused: --replace --remove whose render.md cannot be read
 assert_contains "$OUT" "cannot read stages/02-render/output/widget/render.md" "  and the refusal says so"
 assert_eq "present present" "$(gone "$ROOT/widget/README.md") $(gone "$R/stages/02-render/output/widget/render.md")" \
   "  with the target and render.md left"
+# Without --remove, the record that cannot be read routes to the step that
+# works, removing render.md by hand, not moving away a target it does not
+# name (render's p25 c, NIT 1 of S2's fourth ship gate).
+OUT=$(cd "$R" && PATH="$SCRATCH/rec$n:$PATH" bin/render widget --replace 2>&1)
+assert_status 1 "$?" "refused: --replace whose render.md cannot be read"
+assert_contains "$OUT" "the operator may remove render.md by hand" "  naming the step that works"
+assert_not_contains "$OUT" "move that target away" "  and no step that does not"
 kept_target() { mkdir -p "$ROOT/widget/kept"; }
 failing ls '-A -- *' 1 kept_target
 assert_status 1 "$ST" "refused: the listing of a present target fails"
@@ -1104,6 +1111,25 @@ ready
 render widget
 printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$R/stages/02-render/output/widget/render.md"
 refused "--replace when render.md names no target" "render.md names no target" widget --replace
+# Its route is the step that works, removing render.md by hand (render's
+# p25 a, NIT 1 of S2's fourth ship gate); with --remove, the refusal names
+# the way out (p25 b, and answers' NIT 1).
+assert_contains "$OUT" "the operator may remove render.md by hand" "  naming the step that works"
+assert_not_contains "$OUT" "move that target away" "  and no step that does not"
+refused "--replace --remove when render.md names no target" \
+  "without --remove, bin/render widget --replace names the way" widget --replace --remove "$ROOT/widget"
+# One naming a target that cannot be told there routes to the search a
+# directory above it lacks, not to a step by hand (call Q6).
+if [ "$(id -u)" != 0 ]; then
+  mkdir -p "$SCRATCH/locked$n"
+  printf '%s\n' '# Render of widget' '' "target: $SCRATCH/locked$n/widget" >"$R/stages/02-render/output/widget/render.md"
+  chmod 000 "$SCRATCH/locked$n"
+  render widget --replace
+  chmod 755 "$SCRATCH/locked$n"
+  assert_status 1 "$ST" "refused: --replace when render.md names a target that cannot be told there"
+  assert_contains "$OUT" "give its owner search permission on the directories above it" "  naming the way out"
+  assert_not_contains "$OUT" "by hand" "  and no step by hand"
+fi
 # The record judged before render.md is removed, whatever the target's
 # state: one naming no target, its target moved away (removal M1 of S2's
 # third ship gate); one naming a present target that is not the run's,

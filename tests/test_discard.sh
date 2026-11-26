@@ -244,7 +244,8 @@ assert_contains "$out" "a working tree of this workspace" "  and the refusal say
 
 # --- discard_record: render.md's record, judged before anything removes it -----------------
 # recjudge: discard_record of the run widget, with the answers A and
-# render.md M, its output and status in OUT and ST.
+# render.md M, its output and status in OUT and ST: 1 for a present target
+# the discard may not take, 2 for a record naming no target it can judge.
 recjudge() { OUT=$(discard_record "$A" widget "$M"); ST=$?; }
 target
 recjudge
@@ -256,11 +257,11 @@ assert_status 0 "$ST" "a render.md naming the run's target, present"
 assert_eq "$T" "$OUT" "  prints it"
 printf '%s\n' '# Render of widget' '' 'fingerprint: x' >"$M"
 recjudge
-assert_status 1 "$ST" "refused: a render.md naming no target"
+assert_status 2 "$ST" "refused: a render.md naming no target"
 assert_contains "$OUT" "$M names no target" "  and the refusal says so"
 rm -rf "$T"
 recjudge
-assert_status 1 "$ST" "refused: a render.md naming no target, the target gone"
+assert_status 2 "$ST" "refused: a render.md naming no target, the target gone"
 target
 outside
 recorded "$O"
@@ -284,7 +285,7 @@ target
 recorded "$T"
 fixture_failing "$SCRATCH/rec$n" awk '*ENVIRON\["K"]*' 1 2
 OUT=$(PATH="$SCRATCH/rec$n:$PATH" && discard_record "$A" widget "$M")
-assert_status 1 "$?" "refused: a render.md whose record cannot be read"
+assert_status 2 "$?" "refused: a render.md whose record cannot be read"
 assert_contains "$OUT" "cannot read $M" "  and the refusal says so"
 # A record names a target only when its value is an absolute TARGET under
 # the path rule (removal N3 of S2's fourth ship gate), the target gone.
@@ -293,7 +294,7 @@ for value in '' nowhere "$SCRATCH/x/../widget"; do
   printf '%s\n' '# Render of widget' '' "target: $value" >"$M"
   rm -rf "$T"
   recjudge
-  assert_status 1 "$ST" "refused: a render.md whose target is \"$value\""
+  assert_status 2 "$ST" "refused: a render.md whose target is \"$value\""
   assert_contains "$OUT" "$M names no target" "  and the refusal says so"
   OUT=$(discard_check "$T" "$A" widget "$M")
   assert_status 1 "$?" "  and the discard refuses it too"
@@ -312,13 +313,14 @@ if [ "$(id -u)" != 0 ]; then
   chmod 000 "$ROOT"
   assert_eq "2 2" "$(there "$T") $(there "$ROOT/absent")" "  and under a directory that cannot be searched, cannot be told"
   # The record judge: a render.md, or the target it names, that cannot be
-  # told there, is refused, never judged absent.
+  # told there, is refused, never judged absent, with its own status, 3, as
+  # its way out is neither of the others' (call Q6 of S2's fourth ship gate).
   target
   recorded "$T"
   chmod 000 "$ROOT"
   recjudge
   chmod 755 "$ROOT"
-  assert_status 1 "$ST" "refused: a render.md naming a target that cannot be told there"
+  assert_status 3 "$ST" "refused: a render.md naming a target that cannot be told there"
   assert_contains "$OUT" "cannot tell whether $T is there" "  and the refusal says so"
   target
   mkdir -p "$SCRATCH/md$n"
@@ -329,7 +331,7 @@ if [ "$(id -u)" != 0 ]; then
   OUT2=$(discard_check "$T" "$A" widget "$M")
   ST2=$?
   chmod 755 "$SCRATCH/md$n"
-  assert_status 1 "$ST" "refused: a render.md that cannot be told there"
+  assert_status 3 "$ST" "refused: a render.md that cannot be told there"
   assert_contains "$OUT" "cannot tell whether $M is there" "  and the refusal says so"
   assert_status 1 "$ST2" "  and the discard refuses it too"
   assert_contains "$OUT2" "cannot tell whether $M is there" "  saying so"
