@@ -367,7 +367,7 @@ cmd_questionnaire() {
 
 cmd_run() {
   local name redo=0 remove="" have_remove=0 to=run arg fault field fields value
-  local out="" run_pairs override_pairs given_pairs setup_have setup_pairs outd rel render_md old_target="" target
+  local out="" run_pairs override_pairs given_pairs setup_have setup_given setup_pairs outd rel render_md old_target="" target
   local old_answers="" old_overrides="" old_given="" line
   local answers_text override_text given_text
   local -a run_args=() override_args=()
@@ -419,6 +419,27 @@ cmd_run() {
     *) refuse "cannot judge setup/answers.env:" "$fault" ;;
   esac
   setup_have=$(answers_read "$SETUP" setup/answers.env) || refuse "$setup_have"
+  # setup/answers.env is what bin/ask setup writes from setup/given.env, as
+  # bin/check setup holds it, with its words and route, so a run takes no
+  # setup value the operator did not give and setup did not work out
+  # (decision 229).
+  given "$SETUP_GIVEN" setup/given.env
+  setup_given=$GIVEN
+  value=$(answers_setup "$SCHEMA" "$setup_given")
+  case $? in
+    0) ;;
+    1) refuse "setup/given.env gives no setup/answers.env; correct it with bin/ask setup:" "$value" ;;
+    *) refuse "cannot work out what bin/ask setup writes:" "$value" ;;
+  esac
+  cmp -s - "$SETUP" <<<"$value"
+  case $? in
+    0) ;;
+    1)
+      ! present "$SETUP_GIVEN" || refuse "$(answers_setup_stale 1)"
+      refuse "$(answers_setup_stale 0)"
+      ;;
+    *) refuse "cannot compare setup/answers.env with what bin/ask setup writes" ;;
+  esac
   if [ -f "$outd/answers.env" ]; then
     [ "$redo" = 1 ] ||
       refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
@@ -473,7 +494,6 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
   # and the values before it, as bin/ask setup works it out, so an override
   # moves each default made from it (decision 229). Then the run fields,
   # each given or its default; then TARGET.
-  given "$SETUP_GIVEN" setup/given.env
   fields=$(answers_fields "$SCHEMA" setup) || refuse "cannot read the setup fields of shared/answers.tsv"
   setup_pairs=""
   while IFS= read -r field; do
@@ -482,7 +502,7 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
     case $? in
       0) ;;
       1)
-        answers_get - "$field" <<<"$GIVEN" >/dev/null
+        answers_get - "$field" <<<"$setup_given" >/dev/null
         case $? in
           0) ;;
           1) continue ;;

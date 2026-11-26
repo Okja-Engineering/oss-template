@@ -81,6 +81,13 @@
 #                                    GIVEN, setup/given.env's lines; else
 #                                    the faults out, exiting as
 #                                    answers_derive does
+#   answers_setup_stale HAVE_GIVEN   the refusal of a setup/answers.env
+#                                    other than answers_setup gives, naming
+#                                    the step that mends it and keeps what
+#                                    was given: HAVE_GIVEN 1 when
+#                                    setup/given.env is there, 0 when it is
+#                                    missing; bin/check setup's words and
+#                                    bin/ask run's (decision 229)
 #   answers_default SCHEMA FIELD PAIRS
 #                                    FIELD's default, each `{{OTHER}}` in it
 #                                    given OTHER's value in PAIRS, answers
@@ -643,6 +650,14 @@ answers_setup() {
     return "$st"
   fi
   [ -z "$out" ] || sort <<<"$out"
+}
+
+answers_setup_stale() {
+  if [ "$1" = 1 ]; then
+    printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup'
+  else
+    printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is missing, so bin/ask setup would set each field to its default: restore setup/given.env, or give each field again with bin/ask setup FIELD=value...'
+  fi
 }
 
 answers_default() {

@@ -150,11 +150,11 @@ if get setup/answers.env "$tmp/answers"; then
           esac
         fi
         if [ "$have_given" = 1 ]; then
-          printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup%s\n' "$(then_stage "$setup_writes")"
+          printf '%s%s\n' "$(answers_setup_stale 1)" "$(then_stage "$setup_writes")"
         elif [ "$unstaged" = 1 ]; then
           printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is not staged; stage it with setup/answers.env\n'
         else
-          printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is missing, so bin/ask setup would set each field to its default: restore setup/given.env, or give each field again with bin/ask setup FIELD=value...%s\n' "$(then_stage "$setup_writes")"
+          printf '%s%s\n' "$(answers_setup_stale 0)" "$(then_stage "$setup_writes")"
         fi
         ;;
       *) exit 2 ;;
