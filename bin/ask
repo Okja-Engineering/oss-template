@@ -557,13 +557,6 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
     fault=$(discard_check "$remove" "$outd/answers.env" "$name" "$render_md") ||
       refuse "$fault; without --remove, bin/ask run $name --redo names the way"
   fi
-  # The new target is judged before the old one is routed, so a route is
-  # never followed only to be refused for a target it did not name; one that
-  # is the old target is the old one's to route.
-  if present "$target" && [ "$target" != "$old_target" ] &&
-    { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
-    refuse "the target $target is present, and this run may not remove it; it is left alone: the operator may move it away by hand, or give another TARGET_ROOT, then run the command again"
-  fi
   if [ "$have_remove" = 0 ] && [ "$redo" = 1 ]; then
     fault=$(discard_record "$outd/answers.env" "$name" "$render_md")
     case $? in
@@ -572,6 +565,15 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
       2) refuse "a redo may not remove render.md: $fault; it is left alone, as no target it names can be judged: the operator may remove render.md by hand, once the run's target ${old_target:-$target} is dealt with if it is there, then run the redo again" ;;
       *) refuse "a redo may not remove render.md: $fault; it is left alone: the operator may give its owner search permission on the directories above it, then run the redo again" ;;
     esac
+  fi
+  # The new target is judged before the old one is routed, so a route is
+  # never followed only to be refused for a target it did not name; one that
+  # is the old target is the old one's to route.
+  if present "$target" && [ "$target" != "$old_target" ] &&
+    { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
+    refuse "the target $target is present, and this run may not remove it; it is left alone: the operator may move it away by hand, or give another TARGET_ROOT, then run the command again"
+  fi
+  if [ "$have_remove" = 0 ] && [ "$redo" = 1 ]; then
     if present "$old_target"; then
       fault=$(discard_check "$old_target" "$outd/answers.env" "$name" "$render_md") ||
         refuse "the target $old_target is present, and a redo may not remove it: $fault; it is left alone: the operator may move it away by hand, then run the redo again"
