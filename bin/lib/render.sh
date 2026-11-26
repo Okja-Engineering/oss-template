@@ -18,18 +18,21 @@
 #       selects nothing (no value of the field is VALUE); a selecting field
 #       with no variant for its value; a selected PATH from anything but
 #       its variants, as a plain PATH or PATH.tmpl; two sources for one
-#       path; a submodule; and, before anything is written, a path holding
-#       anything but ASCII letters, digits, ., _, -, / and space (decision
-#       224), and two paths or directories that differ only in ASCII case,
-#       which a disk that folds case holds as one. One line out per refusal; exit 0, 1 on a
-#       refusal, 2 when
-#       COMMIT cannot be read or OUT written. Sets RENDER_LIST to the
-#       produced paths, sorted, one a line.
+#       path; a submodule; a name it would produce that is not a final
+#       component, as foundation/.tmpl and foundation/sub/.tmpl give, or
+#       holds a .git component in any case, as foundation/.GIT.tmpl gives;
+#       and, before anything is written, a path holding anything but ASCII
+#       letters, digits, ., _, -, / and space (decision 224), and two paths
+#       or directories that differ only in ASCII case, which a disk that
+#       folds case holds as one, so each name it produces, a foundation path
+#       less its .tmpl or a selected path, passes both. One line out per
+#       refusal; exit 0, 1 on a refusal, 2 when COMMIT cannot be read or OUT
+#       written. Sets RENDER_LIST to the produced paths, sorted, one a line.
 #   render_walk TARGET LIST
 #       the walk, with no git: every non-directory under TARGET, listed
 #       without following symbolic links, NUL-delimited, sorted with
-#       duplicates kept, equals LIST; an entry named .git, of any kind, at
-#       the top level or nested, a name holding a newline, and a directory
+#       duplicates kept, equals LIST; an entry named .git in any case, of
+#       any kind, at the top level or nested, a name holding a newline, and a directory
 #       that is not the parent of a listed path are refused. One line out
 #       per refusal; exit 0 or 1.
 #   render_fingerprint TARGET LIST
@@ -109,6 +112,28 @@ render_tree() {
       *.tmpl)
         name=${name%.tmpl}
         tmpl=1
+        ;;
+    esac
+    # Every name it produces is a final component that is not empty, and
+    # none of its components is .git in any case, which a disk that folds
+    # case would open as one (decision 224).
+    case "$name" in
+      '' | */)
+        printf 'foundation/%s: renders no name, an empty final component\n' "$rel"
+        refused=1
+        continue
+        ;;
+    esac
+    v=$(tr '[:upper:]' '[:lower:]' <<<"$name") || {
+      printf 'cannot fold the case of %s\n' "$name"
+      refused=2
+      break
+    }
+    case "/$v/" in
+      */.git/*)
+        printf 'foundation/%s: renders %s, an entry named .git\n' "$rel" "$name"
+        refused=1
+        continue
         ;;
     esac
     # A variant: PATH.VALUE, for a PATH a field selects.
@@ -357,7 +382,7 @@ render__substitute() {
 render_walk() {
   local target=$1 list=$2 p refused=0 tmp
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || return 1
-  if ! render__entries "$target" G -name .git >"$tmp/git" ||
+  if ! render__entries "$target" G -iname .git >"$tmp/git" ||
     ! render__entries "$target" F ! -type d >"$tmp/found" ||
     ! render__entries "$target" D -type d >"$tmp/dirs"; then
     printf 'the walk cannot list the target %s\n' "$target"

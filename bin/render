@@ -33,12 +33,15 @@
 # and renames the staging directory to the target and the temporary file to
 # render.md; an empty target so removed is not put back if a rename then
 # fails. A failure or a signal removes only what this run made: its private
-# directory, which holds every temporary file, the staging directory, the
-# temporary file, and the target when this run's rename put it there. A
+# directory, made under TMPDIR, absolute, which holds every temporary file
+# but render.md's, the libraries' included; the staging directory; the
+# temporary file beside render.md; and the target when this run's rename
+# put it there. A
 # kill no trap sees (SIGKILL) leaves its staging directory, which the run's
 # next render, or its next --redo, removes, and its private directory and
 # render.md's temporary file, which nothing reads.
-# Exit 0 when done, 1 on a refusal, 2 on a usage error.
+# Exit 0 when done, a last line that cannot be written included, 1 on a
+# refusal, 2 on a usage error.
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -108,8 +111,15 @@ cleanup() {
   [ -z "$work" ] || rm -rf -- "$work"
 }
 trap cleanup EXIT
+# The private directory, made under TMPDIR made absolute, so it stays the
+# same directory once render enters the workspace.
+tmpdir=${TMPDIR:-/tmp}
+case "$tmpdir" in
+  /*) ;;
+  *) tmpdir=$PWD/$tmpdir ;;
+esac
 discard_hold
-work=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || refuse "cannot make a temporary directory"
+work=$(mktemp -d "$tmpdir/render.XXXXXX") || refuse "cannot make a temporary directory"
 discard_traps
 TMPDIR=$work
 export TMPDIR
@@ -261,4 +271,6 @@ fi
 placed=$target stage=""
 mv -f -- "$tmp" "$render_md" || refuse "cannot write $render_md"
 placed="" tmp=""
-printf 'bin/render: rendered %s into %s, fingerprint %s\n' "$name" "$target" "$fp"
+# The render is done: a line that cannot be written does not make it a
+# refusal.
+printf 'bin/render: rendered %s into %s, fingerprint %s\n' "$name" "$target" "$fp" || true
