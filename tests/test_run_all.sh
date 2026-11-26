@@ -129,6 +129,24 @@ ok 1 - a ends after b
 # 1 assertions, 0 failed
 PASS $D/test_a.sh" "$(block "$out" "$D/test_a.sh")" "  each suite's output whole, under its own name"
 
+# --- each suite runs once, whatever mkdir(1) does in a race --------------------------------
+# Two callers racing to make one directory need not see one of them refused
+# by mkdir(1): Ubuntu 26.04's, uutils coreutils 0.10, lets both succeed most
+# times. A mkdir that never refuses stands in for that race.
+D="$SCRATCH/once"
+mkdir -p "$D" "$SCRATCH/lax"
+export ONCE_LOG="$SCRATCH/once.log"
+for s in a b c; do
+  suite "$D/test_$s.sh" "echo $s >>\"\$ONCE_LOG\"" 'assert_eq x x "ran"' 'assert_done'
+done
+printf '#!/bin/sh\nexec %s -p "$@"\n' "$(command -v mkdir)" >"$SCRATCH/lax/mkdir"
+chmod +x "$SCRATCH/lax/mkdir"
+out=$(PATH="$SCRATCH/lax:$PATH" RUN_ALL_JOBS=3 bash "$RUN_ALL" "$D" 2>&1)
+assert_status 0 "$?" "suites side by side, under a mkdir that never refuses, pass"
+assert_eq "a
+b
+c" "$(sort "$ONCE_LOG" 2>/dev/null)" "  each run once"
+
 # --- a suite that ends without its plan, or cannot be started -----------------------------
 D="$SCRATCH/noplan"
 mkdir -p "$D"
