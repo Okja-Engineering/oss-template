@@ -9,6 +9,7 @@
 # usage: . tests/fixtures/workspace.sh; ws_fixture DIR [CHECK...]
 #        ws_real_check DIR NAME   (the workspace's own bin/checks/NAME)
 #        ws_copy FROM DIR         (a built fixture, copied)
+#        entry_ignored SIGNAL     (SIGNAL was ignored when the suite began)
 
 WS_ROOT=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source-path=SCRIPTDIR source=../../foundation/tests/lib/fixture.sh
@@ -38,6 +39,13 @@ ws_fixture() {
   git -C "$dir" remote add origin "$dir-origin.git" || return 1
   git -C "$dir" push -q -u origin main 2>/dev/null || return 1
 }
+
+# entry_ignored SIGNAL: SIGNAL was ignored when the suite began, so no shell
+# it starts can trap it (POSIX), as in a background job without job
+# control, which ignores INT and QUIT, or under nohup, which ignores HUP. A
+# case that sends it is skipped then, saying so (the tests lens's T2 of S2's
+# fourth ship gate).
+entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive ]; }
 
 # ws_copy FROM DIR: a copy of the fixture workspace FROM, and of its bare
 # remote, at DIR and DIR-origin.git, DIR's origin being its own copy. A suite

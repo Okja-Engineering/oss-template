@@ -810,17 +810,22 @@ if [ "$(id -u)" != 0 ]; then
 fi
 # A signal removes what the run made: a redo signalled while it clears its
 # 03 outputs ends by the signal, leaving no temporary file beside the files
-# it writes.
-rendered
-mkdir -p "$SCRATCH/stub$n"
-printf '#!/bin/sh\ncase "$*" in *03-verify*) kill -s TERM "$(cat "%s")" ;; esac\nexec %s "$@"\n' \
-  "$SCRATCH/pid$n" "$(command -v rm)" >"$SCRATCH/stub$n/rm"
-chmod +x "$SCRATCH/stub$n/rm"
-OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" sh -c 'echo "$$" >"$1" && shift && exec bin/ask "$@"' sh "$SCRATCH/pid$n" \
-  run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
-ST=$?
-assert_status 143 "$ST" "a redo signalled during its removals ends by the signal"
-assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  and leaves no temporary file"
+# it writes. A TERM ignored when the suite began, which ask cannot trap,
+# skips it (entry_ignored).
+if entry_ignored TERM; then
+  assert_pass "skipped: SIGTERM was ignored when the suite began, so ask cannot trap it"
+else
+  rendered
+  mkdir -p "$SCRATCH/stub$n"
+  printf '#!/bin/sh\ncase "$*" in *03-verify*) kill -s TERM "$(cat "%s")" ;; esac\nexec %s "$@"\n' \
+    "$SCRATCH/pid$n" "$(command -v rm)" >"$SCRATCH/stub$n/rm"
+  chmod +x "$SCRATCH/stub$n/rm"
+  OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" sh -c 'echo "$$" >"$1" && shift && exec bin/ask "$@"' sh "$SCRATCH/pid$n" \
+    run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+  ST=$?
+  assert_status 143 "$ST" "a redo signalled during its removals ends by the signal"
+  assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  and leaves no temporary file"
+fi
 # In any shell mode (render R1 of S2's fourth ship gate): with POSIXLY_CORRECT
 # set, where kill -l prints bare names, each command runs to the outcome it
 # has without it, a redo --remove and a refusal included.
@@ -893,18 +898,23 @@ assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with the target as it w
 rm -f "$OUTD"/answers.env.tmp.*
 assert_eq "$before" "$(run_state)" "  and the run's files as they were"
 # A signal while the staged files are renamed into place is held off, so
-# each file is the old one or the new, together.
-ready
-ask run widget 'TITLE=A' 'DESCRIPTION=B'
-mkdir -p "$SCRATCH/mvstub$n"
-printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
-  "$(command -v mv)" >"$SCRATCH/mvstub$n/mv"
-chmod +x "$SCRATCH/mvstub$n/mv"
-OUT=$(cd "$R" && PATH="$SCRATCH/mvstub$n:$PATH" bin/ask run widget --redo 'TITLE=C' 2>&1)
-assert_status 0 "$?" "a TERM while a redo renames its files into place is held off"
-assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  and the answers file is the new one"
-assert_contains "$(cat "$OUTD/given.env")" "TITLE=C" "  as given.env is"
-assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
+# each file is the old one or the new, together; with TERM ignored when the
+# suite began, the case would pass without the hold, so it is skipped.
+if entry_ignored TERM; then
+  assert_pass "skipped: SIGTERM was ignored when the suite began, so the hold cannot be told"
+else
+  ready
+  ask run widget 'TITLE=A' 'DESCRIPTION=B'
+  mkdir -p "$SCRATCH/mvstub$n"
+  printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" >"$SCRATCH/mvstub$n/mv"
+  chmod +x "$SCRATCH/mvstub$n/mv"
+  OUT=$(cd "$R" && PATH="$SCRATCH/mvstub$n:$PATH" bin/ask run widget --redo 'TITLE=C' 2>&1)
+  assert_status 0 "$?" "a TERM while a redo renames its files into place is held off"
+  assert_eq "TITLE=C" "$(grep '^TITLE=' "$ANS")" "  and the answers file is the new one"
+  assert_contains "$(cat "$OUTD/given.env")" "TITLE=C" "  as given.env is"
+  assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
+fi
 # A given file names each field once.
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'

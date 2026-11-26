@@ -411,21 +411,26 @@ assert_contains "$OUT" "cannot fingerprint" "  and the refusal says why"
 assert_eq "present" "$(gone "$ROOT/widget")" "  and the empty target it found is left"
 assert_eq "" "$(entries "$ROOT/widget")" "  holding nothing"
 assert_eq "widget " "$(left)" "  and nothing else is left, no render.md, no staging directory"
-# An interrupt during the fingerprint removes all this run made.
-ready
-gitstub ": >\"$SCRATCH/at$n\"; while [ ! -e \"$SCRATCH/go$n\" ]; do sleep 1; done; exit 1"
-set -m
-(cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" exec bin/render widget >"$SCRATCH/out$n" 2>&1) &
-pid=$!
-set +m
-i=0
-while [ ! -e "$SCRATCH/at$n" ] && [ "$i" -lt 600 ]; do sleep 1 && i=$((i + 1)); done
-kill -INT "$pid"
-: >"$SCRATCH/go$n"
-wait "$pid"
-assert_status 130 "$?" "an interrupt during the fingerprint ends render with 130"
-assert_eq "gone" "$(gone "$ROOT/widget")" "  and leaves no target"
-assert_eq "" "$(left)" "  nor a staging directory, render.md or temporary file"
+# An interrupt during the fingerprint removes all this run made; an INT
+# ignored when the suite began, which render cannot trap, skips it.
+if entry_ignored INT; then
+  assert_pass "skipped: SIGINT was ignored when the suite began, so render cannot trap it"
+else
+  ready
+  gitstub ": >\"$SCRATCH/at$n\"; while [ ! -e \"$SCRATCH/go$n\" ]; do sleep 1; done; exit 1"
+  set -m
+  (cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" exec bin/render widget >"$SCRATCH/out$n" 2>&1) &
+  pid=$!
+  set +m
+  i=0
+  while [ ! -e "$SCRATCH/at$n" ] && [ "$i" -lt 600 ]; do sleep 1 && i=$((i + 1)); done
+  kill -INT "$pid"
+  : >"$SCRATCH/go$n"
+  wait "$pid"
+  assert_status 130 "$?" "an interrupt during the fingerprint ends render with 130"
+  assert_eq "gone" "$(gone "$ROOT/widget")" "  and leaves no target"
+  assert_eq "" "$(left)" "  nor a staging directory, render.md or temporary file"
+fi
 # --replace whose write then fails leaves the run unrendered, not a record
 # naming a target that is gone.
 ready
@@ -629,9 +634,7 @@ signalled() { # TARGET SIGNAL ARGS...: TARGET is "render" or "group"
   ST=$?
 }
 # A signal ignored when the suite began cannot be trapped by any shell it
-# starts (POSIX), as in a background job, which ignores INT and QUIT: such a
-# case is skipped, saying so.
-entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive ]; }
+# starts (POSIX): such a case is skipped, saying so (entry_ignored).
 # A signal render traps, sent to render alone while it waits on its copy,
 # a direct child, ends render by that signal's status, once the copy is
 # done, with nothing it made left. One trap serves every signal of
