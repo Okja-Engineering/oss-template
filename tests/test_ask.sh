@@ -765,6 +765,16 @@ ask run widget --redo --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
 assert_status 0 "$ST" "a redo that moves TARGET_ROOT"
 assert_eq "gone" "$(gone "$ROOT/.widget.render.4242")" "  removes a killed render's staging directory under the old one"
 assert_eq "present" "$(gone "$ROOT/.widget.render.x1")" "  and nothing else there"
+# One the removal helper cannot remove is refused, naming it (removal M6's
+# a10 of S2's third ship gate).
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+mkdir -p "$ROOT/.widget.render.4242" "$SCRATCH/moved$n" "$SCRATCH/rmstub$n"
+printf '#!/bin/sh\ncase "$*" in *.widget.render.4242*) exit 0 ;; esac\nexec %s "$@"\n' "$(command -v rm)" >"$SCRATCH/rmstub$n/rm"
+chmod +x "$SCRATCH/rmstub$n/rm"
+OUT=$(cd "$R" && PATH="$SCRATCH/rmstub$n:$PATH" bin/ask run widget --redo --setup-override "TARGET_ROOT=$SCRATCH/moved$n" 2>&1)
+assert_status 1 "$?" "refused: a redo whose old staging directory cannot be removed"
+assert_contains "$OUT" "could not remove $ROOT/.widget.render.4242" "  naming it"
 # The answers file is staged before anything is removed, too: an entry in
 # the way of its temporary file alone, whose name is bin/ask's PID, refuses
 # a redo with the target and the run's files as they were.
