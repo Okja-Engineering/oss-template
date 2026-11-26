@@ -610,4 +610,15 @@ printf 'TITLE=$Id: kept $\n' >"$SCRATCH/attr/answers.env"
 assert_eq "$(printf 'TITLE=$Id: kept $\n' | git hash-object -t blob --no-filters --stdin)" \
   "$(cd "$SCRATCH/attr" && answers_blob answers.env)" "answers_blob is the id of the bytes, under an ident attribute"
 
+# The root rule is the target rule's: a TARGET_ROOT at or under a working
+# tree of the workspace these libraries are sourced from gives no target
+# (decision 227), and one whose worktrees cannot be listed is not judged.
+WSD=$(CDPATH='' cd -- "$TEST_DIR/.." && pwd)
+out=$(answers_target_for "$WSD/stages" widget 2>&1)
+assert_status 1 "$?" "refused: a TARGET_ROOT inside the workspace"
+assert_contains "$out" "is at or under $WSD, a working tree of this workspace" "  and the refusal says so"
+under git '*worktree list*' 1 answers_target_for /srv/targets widget
+assert_status 2 "$ST" "a TARGET_ROOT whose workspace's worktrees cannot be listed is not judged"
+assert_contains "$OUT" "cannot list the workspace's worktrees" "  and says so"
+
 assert_done

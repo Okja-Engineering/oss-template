@@ -192,6 +192,15 @@ out=$(PATH="$SCRATCH/stub$n:$PATH" discard_remove "$T")
 assert_status 1 "$?" "refused: a removal that leaves the path"
 assert_eq "could not remove $T; remove it, then run the command again" "$out" "  naming it"
 
+# --- the root rule: no path in a working tree of the workspace (decision 227) ---------------
+# The workspace is the one these libraries are sourced from.
+target
+WSD=$(CDPATH='' cd -- "$TEST_DIR/.." && pwd)
+answers "$WSD/stages/01-ask/output" "$WSD/stages/01-ask/output/widget"
+out=$(discard_check "$WSD/stages/01-ask/output/widget" "$A" widget "$M")
+assert_status 1 "$?" "refused: the run's target derived under a TARGET_ROOT inside the workspace"
+assert_contains "$out" "a working tree of this workspace" "  and the refusal says so"
+
 # --- discard_record: render.md's record, judged before anything removes it -----------------
 # recjudge: discard_record of the run widget, with the answers A and
 # render.md M, its output and status in OUT and ST.

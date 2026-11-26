@@ -1090,19 +1090,31 @@ confirmed widget
 refused "a file and a template for the same path" "foundation/doc.md.tmpl: a second source for doc.md" widget
 
 # --- TARGET_ROOT outside every working tree of the workspace ----------------------------------
+# The root rule is the one target rule's (decision 227): bin/ask run
+# refuses such a root before it writes the answers, and render refuses
+# answers edited by hand to one, confirmed again.
 # outside_refused DESCRIPTION NEEDLE ROOT [DIR]: a run whose TARGET_ROOT is
-# ROOT, asked and rendered from the workspace DIR (R by default), is
-# refused before anything is written.
+# ROOT, asked from the workspace DIR (R by default), is refused before
+# anything is written.
 outside_refused() {
   local what=$1 needle=$2 troot=$3 dir=${4:-$R}
-  (cd "$dir" && bin/ask run widget 'DESCRIPTION=One line' --setup-override "TARGET_ROOT=$troot" >/dev/null 2>&1 &&
-    bin/ask confirm widget --by 'A Person' >/dev/null 2>&1)
-  OUT=$(cd "$dir" && bin/render widget 2>&1)
+  OUT=$(cd "$dir" && bin/ask run widget 'DESCRIPTION=One line' --setup-override "TARGET_ROOT=$troot" 2>&1)
   ST=$?
   assert_status 1 "$ST" "refused: a TARGET_ROOT $what"
   assert_contains "$OUT" "$needle" "  and the refusal says: $needle"
-  assert_eq "gone" "$(gone "$troot/widget")" "  and nothing is written"
+  assert_eq "gone gone" "$(gone "$troot/widget") $(gone "$dir/stages/01-ask/output/widget/answers.env")" \
+    "  and nothing is written"
 }
+ready
+A="$R/stages/01-ask/output/widget/answers.env"
+sed -e "s|^TARGET_ROOT=.*|TARGET_ROOT=$R/inside|" -e "s|^TARGET=.*|TARGET=$R/inside/widget|" "$A" >"$SCRATCH/ans$n"
+mv "$SCRATCH/ans$n" "$A"
+printf '%s\n' '# Confirmed: widget' '' 'by: A Person' 'at: 2026-01-01T00:00:00Z' \
+  "answers: $(git hash-object -t blob --no-filters --stdin <"$A")" >"$R/stages/01-ask/output/widget/confirmed.md"
+render widget
+assert_status 1 "$ST" "refused: render of answers edited by hand to a TARGET_ROOT inside the workspace"
+assert_contains "$OUT" "under $R, a working tree" "  and the refusal says so"
+assert_eq "gone" "$(gone "$R/inside")" "  and nothing is written"
 fresh
 outside_refused "inside the workspace, as <ws>/<absent>" "under $R, a working tree" "$R/absent/deeper"
 assert_eq "gone" "$(gone "$R/absent")" "  not even TARGET_ROOT"

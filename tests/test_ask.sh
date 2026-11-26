@@ -1059,6 +1059,32 @@ mkdir -p "$ROOT/other"
 rrefused "--remove naming another path, the target present" "remove $ROOT/other: it is not the run's target $ROOT/widget" \
   run widget --redo --remove "$ROOT/other" 'TITLE=C' 'DESCRIPTION=D'
 
+# --- TARGET_ROOT outside every working tree of the workspace (decision 227) ---------------
+# The root rule is the one target rule's: setup, run, confirm and the
+# discard each refuse a TARGET_ROOT at or under the workspace, so no route
+# removes the run's own folder (removal M3's q04 of S2's third ship gate).
+INSIDE="a working tree of this workspace"
+ready
+refused "setup naming a TARGET_ROOT inside the workspace" "$INSIDE" setup "TARGET_ROOT=$R/stages/01-ask/output"
+ready
+rrefused "a run overriding TARGET_ROOT to inside the workspace" "$INSIDE" \
+  run widget 'TITLE=A' 'DESCRIPTION=B' --setup-override "TARGET_ROOT=$R/stages/01-ask/output"
+ready
+sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$R/stages/01-ask/output|" "$R/setup/answers.env" >"$SCRATCH/setup$n"
+mv "$SCRATCH/setup$n" "$R/setup/answers.env"
+rrefused "a run under a setup/answers.env edited by hand to a TARGET_ROOT inside the workspace" "$INSIDE" \
+  run widget 'TITLE=A' 'DESCRIPTION=B'
+# q04: the run's answers edited by hand to a TARGET_ROOT holding the run's
+# own folder, then confirm, and the --remove route to that folder.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+sed -e "s|^TARGET_ROOT=.*|TARGET_ROOT=$R/stages/01-ask/output|" -e "s|^TARGET=.*|TARGET=$OUTD|" "$ANS" >"$SCRATCH/ans$n"
+mv "$SCRATCH/ans$n" "$ANS"
+rrefused "confirm of answers whose TARGET_ROOT is inside the workspace" "$INSIDE" confirm widget --by 'A Person'
+rrefused "a redo --remove naming the run's own folder" "$INSIDE" \
+  run widget --redo --remove "$OUTD" 'TITLE=C' 'DESCRIPTION=D'
+assert_eq "present" "$(gone "$ANS")" "  and the run's folder is left"
+
 # --- each file bin/ask writes is absent or a regular file (decision 230) ------------------
 # A directory, a link to a directory or a dangling link where bin/ask would
 # write a file is refused before anything is staged or removed, and left as
