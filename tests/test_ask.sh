@@ -1538,16 +1538,20 @@ asked cat '*/setup/answers.env' 2 run widget 'TITLE=A' 'DESCRIPTION=B'
 assert_status 1 "$ST" "refused: run whose read of setup/answers.env fails"
 assert_contains "$OUT" "setup/answers.env: cannot read the file" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
-ready
-ask run widget 'TITLE=A' 'DESCRIPTION=B'
-before=$(run_state)
-chmod 000 "$ANS"
-ask run widget --redo 'TITLE=C'
-st=$ST
-chmod 644 "$ANS"
-assert_status 1 "$st" "refused: a redo whose old answers file cannot be read"
-assert_contains "$OUT" "stages/01-ask/output/widget/answers.env: cannot read the file" "  and the refusal says so"
-assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+# A denied read relies on a user the permission binds, so it skips under
+# root, as its siblings do (the tests lens's T4 of S2's fourth ship gate).
+if [ "$(id -u)" != 0 ]; then
+  ready
+  ask run widget 'TITLE=A' 'DESCRIPTION=B'
+  before=$(run_state)
+  chmod 000 "$ANS"
+  ask run widget --redo 'TITLE=C'
+  st=$ST
+  chmod 644 "$ANS"
+  assert_status 1 "$st" "refused: a redo whose old answers file cannot be read"
+  assert_contains "$OUT" "stages/01-ask/output/widget/answers.env: cannot read the file" "  and the refusal says so"
+  assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+fi
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
 sed '/^TARGET_ROOT=/d' "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
