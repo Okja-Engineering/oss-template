@@ -72,10 +72,10 @@ discard_leftovers() {
 }
 
 discard_target() {
+  # The check refuses a link, and the removal of a path already gone is
+  # nothing to do, so the path checked is removed as it stands.
   discard_check "$@" || return 1
-  if [ -e "$1" ] || [ -L "$1" ]; then
-    discard_remove "$1"
-  fi
+  discard_remove "$1"
 }
 
 discard_check() {
