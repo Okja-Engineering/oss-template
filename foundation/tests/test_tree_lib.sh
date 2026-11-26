@@ -197,7 +197,7 @@ for src in index commit:HEAD; do
   # The look for the path failing, git's 128, is a failed read, never a
   # path the tree lacks; a path the tree lacks is still 1.
   rm -rf "$SCRATCH/gitstub"
-  fixture_failing "$SCRATCH/gitstub" git '*cat-file -t *:CLAUDE.md' 1 128
+  fixture_failing "$SCRATCH/gitstub" git '*ls-tree * -- CLAUDE.md' 1 128
   (cd "$O" && PATH="$SCRATCH/gitstub:$PATH" && tree_cat "$src" CLAUDE.md >/dev/null)
   assert_status 2 "$?" "$src: a path whose type git cannot read fails the read"
   (cd "$O" && tree_cat "$src" no-such-file.md >/dev/null)
@@ -208,6 +208,24 @@ done
 fixture_failing "$SCRATCH/grepstub" grep '-Fxq -e CLAUDE.md' 1 2
 (cd "$O" && PATH="$SCRATCH/grepstub:$PATH" && tree_cat worktree CLAUDE.md >/dev/null)
 assert_status 2 "$?" "worktree: a look for the path that fails fails the read"
+
+# A tree object on the path that cannot be read is a failed read (2), never
+# a path the tree lacks (1): git rev-parse exits 1 for both (render R3 of
+# S2's fourth ship gate). A path the tree lacks, read whole, is still 1.
+C="$SCRATCH/corrupt"
+fixture_repo "$C"
+fixture_write "$C/dir/file" "x"
+fixture_write "$C/top" "y"
+fixture_commit "$C" "test: a tree with a subtree"
+sub=$(git -C "$C" rev-parse HEAD:dir)
+rm -f "$C/.git/objects/${sub:0:2}/${sub:2}"
+(cd "$C" && tree_cat commit:HEAD dir/file >/dev/null 2>&1)
+assert_status 2 "$?" "commit: a path under a tree object that cannot be read fails the read"
+(cd "$C" && tree_cat commit:HEAD dir/absent >/dev/null 2>&1)
+assert_status 2 "$?" "  and so does a path it may or may not hold"
+(cd "$C" && tree_cat commit:HEAD absent >/dev/null 2>&1)
+assert_status 1 "$?" "  and a path the trees read whole lack is not held"
+assert_eq "y" "$(content_of "$C" commit:HEAD top)" "  and one they hold is read"
 
 # A path no listing line can hold (a newline) fails every source alike.
 N="$SCRATCH/newline"
