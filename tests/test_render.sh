@@ -635,9 +635,10 @@ entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive
 # A signal render traps, sent to render alone while it waits on its copy,
 # a direct child, ends render by that signal's status, once the copy is
 # done, with nothing it made left. One trap serves every signal of
-# DISCARD_SIGNALS, each of which the renames case below sends, so three
-# stand for them: INT, which a background job ignores, and two others.
-for sig in HUP INT TERM; do
+# DISCARD_SIGNALS, each of which the renames case below sends, so four
+# stand for them: INT, which a background job ignores, PROF, which a list
+# by hand left out (render N1 of S2's third ship gate), and two others.
+for sig in HUP INT TERM PROF; do
   if entry_ignored "$sig"; then
     assert_pass "skipped: SIG$sig was ignored when the suite began, so render cannot trap it"
     continue
@@ -662,6 +663,22 @@ else
   assert_eq "" "$(left)" "  leaving nothing beside the target"
   assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  and nothing in TMPDIR, the fingerprint's repository included"
 fi
+# A second signal while cleanup runs is held off, so cleanup finishes:
+# TERM during the copy, then TERM again as cleanup removes the staging
+# directory (render's NIT of S2's third ship gate).
+if entry_ignored TERM; then
+  assert_pass "skipped: SIGTERM was ignored when the suite began, so render cannot trap it"
+else
+  ready
+  waitstub cp '-Rp *'
+  printf '#!/bin/sh\ncase "$*" in *.widget.render.*) kill -s TERM "$(ps -o ppid= -p "$PPID" | tr -d " ")" ;; esac\nexec %s "$@"\n' \
+    "$(command -v rm)" >"$SCRATCH/wstub$n/rm"
+  chmod +x "$SCRATCH/wstub$n/rm"
+  signalled render TERM widget
+  assert_status 143 "$ST" "a second signal during cleanup"
+  assert_eq "" "$(left)" "  leaves cleanup to finish: no target, staging directory, render.md or temporary file"
+  assert_eq "" "$(entries "$SCRATCH/tmpdir$n")" "  and nothing in TMPDIR"
+fi
 # A signal while render makes its staging directory is held off until the
 # directory is recorded for cleanup, so it is never left behind.
 ready
@@ -675,8 +692,20 @@ assert_eq "" "$(entries "$ROOT" | grep '^\.widget\.render\.')" "a signal while r
 # Every signal render traps is held off during the renames: each sent in
 # turn, in one render, any not held would end it.
 ready
+# The set is worked out here as discard.sh states it: every signal kill -l
+# lists but those whose default action never ends a process.
 kills=""
-for sig in HUP INT QUIT TERM PIPE USR1 USR2 ALRM XFSZ VTALRM; do kills="$kills kill -s $sig \"\$PPID\";"; done
+for w in $(kill -l); do
+  case "$w" in
+    *')') num=${w%')'} ;;
+    SIG*)
+      case "${w#SIG}" in
+        CHLD | CLD | CONT | STOP | TSTP | TTIN | TTOU | URG | WINCH | INFO | KILL) ;;
+        *) kills="$kills kill -$num \"\$PPID\";" ;;
+      esac
+      ;;
+  esac
+done
 mvstub "  *.widget.render.*)$kills ;;"
 mvstubbed widget
 assert_status 0 "$ST" "every signal render traps, sent during the renames, is held off"

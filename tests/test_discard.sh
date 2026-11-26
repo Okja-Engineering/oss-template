@@ -192,6 +192,20 @@ out=$(PATH="$SCRATCH/stub$n:$PATH" discard_remove "$T")
 assert_status 1 "$?" "refused: a removal that leaves the path"
 assert_eq "could not remove $T; remove it, then run the command again" "$out" "  naming it"
 
+# --- the signals a run holds and traps (decision 226) -------------------------------------
+# Every signal kill -l lists whose default action ends a process, worked
+# out at run time; none whose default action does not (render N1 of S2's
+# third ship gate). DISCARD_SIGNALS holds their numbers.
+for s in HUP INT QUIT TERM PIPE ALRM USR1 USR2 XFSZ VTALRM PROF XCPU ABRT SYS TRAP BUS FPE ILL SEGV; do
+  assert_contains " $DISCARD_SIGNALS " " $(kill -l "$s") " "DISCARD_SIGNALS holds SIG$s"
+done
+for s in CHLD CONT STOP TSTP TTIN TTOU URG WINCH KILL; do
+  assert_not_contains " $DISCARD_SIGNALS " " $(kill -l "$s") " "DISCARD_SIGNALS does not hold SIG$s"
+done
+if kill -l RTMIN >/dev/null 2>&1; then
+  assert_contains " $DISCARD_SIGNALS " " $(kill -l RTMIN) " "DISCARD_SIGNALS holds the first real-time signal"
+fi
+
 # --- the root rule: no path in a working tree of the workspace (decision 227) ---------------
 # The workspace is the one these libraries are sourced from.
 target
