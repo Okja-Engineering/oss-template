@@ -707,8 +707,9 @@ assert_eq "" "$(entries "$ROOT" | grep '^\.widget\.render\.')" "a signal while r
 # Every signal render traps is held off during the renames: each sent in
 # turn, in one render, any not held would end it.
 ready
-# The set is worked out here as discard.sh states it: every signal kill -l
-# lists but those whose default action never ends a process.
+# The set is worked out here from kill -l, outside POSIX mode, as discard.sh
+# does from trap -l: every signal listed but those whose default action never
+# ends a process.
 kills=""
 for w in $(kill -l); do
   case "$w" in
