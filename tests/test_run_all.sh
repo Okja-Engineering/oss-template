@@ -58,6 +58,9 @@ cp "$ROOT/foundation/tests/run-all.sh" "$W/foundation/tests/run-all.sh" 2>/dev/n
 write_suite "$W/tests/test_workspace.sh" workspace
 write_suite "$W/foundation/tests/test_product.sh" product
 RUN_ALL="$W/tests/run-all.sh"
+# The default is under test, so no caller's RUN_ALL_JOBS reaches a run that
+# does not set its own.
+unset RUN_ALL_JOBS
 
 out=$(cd "$SCRATCH" && bash "$RUN_ALL" 2>&1)
 status=$?
@@ -195,7 +198,18 @@ printf '#!/bin/sh\necho undefined\n' >"$SCRATCH/stub/getconf"
 printf '#!/bin/sh\nexit 1\n' >"$SCRATCH/stub/sysctl"
 out=$(PATH="$SCRATCH/stub:$PATH" bash "$RUN_ALL" "$D" 2>&1)
 assert_status 0 "$?" "with no count from getconf, undefined, nor sysctl, two run at a time"
-for bad in 0 x -1 ''; do
+# A count with leading zeros is that count: 01 is a serial run.
+rm -f "$SERIAL_LOG"
+D="$SCRATCH/serial"
+out=$(RUN_ALL_JOBS=01 bash "$RUN_ALL" "$D" 2>&1)
+assert_status 0 "$?" "RUN_ALL_JOBS=01 runs the suites"
+assert_eq "start a
+end a
+start b
+end b
+start c
+end c" "$(cat "$SERIAL_LOG")" "  one at a time"
+for bad in 0 00 x -1 ''; do
   out=$(RUN_ALL_JOBS=$bad bash "$RUN_ALL" "$SCRATCH/serial" 2>&1)
   assert_status 1 "$?" "RUN_ALL_JOBS='$bad' is refused"
   assert_contains "$out" "RUN_ALL_JOBS must be a whole number above 0" "  and the refusal says so"
