@@ -71,7 +71,7 @@ tree_cat() {
         listed=$(readlink "$top/$path") || return 2
         printf '%s' "$listed"
       elif [ -f "$top/$path" ]; then
-        cat "$top/$path"
+        cat "$top/$path" || return 2
       else
         return 1
       fi
@@ -80,7 +80,7 @@ tree_cat() {
       tree=$(tree__tree "$src") || return 2
       type=$(git cat-file -t "$tree:$path" 2>/dev/null) || return 1
       [ "$type" = blob ] || return 1
-      git cat-file blob "$tree:$path"
+      git cat-file blob "$tree:$path" || return 2
       ;;
     *) return 2 ;;
   esac

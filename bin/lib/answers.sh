@@ -21,7 +21,11 @@
 # value is exactly one of its listed values. `text`, `description`
 # and `list` are free text: no email address (decisions 109, 114) and no
 # word from foundation/bin/lib/rules.sh's lists (decision 73). A `list`
-# value is its items joined by `,`, each trimmed and none empty.
+# value is its items joined by `,`, each trimmed and none empty. A GitHub
+# login, in `owner`, `login-or-team` and `url`, is at most 39 characters,
+# and a `url`'s repository is not `.` or `..`. A `path` value, with its `~`
+# expanded, meets the rule every value meets and the path rule a TARGET
+# meets (decision 227).
 #
 # An answers file holds one FIELD=value a line, the value everything after
 # the first `=`. It is read as data, never sourced, so no value runs.
@@ -42,10 +46,34 @@
 #   answers_path VALUE               a `path` value with its `~` expanded;
 #                                    exit 1 when it starts with `~` and HOME
 #                                    is unset or empty
-#   answers_get FILE FIELD           FIELD's value in an answers file (`-`
+#   answers_read FILE LABEL          the one reader of an answers file:
+#                                    FILE's text out once the file-level
+#                                    rule holds, no NUL byte; else the
+#                                    reason, naming LABEL, out, exit 1
+#   answers_given FILE LABEL         a file of the fields the operator gave
+#                                    (setup/given.env, a run's given.env
+#                                    and setup.override.env), read through
+#                                    answers_read: its text out once each
+#                                    line is FIELD=value, its FIELD once;
+#                                    else the reason out, exit 1. Each value
+#                                    is judged where it is kept
+#   answers_get FILE FIELD          FIELD's value in an answers file (`-`
 #                                    for standard input, read whole, so a
-#                                    writer on a pipe is never cut off);
-#                                    exit 1 when the file does not hold FIELD
+#                                    writer on a pipe is never cut off), a
+#                                    FILE judged by the file-level rule
+#                                    first; exit 1 when it does not hold
+#                                    FIELD, 2 when it cannot be read
+#   answers_derive SCHEMA SCOPE GIVEN BASE
+#                                    the SCOPE fields' answers lines, in
+#                                    schema order: each the value GIVEN,
+#                                    answers lines, holds, else its default,
+#                                    worked out from BASE and the lines
+#                                    before it (decision 229); else one
+#                                    fault a line, naming the field, exit 1
+#   answers_setup SCHEMA GIVEN       setup/answers.env's text, sorted: the
+#                                    setup fields answers_derive gives from
+#                                    GIVEN, setup/given.env's lines; else
+#                                    the faults out, exit 1
 #   answers_default SCHEMA FIELD PAIRS
 #                                    FIELD's default, each `{{OTHER}}` in it
 #                                    given OTHER's value in PAIRS, answers
@@ -230,6 +258,9 @@ answers_check() {
     login-or-team)
       answers__ere "$v" "@$ANSWERS_OWNER(/[A-Za-z0-9]([A-Za-z0-9_-]*[A-Za-z0-9])?)?" ||
         { answers__no "$field" "the value is not @login or @organization/team"; return 1; }
+      item=${v#@}
+      item=${item%%/*}
+      [ "${#item}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return 1; }
       ;;
     email-or-url)
       [ "$v" = "$default" ] || answers__ere "$v" 'https://[^[:space:]]+' ||
@@ -239,6 +270,13 @@ answers_check() {
     url)
       answers__ere "$v" "https://github\\.com/$ANSWERS_OWNER/[A-Za-z0-9._-]+" ||
         { answers__no "$field" "the value is not https://github.com/OWNER/REPOSITORY"; return 1; }
+      item=${v#https://github.com/}
+      rest=${item#*/}
+      item=${item%%/*}
+      [ "${#item}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return 1; }
+      case "$rest" in
+        . | ..) answers__no "$field" "a repository is not named . or .."; return 1 ;;
+      esac
       ;;
     path)
       # shellcheck disable=SC2088 # a literal ~, as the value holds it
@@ -248,6 +286,8 @@ answers_check() {
       esac
       expanded=$(answers_path "$v") ||
         { answers__no "$field" "a path starting with ~ needs HOME, which is not set"; return 1; }
+      # The expansion meets the value rule and the path rule a TARGET meets.
+      [ "$expanded" = "$v" ] || answers__value "$field, its ~ expanded," "$expanded" || return 1
       answers__abs "$field" "$expanded" || return 1
       ;;
     *)
@@ -302,10 +342,113 @@ answers_blob() {
 }
 
 answers_get() {
+  if [ "$1" != - ]; then
+    answers__file "$1" "$1" >&2 || return 2
+  fi
   F=$2 awk '
     { i = index($0, "=") }
     !found && i > 1 && substr($0, 1, i - 1) == ENVIRON["F"] { print substr($0, i + 1); found = 1 }
     END { exit !found }' "$1"
+}
+
+answers_read() {
+  answers__file "$1" "$2" || return 1
+  cat -- "$1" || {
+    printf '%s: cannot read the file\n' "$2"
+    return 1
+  }
+}
+
+answers_given() {
+  local text line n=0 seen=" " key
+  text=$(answers_read "$1" "$2") || {
+    printf '%s\n' "$text"
+    return 1
+  }
+  [ -z "$text" ] || while IFS= read -r line; do
+    n=$((n + 1))
+    key=${line%%=*}
+    case "$line" in
+      *=*) answers__ere "$key" '[A-Z][A-Z0-9_]*' || key="" ;;
+      *) key="" ;;
+    esac
+    if [ -z "$key" ]; then
+      printf '%s:%d: not a FIELD=value line: %s\n' "$2" "$n" "$line"
+      return 1
+    fi
+    case "$seen" in
+      *" $key "*)
+        printf '%s:%d: %s is given twice\n' "$2" "$n" "$key"
+        return 1
+        ;;
+    esac
+    seen="$seen$key "
+  done <<<"$text"
+  [ -z "$text" ] || printf '%s\n' "$text"
+}
+
+answers_derive() {
+  local schema=$1 scope=$2 given=$3 base=$4 fields field value fault out="" faults=""
+  fields=$(answers_fields "$schema" "$scope") || {
+    printf 'cannot read the %s fields of the schema\n' "$scope"
+    return 1
+  }
+  while IFS= read -r field; do
+    [ -n "$field" ] || continue
+    value=$(answers_get - "$field" <<<"$given")
+    case $? in
+      0)
+        if ! fault=$(answers_check "$schema" "$field" "$value"); then
+          faults="$faults$fault; give $field again
+"
+          continue
+        fi
+        ;;
+      1)
+        if ! value=$(answers_col "$schema" "$field" default); then
+          faults="$faults$field: cannot read its default
+"
+          continue
+        fi
+        if [ -z "$value" ]; then
+          faults="$faults$field is missing; give $field=value
+"
+          continue
+        fi
+        if ! value=$(answers_default "$schema" "$field" "$base$out"); then
+          faults="$faults$field: cannot work out its default
+"
+          continue
+        fi
+        if ! fault=$(answers_check "$schema" "$field" "$value"); then
+          faults="$faults$fault
+"
+          continue
+        fi
+        ;;
+      *)
+        faults="$faults$field: cannot read what was given
+"
+        continue
+        ;;
+    esac
+    out="$out$field=$value
+"
+  done <<<"$fields"
+  if [ -n "$faults" ]; then
+    printf '%s' "$faults"
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+answers_setup() {
+  local out
+  out=$(answers_derive "$1" setup "$2" "") || {
+    printf '%s\n' "$out"
+    return 1
+  }
+  [ -z "$out" ] || printf '%s\n' "$out" | sort
 }
 
 answers_default() {
@@ -345,7 +488,7 @@ answers_questionnaire() {
 }
 
 answers_validate() {
-  local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field
+  local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field text
   if [ "$scope" = run ]; then
     want=$(answers_fields "$schema") && want="$want
 TARGET"
@@ -355,8 +498,14 @@ TARGET"
     printf '%s: cannot read the fields of the schema\n' "$label"
     return 1
   }
-  answers__file "$file" "$label" || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
+  # Read through the one reader, then line by line exactly: the text less
+  # the newline that ends its last line, a blank line before it kept.
+  text=$(answers_read "$file" "$label" && printf x) || {
+    printf '%s\n' "$text"
+    return 1
+  }
+  text=${text%x}
+  [ -z "$text" ] || while IFS= read -r line; do
     n=$((n + 1))
     key=${line%%=*}
     case "$line" in
@@ -394,7 +543,7 @@ TARGET"
       answers_check "$schema" "$key" "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
     fi
     [ "${PIPESTATUS[0]}" = 0 ] || refused=1
-  done <"$file"
+  done <<<"${text%$'\n'}"
   while IFS= read -r field; do
     [ -n "$field" ] || continue
     case "$seen" in

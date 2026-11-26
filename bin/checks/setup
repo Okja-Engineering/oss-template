@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# The setup file passes the validator, and the questionnaire is bin/ask's output from the schema
+# The setup file is what bin/ask setup works out from what was given, and the questionnaire bin/ask's output from the schema
 # modes: tree staged range
 #
-# AC8: reads shared/answers.tsv, setup/answers.env and setup/questionnaire.md
-# through the tree reader, and refuses a questionnaire other than what
-# `bin/ask questionnaire` writes from that schema, and a setup file that
-# bin/lib/answers.sh's validator rejects.
+# AC8: reads shared/answers.tsv, setup/answers.env, setup/given.env and
+# setup/questionnaire.md through the tree reader, and refuses a
+# questionnaire other than what `bin/ask questionnaire` writes from that
+# schema, a setup file that bin/lib/answers.sh's validator rejects, and one
+# other than what `bin/ask setup` works out from setup/given.env, the fields
+# the operator gave (decision 229).
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -52,10 +54,39 @@ else
 fi
 
 if get setup/answers.env "$tmp/answers"; then
-  answers_validate "$tmp/schema" "$tmp/answers" setup setup/answers.env || refused=1
+  if answers_validate "$tmp/schema" "$tmp/answers" setup setup/answers.env; then
+    # setup/answers.env is what bin/ask setup works out from what the
+    # operator gave, setup/given.env, none when it is absent (decision 229).
+    given=""
+    tree_cat "$src" setup/given.env >"$tmp/given"
+    case $? in
+      0) given=$(answers_given "$tmp/given" setup/given.env) || {
+        printf '%s\n' "$given"
+        exit 1
+      } ;;
+      1) ;;
+      *) exit 2 ;;
+    esac
+    want=$(answers_setup "$tmp/schema" "$given") || {
+      printf 'setup/given.env gives no setup/answers.env:\n%s\n' "$want"
+      exit 1
+    }
+    printf '%s\n' "$want" >"$tmp/want" || exit 2
+    cmp -s "$tmp/want" "$tmp/answers"
+    case $? in
+      0) ;;
+      1)
+        printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup\n'
+        refused=1
+        ;;
+      *) exit 2 ;;
+    esac
+  else
+    refused=1
+  fi
 else
   printf '  run bin/ask setup to write it\n'
 fi
 
-printf 'examined shared/answers.tsv, setup/answers.env and setup/questionnaire.md in %s\n' "$src"
+printf 'examined shared/answers.tsv, setup/answers.env, setup/given.env and setup/questionnaire.md in %s\n' "$src"
 exit "$refused"
