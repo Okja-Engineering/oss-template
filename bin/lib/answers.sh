@@ -100,12 +100,26 @@
 #                                    component, the rule a `path` value meets
 #                                    once expanded; exit 0 or 1, or 2 when
 #                                    it cannot be judged
+#   answers_root_ok ROOT             ROOT, an expanded TARGET_ROOT, is at or
+#                                    under no working tree of the workspace
+#                                    this library is in: its deepest
+#                                    existing ancestor, resolved physically
+#                                    (`cd -P`), and each physical parent up
+#                                    to /, is the same file (`-ef`) as none
+#                                    of `git rev-parse --show-toplevel` and
+#                                    the `worktree` entries of `git worktree
+#                                    list --porcelain -z` not marked `bare`
+#                                    or `prunable`; one that cannot be
+#                                    entered is refused. Exit 0, or 1 with
+#                                    the reason out, or 2 when git cannot
+#                                    say. Run git_hermetic first
 #   answers_target_for TARGET_ROOT NAME
 #                                    a run's TARGET, exactly TARGET_ROOT with
 #                                    its `~` expanded, then `/NAME`, under
 #                                    the path rule answers_target holds it
-#                                    to; else the reason out, exit 1, or 2
-#                                    when it cannot be judged
+#                                    to, the root under answers_root_ok's;
+#                                    else the reason out, exit 1, or 2 when
+#                                    it cannot be judged
 #   answers_target_check FILE NAME   the run answers FILE's TARGET is still
 #                                    answers_target_for its TARGET_ROOT and
 #                                    NAME, under this HOME: that TARGET out,
@@ -136,6 +150,8 @@ ANSWERS_EMAIL='[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
 # four bytes, with no overlong form, surrogate or code point past U+10FFFF.
 ANSWERS_UTF8=$'([\x20-\x7e]|\xc2[\xa0-\xbf]|[\xc3-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee\xef][\x80-\xbf][\x80-\xbf]|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf3][\x80-\xbf][\x80-\xbf][\x80-\xbf]|\xf4[\x80-\x8f][\x80-\xbf][\x80-\xbf])*'
 ANSWERS_LIB=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# The workspace this library is in, whose working trees no TARGET_ROOT is in.
+ANSWERS_WS=$(CDPATH='' cd -- "$ANSWERS_LIB/../.." && pwd)
 # rules.sh reads Markdown through links.sh's subset.
 # shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/links.sh
 . "$ANSWERS_LIB/../../foundation/bin/lib/links.sh"
@@ -339,7 +355,66 @@ answers_target_for() {
     *) printf '%s\n' "$fault" ;;
   esac
   [ "$st" = 0 ] || return "$st"
+  answers_root_ok "$root" || return
   printf '%s/%s\n' "$root" "$2"
+}
+
+answers_root_ok() {
+  local root=$1 dir rec path flag list
+  local -a tops=()
+  path=$(git -C "$ANSWERS_WS" rev-parse --show-toplevel) || {
+    printf 'cannot find the workspace'"'"'s working tree\n'
+    return 2
+  }
+  tops+=("$path")
+  # The list is NUL-delimited, as a worktree's path may hold a newline, so
+  # it is read from a file, its status read first.
+  list=$(mktemp "${TMPDIR:-/tmp}/answers.XXXXXX") || {
+    printf 'cannot make a temporary file\n'
+    return 2
+  }
+  if ! git -C "$ANSWERS_WS" worktree list --porcelain -z >"$list"; then
+    rm -f "$list"
+    printf 'cannot list the workspace'"'"'s worktrees\n'
+    return 2
+  fi
+  path="" flag=""
+  while IFS= read -r -d '' rec; do
+    case "$rec" in
+      'worktree '*) path=${rec#worktree } flag="" ;;
+      bare | 'prunable' | 'prunable '*) flag=skip ;;
+      '')
+        [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
+        path="" flag=""
+        ;;
+    esac
+  done <"$list"
+  rm -f "$list"
+  [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
+  dir=$root
+  while [ ! -d "$dir" ]; do
+    dir=${dir%/*}
+    [ -n "$dir" ] || dir=/
+  done
+  (
+    CDPATH='' cd -P -- "$dir" 2>/dev/null || {
+      printf 'TARGET_ROOT %s: its existing ancestor %s cannot be entered\n' "$root" "$dir"
+      exit 1
+    }
+    while :; do
+      for path in "${tops[@]}"; do
+        if [ . -ef "$path" ]; then
+          printf 'TARGET_ROOT %s is at or under %s, a working tree of this workspace; choose a TARGET_ROOT outside it\n' "$root" "$path"
+          exit 1
+        fi
+      done
+      [ ! . -ef / ] || exit 0
+      cd -P .. 2>/dev/null || {
+        printf 'TARGET_ROOT %s: the parent of %s cannot be entered\n' "$root" "$(pwd -P)"
+        exit 1
+      }
+    done
+  )
 }
 
 answers_target_check() {

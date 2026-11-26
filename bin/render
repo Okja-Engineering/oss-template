@@ -168,7 +168,6 @@ esac
 root=${target%/*}
 
 # Where it goes, and what is in the way.
-fault=$(render_root_ok "$root" "$ws") || refuse "$fault"
 render_md=stages/02-render/output/$name/render.md
 if present "$render_md" && [ ! -f "$render_md" ]; then
   refuse "$render_md is not a file; it is left alone"

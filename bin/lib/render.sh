@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Render's library (AC9-AC12; decisions 53, 60, 78, 159, 166, 192, 211, 215,
 # 217, 219): the foundation rendered from a commit, the walk, the
-# fingerprint, and the check that keeps TARGET_ROOT out of the workspace.
+# fingerprint.
 # bin/render runs it; verify will.
 #
 #   render_tree COMMIT SCHEMA ANSWERS OUT
@@ -38,14 +38,6 @@
 #       index from LIST alone, never in TARGET: `git add` must exit 0 and
 #       the index (`ls-files -z`) must hold exactly LIST. Prints the id;
 #       exit 0, or 1 with the reason out.
-#   render_root_ok ROOT WS
-#       ROOT, a TARGET_ROOT, is at or under no working tree of the
-#       workspace WS: its deepest existing ancestor, resolved physically
-#       (`cd -P`), and each physical parent up to /, is the same file (`-ef`)
-#       as none of `git rev-parse --show-toplevel` and the `worktree`
-#       entries of `git worktree list --porcelain -z` not marked `bare` or
-#       `prunable`. A `cd -P` that fails refuses with the path. Exit 0, or 1
-#       with the reason out.
 #
 # Source tree.sh, answers.sh and git.sh first, and run git_hermetic; run at
 # the top of the workspace's work tree; the caller exports LC_ALL=C. Each
@@ -485,60 +477,4 @@ render_fingerprint() {
   fi
   rm -rf "$g"
   printf '%s\n' "$tree"
-}
-
-render_root_ok() {
-  local root=$1 ws=$2 dir rec path flag list
-  local -a tops=()
-  path=$(git -C "$ws" rev-parse --show-toplevel) || {
-    printf 'cannot find the workspace'"'"'s working tree\n'
-    return 1
-  }
-  tops+=("$path")
-  list=$(mktemp "${TMPDIR:-/tmp}/render.XXXXXX") || {
-    printf 'cannot make a temporary file\n'
-    return 1
-  }
-  if ! git -C "$ws" worktree list --porcelain -z >"$list"; then
-    rm -f "$list"
-    printf 'cannot list the workspace'"'"'s worktrees\n'
-    return 1
-  fi
-  path="" flag=""
-  while IFS= read -r -d '' rec; do
-    case "$rec" in
-      'worktree '*) path=${rec#worktree } flag="" ;;
-      bare | 'prunable' | 'prunable '*) flag=skip ;;
-      '')
-        [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
-        path="" flag=""
-        ;;
-    esac
-  done <"$list"
-  rm -f "$list"
-  [ -z "$path" ] || [ -n "$flag" ] || tops+=("$path")
-  dir=$root
-  while [ ! -d "$dir" ]; do
-    dir=${dir%/*}
-    [ -n "$dir" ] || dir=/
-  done
-  (
-    CDPATH='' cd -P -- "$dir" 2>/dev/null || {
-      printf 'TARGET_ROOT %s: its existing ancestor %s cannot be entered\n' "$root" "$dir"
-      exit 1
-    }
-    while :; do
-      for path in "${tops[@]}"; do
-        if [ . -ef "$path" ]; then
-          printf 'TARGET_ROOT %s is at or under %s, a working tree of this workspace; choose a TARGET_ROOT outside it\n' "$root" "$path"
-          exit 1
-        fi
-      done
-      [ ! . -ef / ] || exit 0
-      cd -P .. 2>/dev/null || {
-        printf 'TARGET_ROOT %s: the parent of %s cannot be entered\n' "$root" "$(pwd -P)"
-        exit 1
-      }
-    done
-  )
 }

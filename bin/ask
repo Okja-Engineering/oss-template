@@ -20,7 +20,9 @@
 # for this run only and recorded in the run's setup.override.env, never in
 # setup/answers.env (decision 103); the run fields given, recorded in the
 # run's given.env, else their defaults; NAME; and TARGET, exactly
-# TARGET_ROOT with its ~ expanded, then /NAME (decision 227). A --redo keeps
+# TARGET_ROOT with its ~ expanded, then /NAME (decision 227), a TARGET_ROOT
+# that setup, run and confirm each hold outside every working tree of the
+# workspace, under git.sh's environment, as render does. A --redo keeps
 # only what the operator gave, each run answer and override not given
 # again, and works every default out again, as setup does: a field given
 # replaces its value, and an override is changed by giving it again, the
@@ -247,7 +249,7 @@ given() {
 }
 
 cmd_setup() {
-  local text fault
+  local text fault root
   schema_ok
   files "$SETUP" "$SETUP_GIVEN"
   assignments setup "$@"
@@ -256,6 +258,21 @@ cmd_setup() {
   given "$SETUP_GIVEN" setup/given.env
   kept "$GIVEN" "$PAIRS" setup setup/given.env
   text=$(answers_setup "$SCHEMA" "$KEPT") || refuse "setup/answers.env is not written:" "$text"
+  # Its TARGET_ROOT meets the root rule run holds a TARGET to (decision 227).
+  root=$(answers_get - TARGET_ROOT <<<"$text")
+  case $? in
+    0)
+      root=$(answers_path "$root") || refuse "TARGET_ROOT: a path starting with ~ needs HOME, which is not set"
+      fault=$(answers_root_ok "$root")
+      case $? in
+        0) ;;
+        1) refuse "setup/answers.env is not written: $fault" ;;
+        *) refuse "cannot judge TARGET_ROOT: $fault" ;;
+      esac
+      ;;
+    1) ;;
+    *) refuse "cannot read TARGET_ROOT from setup/answers.env's text" ;;
+  esac
   [ -z "$KEPT" ] || stage "$SETUP_GIVEN" sorted "$KEPT"
   stage "$SETUP" printf '%s\n' "$text"
   if [ -z "$KEPT" ] && present "$SETUP_GIVEN"; then
@@ -449,7 +466,6 @@ cmd_confirm() {
   name=$1 who=$3
   schema_ok
   fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
-  git_hermetic
   outd=$ws/stages/01-ask/output/$name
   files "$outd/confirmed.md"
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
@@ -469,6 +485,9 @@ cmd_confirm() {
 }
 
 [ "$#" -ge 1 ] || usage "a subcommand is required"
+# Every git it starts, the root rule's and confirm's hash, runs under git.sh's
+# environment, so no caller's GIT_* variable or config reaches one.
+git_hermetic
 sub=$1
 shift
 case "$sub" in
