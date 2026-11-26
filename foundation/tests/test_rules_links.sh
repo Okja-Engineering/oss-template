@@ -81,7 +81,7 @@ fixture_failing "$SCRATCH/anchorstub" grep '-Fx -e deciders' 1 2
 assert_status 2 "$?" "links_judge: a look for the heading that fails cannot be judged"
 
 # --- md_block: the kind of each line, in order --------------------------------
-kinds() { printf '%s\n' "$@" | awk "$LINKS_MD_AWK"'{ printf "%s ", md_block($0) }'; }
+kinds() { printf '%s\n' "$@" | links_md '{ printf "%s ", md_block($0) }'; }
 assert_eq "fence fence fence " "$(kinds '   ```' 'x' '   ```')" "a fence indented by three spaces is a fence"
 assert_eq "text atx " "$(kinds '#hashtag' '#')" "a # with no space after is text; a # alone is a heading"
 assert_eq "break blank break " "$(kinds '* * *' '' '___')" "a line of three *, _ or - marks is a thematic break"
@@ -90,9 +90,22 @@ assert_eq "text text blank code " "$(kinds 'a paragraph' '    still it' '' '    
   "an indented line continues a paragraph, and after a blank line is code"
 assert_eq "front front front text " "$(kinds '---' 'a: b' '...' 'text')" "frontmatter runs from a first --- to ... or ---"
 assert_eq "text blank under " "$(kinds 'text' '' '---')" "a --- after a blank line is no frontmatter"
+# A closing fence is the opening fence's character, at least as many times,
+# with nothing after it but blanks (CommonMark 4.5; conformance N2 of S2's
+# third ship gate).
+assert_eq "fence fence fence fence text " "$(kinds '~~~' '```' 'x' '~~~' 'y')" "a tilde fence holds a backtick line"
+assert_eq "fence fence fence fence text " "$(kinds '```' '~~~' '# h' '```' 'y')" "a backtick fence holds a tilde line"
+assert_eq "fence fence fence fence text " "$(kinds '````' '```' 'x' '````' 'y')" "a longer fence holds a shorter one"
+assert_eq "fence fence fence text " "$(kinds '```' 'x' '`````' 'y')" "a longer run closes a fence"
+assert_eq "fence fence fence fence text " "$(kinds '~~~' '~~~ sh' 'x' '~~~ ' 'y')" \
+  "a line with an info string closes none, and trailing blanks do not count"
+# Frontmatter needs its closing line; without one, its --- is no frontmatter
+# (conformance N3).
+assert_eq "under text text " "$(kinds '---' 'a: b' 'text')" "an unclosed --- is no frontmatter"
+assert_eq "front front text " "$(kinds '---' '---' 'text')" "an empty frontmatter is closed by the next ---"
 
 # --- md_spans: each code span blanked, an unclosed run kept -------------------
-spans() { printf '%s\n' "$1" | awk "$LINKS_MD_AWK"'{ print md_spans($0) }'; }
+spans() { printf '%s\n' "$1" | links_md '{ print md_spans($0) }'; }
 assert_eq "a     c" "$(spans 'a `b` c')" "a code span becomes as many spaces"
 assert_eq "a \`b c" "$(spans 'a `b c')" "a run with no closing run is text"
 
@@ -114,6 +127,9 @@ assert_eq "1:one.md 3:one.md " "$(targets '[a]: one.md' '[a]: two.md' '[it][a]')
 assert_eq "1:d.md 2:t.md " "$(targets '[text]: d.md' '[text](t.md)')" "an inline link is not also a reference"
 assert_eq "1:x.md 2:x.md " "$(targets '[The  Label]: x.md' '[the label][]')" "a label folds case and spacing"
 assert_eq "" "$(targets '---' '[a]: x.md' '---' '[it][a]')" "frontmatter holds no definition"
+assert_eq "2:x.md " "$(targets '---' '[a](x.md)')" "an unclosed --- hides no link"
+assert_eq "5:y.md " "$(targets '```' '~~~' '[a](x.md)' '```' '[b](y.md)')" "a mixed fence hides its links, and only them"
+assert_eq "2	It never ends." "$(printf '%s\n' '---' 'It never ends.' | rules_lines trace)" "an unclosed --- hides no rule line"
 
 # --- links_resolve: a target, relative to the file --------------------------------
 assert_eq "docs/b.md" "$(links_resolve docs/a.md ./b.md)" "a . component goes"

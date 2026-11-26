@@ -571,6 +571,36 @@ fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
 | x |
 ```'
 passes "a contract whose Process holds a fenced ## Inputs line"
+# disclosure reads through the one Markdown subset, links.sh's md_block
+# (decision 231; conformance N4 of S2's third ship gate): a ~~~ fence is a
+# fence, a backtick fence holding ~~~ stays open, and a routing table inside
+# a fence routes nothing.
+valid
+fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
+
+~~~
+## Inputs
+| x |
+~~~'
+passes "a contract whose Process holds a ## Inputs line in a ~~~ fence"
+valid
+fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
+
+```
+~~~
+## Outputs
+```'
+passes "a contract whose Process holds a ## Outputs line after ~~~ in a backtick fence"
+valid
+fixture_replace "$R/CONTEXT.md" "## Routing" "## Stages"
+fixture_append "$R/CONTEXT.md" '
+~~~
+## Routing
+
+| Stage | Contract |
+|---|---|
+~~~'
+refused "a routing table only inside a ~~~ fence" "CONTEXT.md: no ## Routing table"
 # A row is bounded by pipes; the delimiter row's every cell is dashes.
 valid
 fixture_replace "$R/$C1" '| shared | `../../shared/answers.tsv` | all | the fields |' \

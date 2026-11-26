@@ -306,6 +306,35 @@ Agents are also denied `Read(**/secrets/**)`,
 which a paragraph lists.'
 fixture_commit "$R" "test: a deny entry in a paragraph of the section"
 passes "a deny entry listed in a paragraph of § Agent guards"
+# A heading's closing #s go, and a deeper heading is a line of the section
+# (conformance Y5: mk08, mk16).
+valid
+fixture_replace "$R/CONTRIBUTING.md" '## Agent guards' '## Agent guards ##'
+fixture_commit "$R" "test: closing hashes on the Agent guards heading"
+passes "deny entries listed under an Agent guards heading with closing #s"
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_replace "$R/CONTRIBUTING.md" '- `Read(**/.env.*)`' '- `Read(**/.env.*)`
+
+### `Read(**/secrets/**)`'
+fixture_commit "$R" "test: a deny entry in a subsection's heading"
+passes "a deny entry listed in the heading of a subsection of § Agent guards"
+# A backtick fence holding a ~~~ line is still open: a heading after that
+# line, inside the fence, opens nothing (conformance N2).
+valid
+fixture_replace "$R/.claude/settings.json" '"Read(**/.env.*)"' '"Read(**/.env.*)",
+      "Read(**/secrets/**)"'
+fixture_append "$R/CONTRIBUTING.md" '
+## Another section
+
+```
+~~~
+## Agent guards
+- `Read(**/secrets/**)`
+```'
+fixture_commit "$R" "test: the heading after a tilde line in a backtick fence"
+refused "a deny entry listed under an Agent guards heading in a backtick fence holding ~~~" "Read(**/secrets/**)"
 # One frontmatter rule: YAML frontmatter is no setext heading, so it makes
 # no anchor.
 valid
@@ -320,6 +349,16 @@ valid
 put AGENTS.md '---' 'see: "[it](docs/absent.md)"' '---' '' '# A fixture workspace' '' 'Start from [CONTEXT.md](CONTEXT.md).'
 fixture_commit "$R" "test: a link in frontmatter"
 passes "a link in frontmatter, which is not a link"
+# Frontmatter needs its closing line: an unclosed --- hides neither a dead
+# link nor a rule line with no source (conformance N3).
+valid
+put AGENTS.md '---' '# A fixture workspace' '' 'Start from [CONTEXT.md](CONTEXT.md) and [it](docs/absent.md).'
+fixture_commit "$R" "test: a dead link after an unclosed ---"
+refused "a dead link after an unclosed ---" "docs/absent.md"
+valid
+put AGENTS.md '---' '# A fixture workspace' '' 'Start from [CONTEXT.md](CONTEXT.md). Never skip a checkpoint.'
+fixture_commit "$R" "test: a rule line after an unclosed ---"
+refused "a rule line after an unclosed ---" "AGENTS.md:4: a rule line"
 
 # Read through the tree reader.
 valid
