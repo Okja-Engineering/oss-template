@@ -1118,6 +1118,70 @@ fixture_commit "$R" "test: a file and a template for the same path"
 confirmed widget
 refused "a file and a template for the same path" "foundation/doc.md.tmpl: a second source for doc.md" widget
 
+# --- each name render produces (render N4 of S2's third ship gate) ----------------------------
+# A non-empty final component, never .git in any case; an authoring error
+# is a refusal, 1, with nothing written.
+for case in '.GIT.tmpl:renders .GIT, an entry named .git' '.git.tmpl:renders .git, an entry named .git' \
+  'sub/.Git.tmpl:renders sub/.Git, an entry named .git' '.tmpl:renders no name' 'sub/.tmpl:renders no name'; do
+  file=${case%%:*}
+  fresh
+  put "foundation/$file" 'x'
+  fixture_commit "$R" "test: foundation/$file"
+  confirmed widget
+  refused "foundation/$file" "foundation/$file: ${case#*:}" widget
+done
+
+# --- render's private directory, render.md's temporary file and its last line --------------------
+# A relative TMPDIR: the private directory is still absolute, so render
+# runs and leaves nothing there (render N2).
+ready
+mkdir -p "$R/reltmp$n"
+OUT=$(cd "$R" && TMPDIR="reltmp$n" bin/render widget 2>&1)
+assert_status 0 "$?" "render under a relative TMPDIR"
+assert_eq "" "$(entries "$R/reltmp$n")" "  leaves nothing in it"
+# Its last line, written once the render is done, cannot turn it into a
+# refusal: with standard output closed, it exits 0.
+ready
+(cd "$R" && exec bin/render widget >&- 2>/dev/null)
+assert_status 0 "$?" "render with standard output closed, once the render is done"
+assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
+# render.md's text, written to its temporary file, is checked: a write that
+# fails refuses, so no partial render.md is recorded (render N6's v03).
+ready
+waitstub cp '-Rp *'
+(cd "$R" && PATH="$SCRATCH/wstub$n:$PATH" exec bin/render widget >"$SCRATCH/out$n" 2>&1) &
+pid=$!
+i=0
+while [ ! -e "$SCRATCH/at$n" ] && [ "$i" -lt 120 ] && kill -0 "$pid" 2>/dev/null; do sleep 1 && i=$((i + 1)); done
+for t in "$R/stages/02-render/output/widget/render.md.tmp."*; do rm -f "$t" && mkdir "$t"; done
+: >"$SCRATCH/go$n"
+wait "$pid"
+assert_status 1 "$?" "refused: a render.md text that cannot be written"
+assert_contains "$(cat "$SCRATCH/out$n")" "cannot write" "  and the refusal says so"
+assert_eq "gone gone" "$(gone "$ROOT/widget") $(gone "$R/stages/02-render/output/widget/render.md")" \
+  "  with no target and no render.md"
+# The sweep keeps a staging name with no process id, which no render makes
+# (render N6's v01), and sweeps under a TARGET_ROOT holding a space and
+# glob characters (removal M6's d14).
+ready
+mkdir -p "$ROOT/.widget.render." "$ROOT/.widget.render.4242"
+render widget
+assert_eq "present gone" "$(gone "$ROOT/.widget.render.") $(gone "$ROOT/.widget.render.4242")" \
+  "the sweep keeps .widget.render., with no process id, and removes .widget.render.4242"
+fresh
+GROOT="$SCRATCH/a [b]* c$n"
+confirmed widget --setup-override "TARGET_ROOT=$GROOT"
+mkdir -p "$GROOT/.widget.render.4242"
+render widget
+assert_status 0 "$ST" "render under a TARGET_ROOT holding a space and glob characters"
+assert_eq "gone present" "$(gone "$GROOT/.widget.render.4242") $(gone "$GROOT/widget/README.md")" \
+  "  sweeps its leftover staging directory, and renders"
+# A dangling symbolic link at render.md is not a file (render N6's v02).
+ready
+mkdir -p "$R/stages/02-render/output/widget"
+ln -s "$SCRATCH/nowhere$n" "$R/stages/02-render/output/widget/render.md"
+refused "a dangling symbolic link at render.md" "render.md is not a file" widget
+
 # --- TARGET_ROOT outside every working tree of the workspace ----------------------------------
 # The root rule is the one target rule's (decision 227): bin/ask run
 # refuses such a root before it writes the answers, and render refuses
@@ -1239,6 +1303,17 @@ walk_case "a .git at the top level" "holds .git, an entry named .git"
 fresh_walk
 printf 'gitdir: /nowhere\n' >"$W/d/.git"
 walk_case "a nested .git" "holds d/.git, an entry named .git"
+fresh_walk
+printf 'x' >"$W/d/.GIT"
+walk_case "a .git in another case, which a disk folding case opens as .git" "holds d/.GIT, an entry named .git"
+# An empty list, on an empty target, passes the walk and fingerprints as the
+# empty tree (render N6's v04 and v05 of S2's third ship gate).
+rm -rf "$W" && mkdir -p "$W"
+OUT=$(render_walk "$W" "" 2>&1)
+assert_status 0 "$?" "the walk passes an empty target against an empty list"
+OUT=$(render_fingerprint "$W" "" 2>&1)
+assert_status 0 "$?" "the fingerprint of an empty target and list"
+assert_eq "4b825dc642cb6eb9a060e54bf8d69288fbee4904" "$OUT" "  is the empty tree"
 fresh_walk
 printf 'x' >"$W/extra"
 walk_case "an extra file" "extra"
