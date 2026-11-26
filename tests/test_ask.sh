@@ -1141,8 +1141,12 @@ ready
 asked awk '*BEGIN { print ENVIRON\["H"] }*' 1 questionnaire
 assert_status 1 "$ST" "refused: a questionnaire whose text cannot be made"
 assert_eq "gone" "$(gone "$R/setup/questionnaire.md")" "  and writes none"
-for at in "1 cannot read the fields of the schema" "2 cannot read the setup fields" \
-  "3 cannot work out what bin/ask setup writes" "5 cannot read the run fields"; do
+# The schema's field lists a run reads, in order: setup/answers.env's check,
+# what bin/ask setup writes from setup/given.env (decision 229), the setup
+# fields a run works out, then the run answers' check, whose run fields are
+# its second; each needle is the refusal's own first line.
+for at in "1 cannot judge setup/answers.env" "2 cannot work out what bin/ask setup writes" \
+  "3 cannot read the setup fields of shared/answers.tsv" "5 cannot read the run fields"; do
   ready
   asked awk '*ENVIRON\["S"] == ""*' "${at%% *}" run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
   assert_status 1 "$ST" "refused: run whose schema's fields cannot be read, at read ${at%% *}"
