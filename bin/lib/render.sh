@@ -259,11 +259,21 @@ EOF
   while IFS='	' read -r mode tmpl rel name <&3; do
     [ -n "$mode" ] || continue
     case "$name" in
-      */*) mkdir -p "$out/${name%/*}" || { refused=2; break; } ;;
+      */*)
+        mkdir -p "$out/${name%/*}" || {
+          printf 'cannot make the directory %s\n' "${name%/*}"
+          refused=2
+          break
+        }
+        ;;
     esac
     if [ "$mode" = 120000 ]; then
       v=$(tree_cat "commit:$commit" "foundation/$rel" && printf x) || { refused=2; break; }
-      ln -s "${v%x}" "$out/$name" || { refused=2; break; }
+      ln -s "${v%x}" "$out/$name" || {
+        printf 'cannot make the link %s\n' "$name"
+        refused=2
+        break
+      }
       continue
     fi
     if [ "$tmpl" = 1 ]; then
