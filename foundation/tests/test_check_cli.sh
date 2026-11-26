@@ -220,6 +220,21 @@ assert_eq "range" "$(value CHECK_MODE)" "--range is range mode"
 assert_eq "$M1" "$(value CHECK_BASE)" "range: base is BASE"
 assert_eq "$F2" "$(value CHECK_HEAD)" "range: head is HEAD, checked out or not"
 assert_eq "$A" "$(value DOCS_BASE)" "range: docs base is the merge base, not BASE's tip"
+# Each range lookup whose 1 is "none", git failing with 128, is an error
+# that says what it could not read, never a new ref or no docs base (the
+# tests lens's T3 of S2's fourth ship gate).
+base_fails 'rev-parse -q --verify main^{commit}' rbase --range main feature env
+assert_status 2 "$ST" "a BASE git cannot read exits 2, never a new ref"
+assert_contains "$OUT" "cannot read BASE main" "  saying so"
+base_fails 'merge-base *' rmerge --range main feature env
+assert_status 2 "$ST" "a range's merge base git cannot read exits 2"
+assert_contains "$OUT" "cannot read the merge base" "  saying so"
+base_fails 'for-each-ref *' rrefs --range "" feature env
+assert_status 2 "$ST" "a new ref's remote refs git cannot list exits 2"
+assert_contains "$OUT" "could not list the commits feature adds" "  saying so"
+base_fails 'rev-parse -q --verify *^' rparent --range "" feature env
+assert_status 2 "$ST" "the parent of a new ref's oldest commit git cannot read exits 2"
+assert_contains "$OUT" "cannot read the parent of" "  saying so"
 
 # --- range mode: empty and all-zero BASE ---------------------------------------
 # origin/main is at A; feature's F1 and F2 are on no remote ref.
