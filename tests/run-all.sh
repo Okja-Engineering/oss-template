@@ -9,7 +9,9 @@
 # and printed whole, in the suites' order, once every suite has ended: the
 # output is a serial run's, but for its timing. A suite passes when it exits 0 having printed its plan,
 # assert_done's "# N assertions, 0 failed"; one that cannot be started fails.
-# An interrupt ends the suites and removes the private directory.
+# An interrupt ends the suites, run-all exiting only once each has ended,
+# its EXIT trap included, or a minute has passed, when it kills what is
+# left; and it removes the private directory.
 # usage: tests/run-all.sh [DIRECTORY]
 set -u
 set -o pipefail
@@ -55,14 +57,27 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/run-all.XXXXXX") || {
 }
 pids=""
 trap 'rm -rf "$tmp"' EXIT
-# stop STATUS: end each worker's process group, its suites with it.
+# stop STATUS: end each worker's process group, its suites with it, and exit
+# only once each group is empty, a suite's EXIT trap done, so no suite run-all
+# started outlives it: the workers reaped first, then each group waited on,
+# for a minute at most, then killed.
 stop() {
-  local p
+  local p i=0
   trap '' INT TERM HUP
   for p in $pids; do
     kill -TERM -- "-$p" 2>/dev/null
   done
   wait
+  for p in $pids; do
+    while kill -0 -- "-$p" 2>/dev/null; do
+      if [ "$i" -ge 600 ]; then
+        kill -KILL -- "-$p" 2>/dev/null
+        break
+      fi
+      sleep 0.1
+      i=$((i + 1))
+    done
+  done
   exit "$1"
 }
 trap 'stop 129' HUP
