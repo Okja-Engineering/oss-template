@@ -81,14 +81,19 @@ work() {
 }
 [ "$jobs" -le "${#suites[@]}" ] || jobs=${#suites[@]}
 # Under job control each worker leads its own process group, which stop ends
-# whole, and starts with SIGINT not ignored, so its suites can trap it.
+# whole, and starts with SIGINT not ignored, so its suites can trap it. A
+# worker's standard error is not the run's: on macOS a new worker may print
+# "child setpgid (PID to PID): Operation not permitted" when the run has
+# already made it its group's leader, about one fork in 1500, the group made
+# either way; a worker writes nothing else there, its suites' output being
+# kept in their own files.
 set -m
 k=0
 while [ "$k" -lt "$jobs" ]; do
   work &
   pids="$pids $!"
   k=$((k + 1))
-done
+done 2>/dev/null
 set +m
 for p in $pids; do
   wait "$p"
