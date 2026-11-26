@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# The setup file is what bin/ask setup works out from what was given, and the questionnaire bin/ask's output from the schema
+# modes: tree staged range
+#
+# AC8: reads shared/answers.tsv, setup/answers.env, setup/given.env and
+# setup/questionnaire.md through the tree reader, and refuses a
+# questionnaire other than what `bin/ask questionnaire` writes from that
+# schema, a setup file that bin/lib/answers.sh's validator rejects, and one
+# other than what `bin/ask setup` works out from setup/given.env, the fields
+# the operator gave, routed to restore setup/given.env when it is missing and
+# to stage it when it is not staged, each route in staged mode ending in
+# staging what it writes, and a setup/given.env holding a field
+# that is not a setup field, or out of the sorted order setup writes
+# (decision 229).
+set -u
+set -o pipefail
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
+. "$here/../../foundation/bin/lib/tree.sh"
+# shellcheck source-path=SCRIPTDIR source=../lib/answers.sh
+. "$here/../lib/answers.sh"
+
+src=$(tree_source)
+tmp=$(mktemp -d) || exit 2
+trap 'rm -rf "$tmp"' EXIT
+refused=0
+# then_stage FILES: in staged mode, the step that brings a route's writes
+# into the index the check judges, so the route can be followed there
+# (answers' R4 of S2's fourth ship gate); else nothing.
+then_stage() { [ "$src" != index ] || printf ', then stage %s' "$1"; }
+setup_writes='setup/given.env and setup/answers.env'
+
+# get PATH FILE: PATH's bytes in the judged tree into FILE; exit 1 when the
+# tree does not hold PATH, 2 when it cannot be read.
+get() {
+  tree_cat "$src" "$1" >"$2"
+  case $? in
+    0) return 0 ;;
+    1)
+      printf '%s is missing\n' "$1"
+      refused=1
+      return 1
+      ;;
+    *) exit 2 ;;
+  esac
+}
+
+# judge_given: each field $given records is a setup field of the schema,
+# and its lines are in the order bin/ask setup writes them, sorted; else a
+# refusal naming the step that mends it (answers' NIT 3 of S2's third).
+judge_given() {
+  local line n=0 field scope order
+  [ -n "$given" ] || return 0
+  while IFS= read -r line; do
+    n=$((n + 1))
+    field=${line%%=*}
+    scope=$(answers_col "$tmp/schema" "$field" scope)
+    case $? in
+      0 | 1) ;;
+      *) exit 2 ;;
+    esac
+    if [ "$scope" != setup ]; then
+      printf 'setup/given.env:%d: %s is not a setup field of shared/answers.tsv; run bin/ask setup, which drops it%s\n' "$n" "$field" "$(then_stage "$setup_writes")"
+      refused=1
+    fi
+  done <<<"$given"
+  order=$(sort <<<"$given") || exit 2
+  if [ "$order" != "$given" ]; then
+    printf 'setup/given.env is not in the order bin/ask setup writes; run bin/ask setup, which sorts it%s\n' "$(then_stage "$setup_writes")"
+    refused=1
+  fi
+}
+
+get shared/answers.tsv "$tmp/schema" || exit 1
+# Each judge's 1 is a refusal; any higher status is one that could not
+# judge, and the check cannot run (decision 228).
+faults=$(answers_schema_check "$tmp/schema" shared/answers.tsv)
+case $? in
+  0) ;;
+  1)
+    printf '%s\n' "$faults"
+    exit 1
+    ;;
+  *) exit 2 ;;
+esac
+
+if get setup/questionnaire.md "$tmp/questionnaire"; then
+  answers_questionnaire "$tmp/schema" >"$tmp/expected" || exit 2
+  # cmp's 1 is "they differ"; a higher status is no comparison, and the
+  # check cannot run (decision 228).
+  cmp -s "$tmp/expected" "$tmp/questionnaire"
+  case $? in
+    0) ;;
+    1)
+      printf 'setup/questionnaire.md is not what bin/ask questionnaire writes from shared/answers.tsv; run bin/ask questionnaire%s\n' "$(then_stage setup/questionnaire.md)"
+      refused=1
+      ;;
+    *) exit 2 ;;
+  esac
+else
+  printf '  run bin/ask questionnaire to write it%s\n' "$(then_stage setup/questionnaire.md)"
+fi
+
+if get setup/answers.env "$tmp/answers"; then
+  answers_validate "$tmp/schema" "$tmp/answers" setup setup/answers.env
+  case $? in
+    0) valid=1 ;;
+    1) valid=0 ;;
+    *) exit 2 ;;
+  esac
+  if [ "$valid" = 1 ]; then
+    # setup/answers.env is what bin/ask setup works out from what the
+    # operator gave, setup/given.env, none when it is absent (decision 229).
+    given="" have_given=1
+    tree_cat "$src" setup/given.env >"$tmp/given"
+    case $? in
+      0)
+        given=$(answers_given "$tmp/given" setup/given.env)
+        case $? in
+          0) ;;
+          1)
+            printf '%s\n' "$given"
+            exit 1
+            ;;
+          *) exit 2 ;;
+        esac
+        judge_given
+        ;;
+      1) have_given=0 ;;
+      *) exit 2 ;;
+    esac
+    want=$(answers_setup "$tmp/schema" "$given")
+    case $? in
+      0) ;;
+      1)
+        printf 'setup/given.env gives no setup/answers.env:\n%s\n' "$want"
+        exit 1
+        ;;
+      *) exit 2 ;;
+    esac
+    printf '%s\n' "$want" >"$tmp/want" || exit 2
+    cmp -s "$tmp/want" "$tmp/answers"
+    case $? in
+      0) ;;
+      1)
+        refused=1
+        # The route keeps what the operator gave: bin/ask setup alone,
+        # without setup/given.env, would set every field to its default.
+        unstaged=0
+        if [ "$have_given" = 0 ] && [ "$src" = index ]; then
+          tree_cat worktree setup/given.env >/dev/null
+          case $? in
+            0) unstaged=1 ;;
+            1) ;;
+            *) exit 2 ;;
+          esac
+        fi
+        if [ "$have_given" = 1 ]; then
+          printf '%s%s\n' "$(answers_setup_stale 1)" "$(then_stage "$setup_writes")"
+        elif [ "$unstaged" = 1 ]; then
+          printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is not staged; stage it with setup/answers.env\n'
+        else
+          printf '%s%s\n' "$(answers_setup_stale 0)" "$(then_stage "$setup_writes")"
+        fi
+        ;;
+      *) exit 2 ;;
+    esac
+  else
+    refused=1
+  fi
+else
+  printf '  run bin/ask setup to write it%s\n' "$(then_stage "$setup_writes")"
+fi
+
+printf 'examined shared/answers.tsv, setup/answers.env, setup/given.env and setup/questionnaire.md in %s\n' "$src"
+exit "$refused"

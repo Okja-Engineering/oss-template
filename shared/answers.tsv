@@ -1,0 +1,4 @@
+field	scope	type	render	selects	pattern	default	question
+NAME	run	name	no	-	-	-	What is the repository called?
+OWNER	setup	owner	no	-	-	Okja-Engineering	Which GitHub account or organization will own the repositories?
+TARGET_ROOT	setup	path	no	-	-	~/Development/{{OWNER}}	Which directory, outside the workspace, holds the targets?

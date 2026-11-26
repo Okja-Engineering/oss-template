@@ -5,6 +5,7 @@
 # skipping a deleted ref. Driven through real git in a fixture workspace with
 # a bare remote.
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh

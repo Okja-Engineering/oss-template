@@ -4,6 +4,7 @@
 # fixture case per refusal, each on an otherwise valid fixture workspace.
 # shellcheck disable=SC2016 # backticks here are Markdown code spans, kept literal
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh
@@ -28,7 +29,17 @@ pad_to() { # FILE LINES: append filler lines until FILE has LINES lines
     have=$((have + 1))
   done
 }
-run() { OUT=$(cd "$R" && bin/check "$@" disclosure 2>&1); ST=$?; }
+# run [MODE...]: the check on R, its tree mode called directly, as bin/check
+# would call it there (bin/check's own dispatch is test_check_cli's), and
+# any other mode through bin/check.
+run() {
+  if [ "$#" = 0 ]; then
+    OUT=$(cd "$R" && bin/checks/disclosure 2>&1)
+  else
+    OUT=$(cd "$R" && bin/check "$@" disclosure 2>&1)
+  fi
+  ST=$?
+}
 refused() { # DESCRIPTION NEEDLE
   run
   assert_status 1 "$ST" "refused: $1"
@@ -47,10 +58,22 @@ C2=stages/02-render/CONTEXT.md
 HEADER='| Source | File/Location | Section/Scope | Why |'
 DELIM='|---|---|---|---|'
 
-# empty: a fixture workspace with the agent files and no stage.
-empty() {
+# empty: a fixture workspace with the agent files and no stage. valid: two
+# stages, routed, with every optional section, an earlier stage's output as
+# an input, and a named reference. Each is built once, by build_empty and
+# build_valid, and copied for each case.
+empty() { copy empty; }
+valid() { copy valid; }
+copy() { # KIND: the KIND fixture, built once, copied to a new R
+  [ -d "$SCRATCH/$1" ] || {
+    R="$SCRATCH/$1"
+    "build_$1"
+  }
   n=$((n + 1))
   R="$SCRATCH/ws$n"
+  ws_copy "$SCRATCH/$1" "$R"
+}
+build_empty() {
   ws_fixture "$R"
   ws_real_check "$R" disclosure
   put CLAUDE.md '@AGENTS.md'
@@ -60,10 +83,8 @@ empty() {
   fixture_commit "$R" "test: an empty workspace"
 }
 
-# valid: two stages, routed, with every optional section, an earlier stage's
-# output as an input, and a named reference.
-valid() {
-  empty
+build_valid() {
+  build_empty
   put shared/answers.tsv 'field'
   printf '%s\n%s\n' "$ROW1" "$ROW2" >>"$R/CONTEXT.md"
   put "$C1" '# 01-ask' '' '## Inputs' '' "$HEADER" "$DELIM" \
@@ -133,6 +154,9 @@ refused "a routed stage that does not exist" "09-gone"
 valid
 fixture_replace "$R/CONTEXT.md" "## Routing" "## Stages"
 refused "a CONTEXT.md with no routing table" "Routing"
+valid
+fixture_remove "$R/CONTEXT.md"
+refused "a missing CONTEXT.md" "CONTEXT.md: missing"
 
 # --- AC2: stage folders --------------------------------------------------------
 for bad in 3-verify 03_verify 03-Verify 03-verify-; do
@@ -143,6 +167,12 @@ done
 valid
 fixture_remove "$R/$C2"
 refused "a stage without CONTEXT.md" "stages/02-render"
+# An earlier stage without CONTEXT.md has no Outputs: an input naming its
+# output is refused as not in them, never a check that cannot run (the
+# tests lens's T3 of S2's fourth ship gate).
+valid
+fixture_remove "$R/$C1"
+refused "an input naming the output of a stage without CONTEXT.md" "is not in stages/01-ask/'s Outputs"
 valid
 fixture_remove "$R/stages/01-ask/output/.gitignore"
 refused "a stage without output/.gitignore" "output/.gitignore"
@@ -536,6 +566,86 @@ modes_refuse "twins under one folder, beside that folder's twin" "a/X and a/x: $
 assert_contains "$OUT" "A/ and a/: $TWIN" "  and names the folders' twins too"
 assert_not_contains "$OUT" "A/x and" "  and names no set twice"
 
+# --- each reader's edge (F9 of the tests lens) -------------------------------------
+# A `## ` line in a fence is no section: neither a heading in the order nor
+# the start of one.
+valid
+fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
+
+```
+## Inputs
+| x |
+```'
+passes "a contract whose Process holds a fenced ## Inputs line"
+# disclosure reads through the one Markdown subset, links.sh's md_block
+# (decision 231; conformance N4 of S2's third ship gate): a ~~~ fence is a
+# fence, a backtick fence holding ~~~ stays open, and a routing table inside
+# a fence routes nothing.
+valid
+fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
+
+~~~
+## Inputs
+| x |
+~~~'
+passes "a contract whose Process holds a ## Inputs line in a ~~~ fence"
+valid
+fixture_replace "$R/$C1" 'Draft the answers.' 'Draft the answers.
+
+```
+~~~
+## Outputs
+```'
+passes "a contract whose Process holds a ## Outputs line after ~~~ in a backtick fence"
+valid
+fixture_replace "$R/CONTEXT.md" "## Routing" "## Stages"
+fixture_append "$R/CONTEXT.md" '
+~~~
+## Routing
+
+| Stage | Contract |
+|---|---|
+~~~'
+refused "a routing table only inside a ~~~ fence" "CONTEXT.md: no ## Routing table"
+# A row is bounded by pipes; the delimiter row's every cell is dashes.
+valid
+fixture_replace "$R/$C1" '| shared | `../../shared/answers.tsv` | all | the fields |' \
+  'shared | `../../shared/answers.tsv` | all | the fields |'
+refused "an Inputs row with no leading pipe" "a row without four cells"
+valid
+fixture_replace "$R/$C1" "$DELIM" '|---|---|x|y|'
+refused "a delimiter row whose last cells are not dashes" "the line after its header is not its delimiter row"
+# An earlier stage's output, named by the folder it is in: the stage must
+# exist, and its Outputs may name the file by its output/<name>/ path.
+valid
+fixture_replace "$R/$C2" '`../01-ask/output/<name>/confirmed.md`' '`../00-none/output/<name>/confirmed.md`'
+refused "an output of a stage folder that does not exist" \
+  "Inputs \`../00-none/output/<name>/confirmed.md\` does not resolve"
+valid
+fixture_replace "$R/$C1" '`answers.env`, `confirmed.md`' '`answers.env`, `output/<name>/confirmed.md`'
+passes "an earlier stage's Outputs naming the file by its output/<name>/ path"
+valid
+fixture_replace "$R/$C1" '| shared | `../../shared/answers.tsv` | all | the fields |' \
+  '| above | `../../../outside.md` | all | the fields |'
+refused "an input that climbs above the workspace" "Inputs \`../../../outside.md\` does not resolve"
+# A stage folder with no number orders before no stage: its input of an
+# output is refused, and of a tracked file in another stage judged with no
+# shell error.
+valid
+put stages/zz-x/CONTEXT.md '# zz-x' '' '## Inputs' '' "$HEADER" "$DELIM" \
+  '| 01-ask | `../01-ask/output/<name>/confirmed.md` | all | the answers |' \
+  '| 01-ask | `../01-ask/CONTEXT.md` | all | the contract |' '' '## Process' '' 'Do it.' '' '## Outputs' '' '`out.md`'
+put stages/zz-x/output/.gitignore '*' '!.gitignore'
+printf '| `stages/zz-x/` | [contract](stages/zz-x/CONTEXT.md) |\n' >>"$R/CONTEXT.md"
+refused "a stage folder with no number taking an output" "is an output of the same or a later stage"
+assert_not_contains "$OUT" "integer expression" "  and no comparison fails"
+# The tree's listing failing is a check that cannot run.
+valid
+fixture_failing "$R-stub" git '*ls-files -z -c -o --exclude-standard' 1
+OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/checks/disclosure 2>&1)
+assert_status 2 "$?" "the check cannot run when it cannot list the tree"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
+
 # --- paths are judged literally, never split or expanded -------------------------
 # A portable name can still hold a space or a . that a split or a pattern
 # would misread.
@@ -575,5 +685,100 @@ assert_status 1 "$ST" "staged mode: the same refusal"
 git -C "$R" commit -q --no-verify -m "test: a quoted stage name"
 run --range HEAD~1 HEAD
 assert_status 1 "$ST" "range mode: the same refusal"
+
+# A stage found early in a long list of stage folders is still a stage
+# folder: each lookup reads the list whole, so no reader leaves a writer to a
+# broken pipe under pipefail (the list here outgrows a pipe's buffer).
+valid
+long=$(printf '%0240d' 0 | tr 0 x)
+i=100
+while [ "$i" -lt 500 ]; do
+  put "stages/zz-$long$i/notes.md" 'notes'
+  i=$((i + 1))
+done
+run
+assert_contains "$OUT" "stages/zz-${long}100/: no CONTEXT.md" "a long list of stage folders is judged"
+assert_not_contains "$OUT" "stages/01-ask/, which is not a stage folder" "  and a routed stage early in it is a stage folder"
+assert_not_contains "$OUT" "does not resolve" "  and an earlier stage's output in it still resolves"
+
+# --- a failed read is a check that cannot run (decision 228) -----------------
+# Each case fails one stage of one pipeline on the valid workspace, through a
+# stub first on PATH: the check exits 2, never judging the list that stage did
+# not produce. NTH counts the stub's matching calls, in the check's order.
+cannot_run() { # TOOL PATTERN NTH WHAT
+  valid
+  fixture_failing "$R-stub" "$1" "$2" "$3"
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/check disclosure 2>&1)
+  ST=$?
+  assert_status 2 "$ST" "the check cannot run when it cannot read $4"
+  assert_contains "$OUT" "FAIL disclosure (could not run)" "  and bin/check says so"
+}
+cannot_run sed 's/^\[^*' 1 "the tree's paths"
+cannot_run awk 'END { print NR }' 1 "AGENTS.md's lines"
+cannot_run awk '!/^\[A-Za-z0-9.*' 1 "the unportable paths"
+cannot_run awk '*parent = parent $i*' 1 "the paths, for case twins"
+cannot_run sort '' 1 "the sorted case twins"
+cannot_run awk '*$1 == "stages" && NF >= 3*' 1 "the stage folders"
+cannot_run sort '-u' 1 "the sorted stage folders"
+cannot_run git '*:(literal)stages/01-ask/output/.gitignore' 1 "a stage's output/.gitignore"
+cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 1 "a stage's output/"
+cannot_run awk 'END { print NR }' 2 "CONTEXT.md's lines"
+cannot_run awk '*insec = ($0 == want)*' 1 "the routing table"
+cannot_run awk '*n++; if (n > 2) print*' 1 "the routing table's rows"
+cannot_run awk '*split("", seen)*' 1 "the routed stages"
+cannot_run awk '*$0 == ENVIRON\["S"] { n++ }*' 1 "how often a stage is routed"
+cannot_run sort '-u' 2 "the routed stages, sorted"
+cannot_run awk 'END { print NR }' 3 "a contract's lines"
+cannot_run awk '*printf "%s%s", sep*' 1 "a contract's sections"
+cannot_run awk '*insec = ($0 == want)*' 2 "a contract's Inputs section"
+cannot_run awk '*BEGIN { H = "| Source*' 1 "a contract's Inputs table"
+cannot_run awk '*if (n == 0) { print ""; exit }*' 1 "an input's path"
+cannot_run awk '*!found && substr($0, i + 1)*' 1 "an input's mode"
+cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 4 "whether an input is a directory"
+cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 5 "a stage's references/"
+# An earlier stage's Outputs, read for an input that names its output: the
+# section, then the names in it (the tests lens's T3 of S2's fourth ship
+# gate).
+cannot_run awk '*insec = ($0 == want)*' 4 "an earlier stage's Outputs section"
+cannot_run awk '*while (match(s, *' 2 "the names in an earlier stage's Outputs"
+# A lookup whose 1 is "no", grep failing with a higher status, is a check
+# that cannot run, never a path the tree lacks (decision 228): a stage's
+# CONTEXT.md, the top CONTEXT.md, and the contract whose rules would be
+# skipped; a stage's name; a routed stage; an earlier stage's Outputs; a
+# file in references/.
+cannot_look() { # PATTERN NTH WHAT
+  valid
+  fixture_failing "$R-stub" grep "$1" "$2" 2
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/checks/disclosure 2>&1)
+  assert_status 2 "$?" "the check cannot run when it cannot look up $3"
+  assert_not_contains "$OUT" "examined" "  and judges nothing"
+}
+cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 1 "a stage's CONTEXT.md"
+cannot_look '-Fxq -- CONTEXT.md' 1 "CONTEXT.md"
+cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 2 "a contract"
+cannot_look '-Eq*^\[0-9]\[0-9]-*' 1 "a stage's name"
+cannot_look '-Fxq -- 01-ask' 1 "a routed stage"
+cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 3 "an earlier stage's contract, for its Outputs"
+# The tree reader failing on a file's bytes, at each of its reads, and on a
+# commit that does not exist (the tests lens's F3). PATH is the file's path
+# in the workspace, NTH its read; the stub matches it under the workspace's
+# own folder name, as git names the top with links resolved.
+cannot_read() { # PATH NTH WHAT
+  valid
+  fixture_failing "$R-stub" cat "*/${R##*/}/$1" "$2"
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/checks/disclosure 2>&1)
+  assert_status 2 "$?" "the check cannot run when it cannot read $3"
+  assert_not_contains "$OUT" "examined" "  and judges nothing"
+}
+cannot_read CLAUDE.md 1 "CLAUDE.md"
+cannot_read AGENTS.md 1 "AGENTS.md"
+cannot_read CONTEXT.md 1 "CONTEXT.md, for its lines"
+cannot_read CONTEXT.md 2 "CONTEXT.md, for its ## Routing heading"
+cannot_read CONTEXT.md 3 "CONTEXT.md, for its routing table"
+cannot_read "$C1" 1 "a contract, for its lines"
+valid
+OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/disclosure 2>&1)
+assert_status 2 "$?" "the check cannot run on a commit that does not exist"
+assert_not_contains "$OUT" "examined" "  and judges nothing"
 
 assert_done

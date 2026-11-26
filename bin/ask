@@ -1,0 +1,669 @@
+#!/usr/bin/env bash
+# Stage 01's script (AC7): it writes the answers, from the field schema
+# shared/answers.tsv, through bin/lib/answers.sh. A refusal writes nothing,
+# a folder it made for its files removed again, with any of them a rename
+# put there, and removes nothing unless a removal itself is what failed, or
+# a rename after a redo's removals, which names what they removed and the
+# route: the redo again. It runs on git 2.36 or later, as render does.
+#
+# usage:
+#   bin/ask setup [FIELD=value...]
+#   bin/ask questionnaire
+#   bin/ask run NAME [FIELD=value...] [--setup-override FIELD=value...]
+#               [--redo [--remove PATH]]
+#   bin/ask confirm NAME --by WHO
+#
+# `setup` records the setup fields given in setup/given.env, with those
+# given before and not given again, and rewrites setup/answers.env from
+# them: each field given, else its default, worked out again (decision 229).
+# `questionnaire` writes setup/questionnaire.md from the schema.
+#
+# `run` writes stages/01-ask/output/NAME/answers.env: the setup fields, each
+# FIELD=value after --setup-override replacing one for this run only and
+# recorded in the run's setup.override.env, never in setup/answers.env
+# (decision 103), each setup/given.env records from setup/answers.env, and
+# each other worked out again from its default, as setup does (decision
+# 229); the run fields given, recorded in the
+# run's given.env, else their defaults; NAME; and TARGET, exactly
+# TARGET_ROOT with its ~ expanded, then /NAME (decision 227), a TARGET_ROOT
+# that setup, run and confirm each hold outside every working tree of the
+# workspace, and a TARGET that run and confirm hold to be none of them and
+# above none, under git.sh's environment, as render does. A --redo keeps
+# only what the operator gave, each run answer and override not given
+# again, and works every default out again, as setup does: a field given
+# replaces its value, and an override is changed by giving it again, the
+# setup value making it harmless; a kept field no longer of its scope is
+# dropped, with a note (decision 229). An existing run needs
+# --redo, and a target present needs --remove naming it: --remove PATH
+# discards the run's target, which the shared discard, bin/lib/discard.sh,
+# derives itself from the old answers file's TARGET_ROOT and NAME, after the
+# operator's yes at stage 01's checkpoint (AC9, decisions 123, 134, 149,
+# 203, 227); a present target it would not take is refused, never routed
+# to --remove. Before it removes render.md, a redo judges its record
+# through the discard's discard_record, as render does; a first run removes
+# no render.md and judges none. --redo clears the
+# run's 03 and 02 outputs and then its confirmation, so a clear that fails
+# leaves the run confirmed and its files in step, and removes the staging
+# directories a killed render left under the old TARGET_ROOT (decision 226).
+# Everything that can refuse, the files it writes staged beside them
+# included, is settled before anything is removed (decision 230).
+#
+# `confirm` writes the run's confirmed.md: who, when (UTC) and the answers
+# file's blob id, once TARGET is still TARGET_ROOT, ~ expanded under this
+# HOME, then /NAME.
+#
+# Every file is written sorted where it is a list of fields, with LF endings,
+# through a temporary file beside it, which a failure or a signal removes.
+# Each file a command writes, renames over, removes or reads as a record,
+# render.md and setup's files a run reads included, is absent, or a regular
+# file and not a symbolic link, or the command refuses before it stages or
+# removes anything (decision 230).
+# Exit 0 when done, 1 on a refusal, 2 on a usage error, or when the shell's
+# signals cannot be worked out (bin/lib/discard.sh).
+set -u
+set -o pipefail
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+ws=$(CDPATH='' cd -- "$here/.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=lib/answers.sh
+. "$here/lib/answers.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/discard.sh
+. "$here/lib/discard.sh"
+# The signals a run holds off, worked out as discard.sh is sourced; with
+# none, nothing is made (decision 226).
+if [ -z "$DISCARD_SIGNALS" ]; then
+  printf 'bin/ask: cannot work out the signals to hold off from the shell'"'"'s trap -l; nothing is done\n' >&2
+  exit 2
+fi
+# shellcheck source-path=SCRIPTDIR source=lib/git.sh
+. "$here/lib/git.sh"
+
+SCHEMA=$ws/shared/answers.tsv
+SETUP=$ws/setup/answers.env
+SETUP_GIVEN=$ws/setup/given.env
+QUESTIONNAIRE=$ws/setup/questionnaire.md
+
+usage() {
+  printf 'bin/ask: %s\n' "$1" >&2
+  printf '%s\n' 'usage: bin/ask setup [FIELD=value...]' '       bin/ask questionnaire' \
+    '       bin/ask run NAME [FIELD=value...] [--setup-override FIELD=value...] [--redo [--remove PATH]]' \
+    '       bin/ask confirm NAME --by WHO' >&2
+  exit 2
+}
+refuse() {
+  printf 'bin/ask: %s\n' "$@" >&2
+  exit 1
+}
+
+# Each lookup whose 1 is "none" reads a higher status as a failure, never as
+# that none (decision 228).
+
+# schema_ok: the schema parses, or the command refuses, naming its faults.
+schema_ok() {
+  local faults
+  faults=$(answers_schema_check "$SCHEMA" shared/answers.tsv 2>&1)
+  case $? in
+    0) ;;
+    1) refuse "shared/answers.tsv does not parse:" "$faults" ;;
+    *) refuse "cannot read shared/answers.tsv" ${faults:+"$faults"} ;;
+  esac
+}
+
+# pick TEXT FIELD LABEL: in PICKED, FIELD's value in TEXT, answers lines,
+# from the file LABEL names; the command refuses when it holds no FIELD,
+# or when it cannot be read.
+pick() {
+  PICKED=$(answers_get - "$2" <<<"$1")
+  case $? in
+    0) ;;
+    1) refuse "$3 holds no $2" ;;
+    *) refuse "cannot read $2 from $3" ;;
+  esac
+}
+
+# assignments SCOPE ARG...: the FIELD=value arguments as answers lines, in
+# PAIRS; each names a field of SCOPE once, with a value that is one line, or
+# the command refuses.
+assignments() {
+  local scope=$1 arg field seen=" " fault in
+  shift
+  PAIRS=""
+  for arg in "$@"; do
+    field=${arg%%=*}
+    case "$arg" in
+      *=*) ;;
+      *) refuse "not FIELD=value: $arg" ;;
+    esac
+    case "$seen" in
+      *" $field "*) refuse "$field is given twice" ;;
+    esac
+    seen="$seen$field "
+    in=$(answers_col "$SCHEMA" "$field" scope)
+    case $? in
+      0) ;;
+      1) refuse "$field: an unknown field" ;;
+      *) refuse "cannot read the scope of $field in shared/answers.tsv" ;;
+    esac
+    case "$in" in
+      "$scope") ;;
+      setup) refuse "$field is a setup field: give it after --setup-override for this run, or set it with bin/ask setup" ;;
+      *) refuse "$field is a $in field, not a $scope field" ;;
+    esac
+    fault=$(answers_check "$SCHEMA" "$field" "${arg#*=}") || refuse "$fault"
+    PAIRS="$PAIRS$arg
+"
+  done
+}
+
+# What this run made, all that a failure or a signal removes: the temporary
+# files beside the files it writes, and the directories it made for them,
+# each recorded, with signals held off, as it is made, until it is renamed
+# into place (decision 230). A directory goes only while it holds nothing.
+tmps=() dests=() made_deep=() made_top=()
+# What it removed, named by a refusal after its removals (decision 230).
+removed="" route=""
+cleanup() {
+  local t i d
+  # Held off through cleanup, so a second signal never ends it partway.
+  discard_hold
+  for t in ${tmps[@]+"${tmps[@]}"}; do
+    rm -f -- "$t"
+  done
+  for i in ${made_deep[@]+"${!made_deep[@]}"}; do
+    d=${made_deep[$i]}
+    while rmdir -- "$d" 2>/dev/null && [ "$d" != "${made_top[$i]}" ]; do
+      d=${d%/*}
+    done
+  done
+}
+# The signals are trapped from the first temporary file on.
+trap cleanup EXIT
+
+# stage FILE COMMAND [ARG...]: COMMAND's output in a temporary file beside
+# FILE, made exclusively where nothing, not even a symbolic link, is in the
+# way. COMMAND runs here, in this shell, never at the end of a pipeline
+# (decision 228): when it or the write fails, the command refuses.
+stage() {
+  local file=$1 tmp=$1.tmp.$$ made=0 dir=${1%/*} top="" up
+  shift
+  up=$dir
+  while ! present "$up"; do
+    top=$up
+    up=${up%/*}
+  done
+  discard_hold
+  if mkdir -p "$dir"; then
+    made=1
+    if [ -n "$top" ]; then
+      made_deep+=("$dir")
+      made_top+=("$top")
+    fi
+  fi
+  discard_traps
+  [ "$made" = 1 ] || refuse "cannot make the directory of $file"
+  made=0
+  ! present "$tmp" || refuse "cannot write beside $file: $tmp is in the way"
+  discard_hold
+  if (set -C && : >"$tmp") 2>/dev/null; then
+    tmps+=("$tmp")
+    dests+=("$file")
+    made=1
+  fi
+  discard_traps
+  [ "$made" = 1 ] || refuse "cannot write beside $file: $tmp"
+  "$@" >"$tmp" || refuse "cannot write $file"
+}
+# place: each staged file renamed over its FILE, in the order staged, with
+# signals held off, so each FILE is either as it was or whole. A rename that
+# fails after the command's removals names what they removed and the route.
+place() {
+  local i j
+  discard_hold
+  for i in ${tmps[@]+"${!tmps[@]}"}; do
+    if ! mv -f -- "${tmps[$i]}" "${dests[$i]}"; then
+      # A file already renamed into a directory this run made is this run's
+      # own, and goes with it, so that directory goes too (decision 230).
+      for ((j = 0; j < i; j++)); do
+        ! made_here "${dests[$j]}" || rm -f -- "${dests[$j]}"
+      done
+      [ -n "$removed" ] || refuse "cannot write ${dests[$i]}"
+      refuse "cannot write ${dests[$i]}, having removed $removed; $route"
+    fi
+  done
+  tmps=() dests=() made_deep=() made_top=()
+  discard_traps
+}
+# made_here FILE: FILE's directory is one this run made.
+made_here() {
+  local d
+  for d in ${made_deep[@]+"${made_deep[@]}"}; do
+    [ "${1%/*}" != "$d" ] || return 0
+  done
+  return 1
+}
+# gone_by PATH: remove PATH through the removal helper, or refuse; a PATH
+# that was there is noted among what this command removed.
+gone_by() {
+  local fault
+  if present "$1"; then
+    removed="$removed${removed:+, }${1#"$ws/"}"
+  fi
+  fault=$(discard_remove "$1") || refuse "$fault"
+}
+# write FILE COMMAND [ARG...]: stage, then place.
+write() {
+  stage "$@"
+  place
+}
+
+# sorted TEXT: TEXT's lines, sorted; a failed sort fails.
+sorted() { printf '%s' "$1" | sort; }
+
+# present PATH: something, a dangling symbolic link included, is at PATH;
+# when that cannot be told, a directory above it unsearchable, the command
+# refuses, never reading it as absent (decision 228).
+present() {
+  discard_there "$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) refuse "cannot tell whether ${1#"$ws/"} is there: a directory above it cannot be searched; give its owner search permission, then run the command again" ;;
+  esac
+}
+# files FILE...: each FILE this command may write, rename over or remove is
+# absent, or a regular file and not a symbolic link, so a rename replaces
+# that file and nothing else, and lands nothing in a directory or through a
+# link (decision 230); else the command refuses, before it reads, stages or
+# removes anything, and leaves it.
+files() {
+  local f
+  for f in "$@"; do
+    if present "$f" && { [ -L "$f" ] || [ ! -f "$f" ]; }; then
+      refuse "${f#"$ws/"} is not a file: a directory or a symbolic link is in the way; it is left alone"
+    fi
+  done
+}
+
+# kept OLD NEW SCOPE LABEL: in KEPT, NEW, the answers lines given now, then
+# each line of OLD, those given before and recorded in LABEL, whose field NEW
+# does not give again. A line for a field the schema no longer lists in
+# SCOPE is dropped, with a note naming it (decision 229).
+kept() {
+  local old=$1 new=$2 scope=$3 label=$4 line field in
+  KEPT=$new
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    field=${line%%=*}
+    answers_get - "$field" <<<"$new" >/dev/null
+    case $? in
+      0) continue ;;
+      1) ;;
+      *) refuse "cannot read the answers given" ;;
+    esac
+    in=$(answers_col "$SCHEMA" "$field" scope)
+    case $? in
+      0 | 1) ;;
+      *) refuse "cannot read the scope of $field in shared/answers.tsv" ;;
+    esac
+    if [ "$in" != "$scope" ]; then
+      printf 'bin/ask: %s holds %s, which is no longer a %s field; it is dropped\n' "$label" "$field" "$scope"
+      continue
+    fi
+    KEPT="$KEPT$line
+"
+  done <<<"$old"
+}
+
+# given FILE LABEL: in GIVEN, the answers lines FILE records as given, read
+# through answers_given; none when FILE is absent. Each caller has judged
+# FILE through `files` first, so it is absent or a regular file.
+given() {
+  GIVEN=""
+  present "$1" || return 0
+  GIVEN=$(answers_given "$1" "$2") ||
+    refuse "$GIVEN; the operator may correct $2 by hand, or remove it by hand and give its fields again"
+}
+
+cmd_setup() {
+  local text fault root
+  schema_ok
+  files "$SETUP" "$SETUP_GIVEN"
+  assignments setup "$@"
+  # Setup keeps what the operator gave, recorded in setup/given.env, and
+  # works each other field's default out again (decision 229).
+  given "$SETUP_GIVEN" setup/given.env
+  kept "$GIVEN" "$PAIRS" setup setup/given.env
+  text=$(answers_setup "$SCHEMA" "$KEPT") || refuse "setup/answers.env is not written:" "$text"
+  # Its TARGET_ROOT meets the root rule run holds a TARGET to (decision 227).
+  root=$(answers_get - TARGET_ROOT <<<"$text")
+  case $? in
+    0)
+      root=$(answers_path "$root") || refuse "TARGET_ROOT: a path starting with ~ needs HOME, which is not set"
+      fault=$(answers_root_ok "$root")
+      case $? in
+        0) ;;
+        1) refuse "setup/answers.env is not written: $fault" ;;
+        *) refuse "cannot judge TARGET_ROOT: $fault" ;;
+      esac
+      ;;
+    1) ;;
+    *) refuse "cannot read TARGET_ROOT from setup/answers.env's text" ;;
+  esac
+  [ -z "$KEPT" ] || stage "$SETUP_GIVEN" sorted "$KEPT"
+  stage "$SETUP" printf '%s\n' "$text"
+  if [ -z "$KEPT" ] && present "$SETUP_GIVEN"; then
+    fault=$(discard_remove "$SETUP_GIVEN") || refuse "$fault"
+  fi
+  place
+  printf 'bin/ask: wrote setup/answers.env\n'
+}
+
+cmd_questionnaire() {
+  [ "$#" -eq 0 ] || usage "questionnaire takes no argument"
+  schema_ok
+  files "$QUESTIONNAIRE"
+  write "$QUESTIONNAIRE" answers_questionnaire "$SCHEMA"
+  printf 'bin/ask: wrote setup/questionnaire.md\n'
+}
+
+cmd_run() {
+  local name redo=0 remove="" have_remove=0 to=run arg fault field fields value
+  local out="" run_pairs override_pairs given_pairs setup_have setup_given setup_pairs outd rel render_md old_target="" target
+  local old_answers="" old_overrides="" old_given="" line
+  local answers_text override_text given_text
+  local -a run_args=() override_args=()
+  [ "$#" -ge 1 ] || usage "run needs NAME"
+  name=$1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --redo) redo=1 to=run ;;
+      --remove)
+        [ "$#" -ge 2 ] || usage "--remove needs PATH"
+        remove=$2 have_remove=1 to=run
+        shift
+        ;;
+      --setup-override) to=override ;;
+      -*) usage "unknown option: $1" ;;
+      *)
+        if [ "$to" = override ]; then
+          override_args+=("$1")
+        else
+          run_args+=("$1")
+        fi
+        ;;
+    esac
+    shift
+  done
+  [ "$have_remove" = 0 ] || [ "$redo" = 1 ] || usage "--remove goes with --redo"
+
+  # Everything is judged before anything is removed or written.
+  schema_ok
+  fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
+  answers_col "$SCHEMA" TARGET_ROOT type >/dev/null
+  case $? in
+    0) ;;
+    1) refuse "shared/answers.tsv has no TARGET_ROOT" ;;
+    *) refuse "cannot read TARGET_ROOT's row of shared/answers.tsv" ;;
+  esac
+  outd=$ws/stages/01-ask/output/$name
+  rel=stages/01-ask/output/$name
+  render_md=$ws/stages/02-render/output/$name/render.md
+  # Each file the run writes, removes, or reads as a record (decision 230).
+  files "$SETUP" "$SETUP_GIVEN" "$outd/answers.env" "$outd/given.env" "$outd/setup.override.env" \
+    "$outd/confirmed.md" "$render_md"
+  [ -f "$SETUP" ] || refuse "setup/answers.env is missing; run bin/ask setup"
+  fault=$(answers_validate "$SCHEMA" "$SETUP" setup setup/answers.env)
+  case $? in
+    0) ;;
+    1) refuse "setup/answers.env is not valid; fix it with bin/ask setup:" "$fault" ;;
+    *) refuse "cannot judge setup/answers.env:" "$fault" ;;
+  esac
+  setup_have=$(answers_read "$SETUP" setup/answers.env) || refuse "$setup_have"
+  # setup/answers.env is what bin/ask setup writes from setup/given.env, as
+  # bin/check setup holds it, with its words and route, so a run takes no
+  # setup value the operator did not give and setup did not work out
+  # (decision 229).
+  given "$SETUP_GIVEN" setup/given.env
+  setup_given=$GIVEN
+  value=$(answers_setup "$SCHEMA" "$setup_given")
+  case $? in
+    0) ;;
+    1) refuse "setup/given.env gives no setup/answers.env; correct it with bin/ask setup:" "$value" ;;
+    *) refuse "cannot work out what bin/ask setup writes:" "$value" ;;
+  esac
+  cmp -s - "$SETUP" <<<"$value"
+  case $? in
+    0) ;;
+    1)
+      ! present "$SETUP_GIVEN" || refuse "$(answers_setup_stale 1)"
+      refuse "$(answers_setup_stale 0)"
+      ;;
+    *) refuse "cannot compare setup/answers.env with what bin/ask setup writes" ;;
+  esac
+  if [ -f "$outd/answers.env" ]; then
+    [ "$redo" = 1 ] ||
+      refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
+    old_answers=$(answers_read "$outd/answers.env" "$rel/answers.env") ||
+      refuse "$old_answers; the operator may correct it by hand, or remove the run's folder $rel by hand and run it again"
+    answers_get - TARGET <<<"$old_answers" >/dev/null
+    case $? in
+      0) ;;
+      1) refuse "$rel/answers.env holds no TARGET, so the run is not redone; the operator may remove the run's folder $rel by hand and run it again" ;;
+      *) refuse "cannot read TARGET from $rel/answers.env" ;;
+    esac
+    # The old target: the old answers file's TARGET, verified as the
+    # discard verifies it, TARGET_ROOT under this HOME, then /NAME (decision
+    # 227). Answers that give none verified, edited by hand, holding no
+    # TARGET_ROOT or written under another HOME, give no old target to
+    # remove; a target render.md records is judged from that record.
+    old_target=$(answers_target_check "$outd/answers.env" "$name")
+    case $? in
+      0) ;;
+      1) old_target="" ;;
+      *) refuse "$rel/answers.env: $old_target" ;;
+    esac
+    given "$outd/setup.override.env" "$rel/setup.override.env"
+    old_overrides=$GIVEN
+    given "$outd/given.env" "$rel/given.env"
+    old_given=$GIVEN
+  else
+    [ "$redo" = 0 ] || refuse "there is no run $name to redo"
+  fi
+  assignments run ${run_args[@]+"${run_args[@]}"}
+  run_pairs=$PAIRS
+  case "
+$run_pairs" in
+    *'
+NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=value" ;;
+  esac
+  assignments setup ${override_args[@]+"${override_args[@]}"}
+  # A redo keeps only what the operator gave, each override and run answer
+  # not given again, and works every default out again (decision 229).
+  kept "$old_overrides" "$PAIRS" setup "$rel/setup.override.env"
+  override_pairs=$KEPT
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    fault=$(answers_check "$SCHEMA" "${line%%=*}" "${line#*=}") ||
+      refuse "$rel/setup.override.env: $fault; give it again with --setup-override"
+  done <<<"$override_pairs"
+  kept "$old_given" "$run_pairs" run "$rel/given.env"
+  given_pairs=$KEPT
+
+  # The setup fields: each overridden, or recorded in setup/given.env and
+  # read from setup/answers.env, or else worked out again from its default
+  # and the values before it, as bin/ask setup works it out, so an override
+  # moves each default made from it (decision 229). Then the run fields,
+  # each given or its default; then TARGET.
+  fields=$(answers_fields "$SCHEMA" setup) || refuse "cannot read the setup fields of shared/answers.tsv"
+  setup_pairs=""
+  while IFS= read -r field; do
+    [ -n "$field" ] || continue
+    value=$(answers_get - "$field" <<<"$override_pairs")
+    case $? in
+      0) ;;
+      1)
+        answers_get - "$field" <<<"$setup_given" >/dev/null
+        case $? in
+          0) ;;
+          1) continue ;;
+          *) refuse "cannot read setup/given.env's fields" ;;
+        esac
+        pick "$setup_have" "$field" setup/answers.env
+        value=$PICKED
+        ;;
+      *) refuse "cannot read the overrides" ;;
+    esac
+    setup_pairs="$setup_pairs$field=$value
+"
+  done <<<"$fields"
+  out=$(answers_derive "$SCHEMA" setup "$setup_pairs" "") || refuse "the answers are not written:" "$out"
+  out="$out
+"
+  value=$(answers_derive "$SCHEMA" run "NAME=$name
+$given_pairs" "$out") || refuse "the answers are not written:" "$value"
+  out="$out$value
+"
+  pick "$out" TARGET_ROOT "this run's answers.env"
+  target=$(answers_target_for "$PICKED" "$name")
+  case $? in
+    0) ;;
+    1)
+      # A TARGET_ROOT this run's overrides give, a kept one included, is
+      # changed only by giving it again after --setup-override.
+      answers_get - TARGET_ROOT <<<"$override_pairs" >/dev/null
+      case $? in
+        0) refuse "$target; give TARGET_ROOT again after --setup-override, which replaces the override this run keeps" ;;
+        1) refuse "$target; give TARGET_ROOT again, with --setup-override or with bin/ask setup" ;;
+        *) refuse "cannot read the overrides" ;;
+      esac
+      ;;
+    *) refuse "$target" ;;
+  esac
+  out="${out}TARGET=$target
+"
+  # What the run writes, made before anything is removed.
+  if ! answers_text=$(sorted "$out") || ! override_text=$(sorted "$override_pairs") ||
+    ! given_text=$(sorted "$given_pairs"); then
+    refuse "cannot sort the answers"
+  fi
+
+  # A redo removes render.md, so it judges render.md's record first, as
+  # render does (discard_record): no removal drops the record of a present
+  # target the discard may not take. A first run removes no render.md. The
+  # old target, present, is removed only through the discard, which derives
+  # the run's target from the old answers file itself, and judges the
+  # record too, so the route names it only when the discard would take it.
+  if [ "$have_remove" = 1 ]; then
+    fault=$(discard_check "$remove" "$outd/answers.env" "$name" "$render_md") ||
+      refuse "$fault; without --remove, bin/ask run $name --redo names the way"
+  fi
+  if [ "$have_remove" = 0 ] && [ "$redo" = 1 ]; then
+    fault=$(discard_record "$outd/answers.env" "$name" "$render_md")
+    case $? in
+      0) ;;
+      1) refuse "a redo may not remove render.md: $fault; it is left alone: the operator may move that target away by hand, then run the redo again" ;;
+      2) refuse "a redo may not remove render.md: $fault; it is left alone, as no target it names can be judged: the operator may remove render.md by hand, once the run's target ${old_target:-$target} is dealt with if it is there, then run the redo again" ;;
+      *) refuse "a redo may not remove render.md: $fault; it is left alone: the operator may give its owner search permission on the directories above it, then run the redo again" ;;
+    esac
+  fi
+  # The new target is judged before the old one is routed, so a route is
+  # never followed only to be refused for a target it did not name; one that
+  # is the old target is the old one's to route.
+  if present "$target" && [ "$target" != "$old_target" ] &&
+    { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
+    refuse "the target $target is present, and this run may not remove it; it is left alone: the operator may move it away by hand, or give another TARGET_ROOT, then run the command again"
+  fi
+  if [ "$have_remove" = 0 ] && [ "$redo" = 1 ]; then
+    if present "$old_target"; then
+      fault=$(discard_check "$old_target" "$outd/answers.env" "$name" "$render_md") ||
+        refuse "the target $old_target is present, and a redo may not remove it: $fault; it is left alone: the operator may move it away by hand, then run the redo again"
+      refuse "the target $old_target is present: with the operator's yes to \"remove $old_target\", run bin/ask run $name --redo --remove \"$old_target\" and the answers"
+    fi
+  fi
+
+  # The files it writes, staged beside them, the last thing that can refuse
+  # before anything is removed.
+  [ -z "$override_pairs" ] || stage "$outd/setup.override.env" printf '%s\n' "$override_text"
+  [ -z "$given_pairs" ] || stage "$outd/given.env" printf '%s\n' "$given_text"
+  stage "$outd/answers.env" printf '%s\n' "$answers_text"
+
+  # Remove, then place. A killed render's staging directories under the old
+  # TARGET_ROOT, which a moved TARGET_ROOT would otherwise strand, go first,
+  # so a sweep that refuses, as of a root it cannot list, leaves the run's
+  # files as they were (decision 226). An old target none verifies has no
+  # root to sweep.
+  if [ "$redo" = 1 ] && [ -n "$old_target" ]; then
+    fault=$(discard_leftovers "${old_target%/*}" "$name") || refuse "$fault"
+  fi
+  route="run bin/ask run $name --redo again, with the answers, to write them"
+  if [ "$have_remove" = 1 ]; then
+    present "$remove" && removed=$remove
+    fault=$(discard_target "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
+  fi
+  if [ "$redo" = 1 ]; then
+    # What derives from the confirmation goes first, so a clear that fails
+    # leaves the run confirmed and rendered, and the redo is asked for again.
+    for value in "$ws/stages/03-verify/output/$name" "$ws/stages/02-render/output/$name" "$outd/confirmed.md"; do
+      gone_by "$value"
+    done
+  fi
+  if [ -z "$override_pairs" ] && present "$outd/setup.override.env"; then
+    gone_by "$outd/setup.override.env"
+  fi
+  if [ -z "$given_pairs" ] && present "$outd/given.env"; then
+    gone_by "$outd/given.env"
+  fi
+  place
+  printf 'bin/ask: wrote stages/01-ask/output/%s/answers.env\n' "$name"
+}
+
+cmd_confirm() {
+  local name who outd fault blob at
+  [ "$#" -eq 3 ] && [ "$2" = --by ] || usage "confirm takes NAME --by WHO"
+  name=$1 who=$3
+  schema_ok
+  fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
+  outd=$ws/stages/01-ask/output/$name
+  files "$outd/confirmed.md" "$outd/answers.env"
+  [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
+  # Read through the one reader first, so a file it refuses, holding a NUL,
+  # is refused as such, with a redo's way out, never as a read that failed
+  # (decision 229).
+  fault=$(answers_read "$outd/answers.env" "stages/01-ask/output/$name/answers.env")
+  case $? in
+    0) ;;
+    1) refuse "$fault; the operator may correct it by hand, or remove the run's folder stages/01-ask/output/$name by hand and run it again" ;;
+    *) refuse "$fault" ;;
+  esac
+  fault=$(answers_target_check "$outd/answers.env" "$name")
+  case $? in
+    0) ;;
+    1) refuse "stages/01-ask/output/$name/answers.env: $fault; change the answers with bin/ask run $name --redo" ;;
+    *) refuse "stages/01-ask/output/$name/answers.env: $fault" ;;
+  esac
+  # The operator's name meets the rule every value meets.
+  fault=$(answers__value --by "$who") || refuse "$fault; --by names the operator on one line"
+  # Hashed as render hashes it: in the workspace, under git.sh's environment.
+  blob=$(cd "$ws" && answers_blob "$outd/answers.env") || refuse "cannot hash $outd/answers.env"
+  at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || refuse "cannot read the time"
+  write "$outd/confirmed.md" printf '%s\n' "# Confirmed: $name" '' "by: $who" "at: $at" "answers: $blob"
+  printf 'bin/ask: wrote stages/01-ask/output/%s/confirmed.md\n' "$name"
+}
+
+[ "$#" -ge 1 ] || usage "a subcommand is required"
+# Every git it starts, the root rule's and confirm's hash, runs under git.sh's
+# environment, so no caller's GIT_* variable or config reaches one.
+git_hermetic
+# The root rule reads `git worktree list -z`, which needs git 2.36, the
+# floor render holds too.
+fault=$(git_version_ok) || refuse "$fault"
+sub=$1
+shift
+case "$sub" in
+  setup) cmd_setup "$@" ;;
+  questionnaire) cmd_questionnaire "$@" ;;
+  run) cmd_run "$@" ;;
+  confirm) cmd_confirm "$@" ;;
+  *) usage "unknown subcommand: $sub" ;;
+esac

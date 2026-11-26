@@ -8,6 +8,7 @@
 #                            read. Sets AGENTS_LINES to AGENTS.md's lines.
 #
 # The product's `agents` check and the workspace's `disclosure` both call it.
+# Each status a guard reads is its own, never the caller's pipefail.
 
 agents_judge() {
   local src=$1 max=$2 claude agents refused=0
@@ -33,7 +34,10 @@ agents_judge() {
   agents=$(tree_cat "$src" AGENTS.md && printf x)
   case $? in
     0)
-      AGENTS_LINES=$(printf '%s' "${agents%x}" | awk 'END { print NR }')
+      AGENTS_LINES=$(
+        set -o pipefail
+        printf '%s' "${agents%x}" | awk 'END { print NR }'
+      ) || return 2
       if [ "$AGENTS_LINES" -gt "$max" ]; then
         printf 'AGENTS.md has %s lines, over %s\n' "$AGENTS_LINES" "$max"
         refused=1

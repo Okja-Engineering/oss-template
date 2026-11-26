@@ -79,6 +79,16 @@ assert_contains "$out" "git dir: $(cd "$E" && pwd -P)/iso/.git" "an inherited GI
 assert_contains "$out" "untracked: untracked.txt" "the caller's git ignore files are not read"
 assert_eq "" "$(CHECK_REF=main bash -c '. "$1"; printf %s "${CHECK_REF:-}"' _ "$TEST_DIR/lib/fixture.sh")" \
   "an inherited CHECK_REF is unset"
+# Every inherited GIT_* goes, the trace and pathspec ones among them, so a
+# caller's GIT_TRACE=1 adds nothing to a git the suites run.
+out=$(GIT_TRACE=1 GIT_TRACE_PERFORMANCE=1 GIT_ICASE_PATHSPECS=1 bash -c '
+  . "$1/lib/assert.sh"
+  . "$1/lib/fixture.sh"
+  printf "%s %s %s\n" "${GIT_TRACE-unset}" "${GIT_TRACE_PERFORMANCE-unset}" "${GIT_ICASE_PATHSPECS-unset}"
+  git --version
+' _ "$TEST_DIR" 2>&1)
+assert_eq "unset unset unset
+$(git --version)" "$out" "an inherited GIT_TRACE, GIT_TRACE_PERFORMANCE and GIT_ICASE_PATHSPECS are unset"
 
 # --- mutations that change something pass -----------------------------------
 fixture_replace "$R/GOVERNANCE.md" "- A Person" "- Another Person"

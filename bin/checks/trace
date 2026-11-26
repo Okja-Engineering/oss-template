@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# Every rule line in an agent file links its source, every link resolves, every deny entry is listed
+# modes: tree staged range
+#
+# AC4: TAC12's rule over the workspace's agent files, AGENTS.md, CLAUDE.md,
+# CONTEXT.md and each stage's contract: a line holding a rule word of
+# foundation/bin/lib/rules.sh's `trace` list links docs/workflow.md,
+# CONTRIBUTING.md or GOVERNANCE.md; every relative link and anchor resolves,
+# through foundation/bin/lib/links.sh; and each deny entry in
+# .claude/settings.json appears in CONTRIBUTING.md § Agent guards. The
+# agent files are the top level's and stages/*/CONTEXT.md, so none lies
+# under foundation/, docs/adr/, docs/work/ or tests/fixtures/.
+set -u
+set -o pipefail
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/tree.sh
+. "$here/../../foundation/bin/lib/tree.sh"
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/links.sh
+. "$here/../../foundation/bin/lib/links.sh"
+# shellcheck source-path=SCRIPTDIR source=../../foundation/bin/lib/rules.sh
+. "$here/../../foundation/bin/lib/rules.sh"
+
+SOURCES='docs/workflow.md CONTRIBUTING.md GOVERNANCE.md'
+src=$(tree_source)
+all=$(tree_list "$src") || exit 2
+paths=$(printf '%s\n' "$all" | sed 's/^[^	]*	//') || exit 2
+agents=$(printf '%s\n' "$paths" | awk '
+  $0 == "AGENTS.md" || $0 == "CLAUDE.md" || $0 == "CONTEXT.md" ||
+    $0 ~ /^stages\/[^\/]+\/CONTEXT\.md$/') || exit 2
+refused=0
+files=0
+
+# sourced FILE TARGETS: one of TARGETS, link targets in FILE one a line, is
+# one of SOURCES. The check cannot run when a target cannot be read.
+sourced() {
+  local target resolved
+  while IFS= read -r target; do
+    [ -n "$target" ] || continue
+    resolved=$(links_resolve "$1" "$target")
+    case $? in
+      0) ;;
+      3) exit 2 ;;
+      *) continue ;;
+    esac
+    case " $SOURCES " in *" ${resolved%%#*} "*) return 0 ;; esac
+  done <<EOF
+$2
+EOF
+  return 1
+}
+
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  files=$((files + 1))
+  hits=$(tree_cat "$src" "$file" | rules_lines trace) || exit 2
+  # The file's links, read whole, since a reference's definition may sit on
+  # any line.
+  targets=$(tree_cat "$src" "$file" | links_targets) || exit 2
+  while IFS='	' read -r nr text; do
+    [ -n "$nr" ] || continue
+    on=$(links_on "$nr" "$targets") || exit 2
+    sourced "$file" "$on" && continue
+    printf '%s:%s: a rule line that links none of %s: %s\n' "$file" "$nr" "$SOURCES" "$text"
+    refused=1
+  done <<EOF
+$hits
+EOF
+  links_judge "$src" "$file" "$paths"
+  case $? in
+    0) ;;
+    1) refused=1 ;;
+    *) exit 2 ;;
+  esac
+done <<EOF
+$agents
+EOF
+
+# The deny list: each entry appears, as written, in § Agent guards.
+settings=$(tree_cat "$src" .claude/settings.json)
+case $? in
+  0 | 1) ;;
+  *) exit 2 ;;
+esac
+contributing=$(tree_cat "$src" CONTRIBUTING.md)
+case $? in
+  0 | 1) ;;
+  *) exit 2 ;;
+esac
+# § Agent guards, read through links.sh's Markdown subset: from a level-1 or
+# level-2 heading, ATX or setext, "Agent guards", to the next such heading.
+guards=$(links_md <<<"$contributing" '
+  function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+  # heading T LEVEL: a heading of level 2 or less opens the section or
+  # closes it; a deeper one is part of it.
+  function heading(t, level) { if (level <= 2) insec = (t == "Agent guards") }
+  # flush: the paragraph lines held back, which no underline made a heading.
+  function flush(   i) {
+    if (insec) for (i = 1; i <= held; i++) print hl[i]
+    held = 0
+  }
+  {
+    k = md_block($0)
+    if (k == "text") { para = held ? para " " trim($0) : trim($0); hl[++held] = $0; next }
+    # A setext heading is of level 1 or 2.
+    if (k == "under" && held) { held = 0; heading(para, 2); next }
+    flush()
+    if (k == "atx") {
+      h = trim($0)
+      match(h, /^#+/)
+      level = RLENGTH
+      sub(/^#+[ \t]*/, "", h)
+      sub(/[ \t]+#+$/, "", h)
+      heading(h, level)
+      if (level <= 2) next
+    }
+    if (insec) print
+  }
+  END { flush() }') || exit 2
+# The strings of the "deny" array, each on its own line.
+entries=$(printf '%s\n' "$settings" | awk '
+  { s = s $0 "\n" }
+  END {
+    i = index(s, "\"deny\"")
+    if (!i) exit
+    s = substr(s, i + 6)
+    if (!match(s, /^[ \t\n]*:[ \t\n]*\[/)) exit
+    s = substr(s, RLENGTH + 1)
+    while (match(s, /^[ \t\n,]*"([^"\\]|\\.)*"/)) {
+      e = substr(s, 1, RLENGTH)
+      s = substr(s, RLENGTH + 1)
+      sub(/^[^"]*"/, "", e)
+      print substr(e, 1, length(e) - 1)
+    }
+  }') || exit 2
+denies=0
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  denies=$((denies + 1))
+  case "$guards" in
+    *"$entry"*) ;;
+    *)
+      printf '.claude/settings.json: the deny entry %s is not listed in CONTRIBUTING.md § Agent guards\n' "$entry"
+      refused=1
+      ;;
+  esac
+done <<<"$entries"
+
+printf 'examined %s agent files and %s deny entries in %s\n' "$files" "$denies" "$src"
+exit "$refused"

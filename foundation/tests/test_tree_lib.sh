@@ -180,6 +180,60 @@ done
 assert_contains "$list_wt" "120000 $(printf CLAUDE.md | git -C "$O" hash-object --stdin)${TAB}-link" \
   "worktree: a symbolic link whose name starts with - has its target's blob"
 assert_eq "CLAUDE.md" "$(content_of "$O" worktree -link)" "worktree: reads a link as its target text"
+# A link whose text cannot be read fails the read; it is not an empty file.
+fixture_failing "$SCRATCH/stub" readlink '*/-link' 1
+(cd "$O" && PATH="$SCRATCH/stub:$PATH" && tree_cat worktree -link >/dev/null)
+assert_status 2 "$?" "worktree: a link readlink cannot read fails the read"
+# And fails the listing: its text unread, or its blob id not worked out
+# (the tests lens's T3 of S2's fourth ship gate).
+fixture_failing "$SCRATCH/lsstub" readlink '*/-link' 1
+(cd "$O" && PATH="$SCRATCH/lsstub:$PATH" && tree_list worktree >/dev/null)
+assert_status 2 "$?" "worktree: a listed link readlink cannot read fails the listing"
+fixture_failing "$SCRATCH/hashstub" git 'hash-object --stdin' 1 128
+(cd "$O" && PATH="$SCRATCH/hashstub:$PATH" && tree_list worktree >/dev/null)
+assert_status 2 "$?" "worktree: a listed link whose blob id git cannot work out fails the listing"
+# A listed file whose bytes cannot be read fails the read (2); it is not a
+# file the tree lacks (1), whatever status the reader exits with.
+fixture_failing "$SCRATCH/catstub" cat '*/CLAUDE.md' 1 1
+(cd "$O" && PATH="$SCRATCH/catstub:$PATH" && tree_cat worktree CLAUDE.md >/dev/null)
+assert_status 2 "$?" "worktree: a file cat cannot read fails the read"
+for src in index commit:HEAD; do
+  rm -rf "$SCRATCH/gitstub"
+  fixture_failing "$SCRATCH/gitstub" git '*cat-file blob *:CLAUDE.md' 1 1
+  (cd "$O" && PATH="$SCRATCH/gitstub:$PATH" && tree_cat "$src" CLAUDE.md >/dev/null)
+  assert_status 2 "$?" "$src: a blob git cannot read fails the read"
+  # The look for the path failing, git's 128, is a failed read, never a
+  # path the tree lacks; a path the tree lacks is still 1.
+  rm -rf "$SCRATCH/gitstub"
+  fixture_failing "$SCRATCH/gitstub" git '*ls-tree * -- CLAUDE.md' 1 128
+  (cd "$O" && PATH="$SCRATCH/gitstub:$PATH" && tree_cat "$src" CLAUDE.md >/dev/null)
+  assert_status 2 "$?" "$src: a path whose type git cannot read fails the read"
+  (cd "$O" && tree_cat "$src" no-such-file.md >/dev/null)
+  assert_status 1 "$?" "$src: a path the tree lacks is not held"
+done
+# The worktree's look for the path in git's listing failing is a failed
+# read, never a path not listed.
+fixture_failing "$SCRATCH/grepstub" grep '-Fxq -e CLAUDE.md' 1 2
+(cd "$O" && PATH="$SCRATCH/grepstub:$PATH" && tree_cat worktree CLAUDE.md >/dev/null)
+assert_status 2 "$?" "worktree: a look for the path that fails fails the read"
+
+# A tree object on the path that cannot be read is a failed read (2), never
+# a path the tree lacks (1): git rev-parse exits 1 for both (render R3 of
+# S2's fourth ship gate). A path the tree lacks, read whole, is still 1.
+C="$SCRATCH/corrupt"
+fixture_repo "$C"
+fixture_write "$C/dir/file" "x"
+fixture_write "$C/top" "y"
+fixture_commit "$C" "test: a tree with a subtree"
+sub=$(git -C "$C" rev-parse HEAD:dir)
+rm -f "$C/.git/objects/${sub:0:2}/${sub:2}"
+(cd "$C" && tree_cat commit:HEAD dir/file >/dev/null 2>&1)
+assert_status 2 "$?" "commit: a path under a tree object that cannot be read fails the read"
+(cd "$C" && tree_cat commit:HEAD dir/absent >/dev/null 2>&1)
+assert_status 2 "$?" "  and so does a path it may or may not hold"
+(cd "$C" && tree_cat commit:HEAD absent >/dev/null 2>&1)
+assert_status 1 "$?" "  and a path the trees read whole lack is not held"
+assert_eq "y" "$(content_of "$C" commit:HEAD top)" "  and one they hold is read"
 
 # A path no listing line can hold (a newline) fails every source alike.
 N="$SCRATCH/newline"

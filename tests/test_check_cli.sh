@@ -2,6 +2,7 @@
 # The workspace's bin/check sources the product's dispatcher over the
 # workspace's own bin/checks/ and takes each of C4's argument forms (AC5).
 set -u
+set -o pipefail
 export LC_ALL=C
 TEST_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/assert.sh

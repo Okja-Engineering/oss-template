@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Check the commit message with the workspace's bin/check commit-msg.
 set -u
+set -o pipefail
 export LC_ALL=C
 [ "$#" -eq 1 ] || { printf 'commit-msg: git passes one FILE, the message\n' >&2; exit 2; }
 root=$(git rev-parse --show-toplevel) || exit 2

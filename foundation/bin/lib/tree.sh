@@ -19,6 +19,8 @@
 # `git commit` does, so reading the index takes its lock and writes tree
 # objects, and fails when it cannot. The working tree is what
 # `git add -A` would stage, each file hashed as its bytes stand, unfiltered.
+# Each pipeline sets pipefail itself, never relying on the caller's
+# (decision 228).
 
 tree_source() {
   case "${CHECK_MODE:-tree}" in
@@ -52,7 +54,10 @@ tree_list() {
       ;;
   esac
   [ -n "$listing" ] || return 0
-  printf '%s\n' "$listing" | tree__exclude "$@" | sort -t '	' -k 2
+  (
+    set -o pipefail
+    printf '%s\n' "$listing" | tree__exclude "$@" | sort -t '	' -k 2
+  ) || return 2
 }
 
 tree_cat() {
@@ -66,20 +71,32 @@ tree_cat() {
         cd "$top" &&
           git ls-files -z -c -o --exclude-standard -- ":(literal)$path" | tr '\0' '\n'
       ) || return 2
-      printf '%s\n' "$listed" | grep -Fxq -e "$path" || return 1
+      # grep's 1 is "not listed"; any higher status is a failed read.
+      grep -Fxq -e "$path" <<<"$listed"
+      case $? in
+        0) ;;
+        1) return 1 ;;
+        *) return 2 ;;
+      esac
       if [ -L "$top/$path" ]; then
-        printf '%s' "$(readlink "$top/$path")"
+        listed=$(readlink "$top/$path") || return 2
+        printf '%s' "$listed"
       elif [ -f "$top/$path" ]; then
-        cat "$top/$path"
+        cat "$top/$path" || return 2
       else
         return 1
       fi
       ;;
     index | commit:*)
       tree=$(tree__tree "$src") || return 2
-      type=$(git cat-file -t "$tree:$path" 2>/dev/null) || return 1
+      # The path's entry, read through each tree on the way to it: none,
+      # those trees read whole, is a path the tree lacks; a tree it cannot
+      # read fails the read, never "not held". cat-file and rev-parse fail
+      # alike for both.
+      type=$(git --literal-pathspecs ls-tree --format='%(objecttype)' "$tree" -- "$path") || return 2
+      [ -n "$type" ] || return 1
       [ "$type" = blob ] || return 1
-      git cat-file blob "$tree:$path"
+      git cat-file blob "$tree:$path" || return 2
       ;;
     *) return 2 ;;
   esac
@@ -163,7 +180,10 @@ tree__worktree_lines() {
     last=$path
     if [ -L "$path" ]; then
       id=$(readlink "./$path") || return 2
-      id=$(printf '%s' "$id" | git hash-object --stdin) || return 2
+      id=$(
+        set -o pipefail
+        printf '%s' "$id" | git hash-object --stdin
+      ) || return 2
       printf '120000 %s\t%s\n' "$id" "$path"
     elif [ -d "$path" ]; then
       if [ -e "$path/.git" ]; then

@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+# Stage 02's script (AC9-AC12): it renders a confirmed run's answers into
+# its target through bin/lib/render.sh, under hermetic git
+# (bin/lib/git.sh), and records the render in
+# stages/02-render/output/NAME/render.md.
+#
+# usage: bin/render NAME [--replace [--remove PATH]]
+#
+# It reads the run's answers.env and confirmed.md, which must name it by its
+# blob id; the schema and `foundation/` at the workspace's committed HEAD;
+# HOME, to expand TARGET_ROOT's ~; TMPDIR, under which it makes its private
+# directory; what is at the target and beside it; and, under --replace,
+# render.md's record; and nothing else (AC11). Everything is judged before anything is removed or
+# written: the answers against HEAD's schema; TARGET, still TARGET_ROOT
+# with its ~ expanded under this HOME, then /NAME (decision 227);
+# TARGET_ROOT outside every working tree of the workspace, and the target
+# none of them and above none; the target
+# absent, or an empty directory; the foundation rendered in a private
+# directory. A run already rendered needs --replace. A present target, the
+# one render.md records or one a killed render left with no render.md,
+# needs --replace --remove naming it, which discards it through the shared
+# discard, bin/lib/discard.sh, after the operator's yes at stage 02's
+# checkpoint. --replace then clears the run's 03 outputs, so the next
+# verify is a first run (decision 157), and removes the old render.md,
+# whose record it judges first through the discard's discard_record, as a
+# redo does: one that names no target or cannot be read, or names a present
+# target that is not the run's, is refused (decision 227).
+#
+# The write is one transaction (decision 226). Render makes TARGET_ROOT and
+# any missing ancestor, which stay, then a staging directory beside the
+# target with an exclusive mkdir; it copies the render there, walks and
+# fingerprints it there, its git tree id built in a private repository,
+# and writes render.md's text to a temporary file beside it: the target,
+# the workspace SHA, the answers blob id, the fingerprint and the file
+# list. Then, with signals held off, it removes an empty target with rmdir
+# and renames the staging directory to the target and the temporary file to
+# render.md; an empty target so removed is not put back if a rename then
+# fails. A failure or a signal removes only what this run made: its private
+# directory, made under TMPDIR, absolute, which holds every temporary file
+# but render.md's, the libraries' included; the staging directory; the
+# temporary file beside render.md; the run's output folder,
+# stages/02-render/output/NAME/, when this run made it and it holds nothing;
+# and the target when this run's rename put it there. A kill no trap sees (SIGKILL) leaves its staging directory, which the run's
+# next render, or its next --redo, removes, and its private directory and
+# render.md's temporary file, which nothing reads.
+# Exit 0 when done, a last line that cannot be written included, 1 on a
+# refusal, 2 on a usage error, or when the shell's signals cannot be worked
+# out (bin/lib/discard.sh).
+set -u
+set -o pipefail
+export LC_ALL=C
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+ws=$(CDPATH='' cd -- "$here/.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=../foundation/bin/lib/tree.sh
+. "$here/../foundation/bin/lib/tree.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/answers.sh
+. "$here/lib/answers.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/discard.sh
+. "$here/lib/discard.sh"
+# The signals a run holds off, worked out as discard.sh is sourced; with
+# none, nothing is made (decision 226).
+if [ -z "$DISCARD_SIGNALS" ]; then
+  printf 'bin/render: cannot work out the signals to hold off from the shell'"'"'s trap -l; nothing is done\n' >&2
+  exit 2
+fi
+# shellcheck source-path=SCRIPTDIR source=lib/git.sh
+. "$here/lib/git.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/render.sh
+. "$here/lib/render.sh"
+
+usage() {
+  printf 'bin/render: %s\n' "$1" >&2
+  printf '%s\n' 'usage: bin/render NAME [--replace [--remove PATH]]' >&2
+  exit 2
+}
+refuse() {
+  printf 'bin/render: %s\n' "$@" >&2
+  exit 1
+}
+
+# present PATH: something, a dangling symbolic link included, is at PATH;
+# when that cannot be told, a directory above it unsearchable, render
+# refuses, never reading it as absent (decision 228).
+present() {
+  discard_there "$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) refuse "cannot tell whether $1 is there: a directory above it cannot be searched; give its owner search permission, then run bin/render again" ;;
+  esac
+}
+# empty_dir PATH: PATH is a directory, not a symbolic link, that ls lists
+# whole as holding nothing.
+empty_dir() {
+  local held
+  [ -d "$1" ] && [ ! -L "$1" ] && held=$(ls -A -- "$1" 2>/dev/null) && [ -z "$held" ]
+}
+
+[ "$#" -ge 1 ] || usage "NAME is required"
+name=$1
+shift
+replace=0 remove="" have_remove=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --replace) replace=1 ;;
+    --remove)
+      [ "$#" -ge 2 ] || usage "--remove needs PATH"
+      remove=$2 have_remove=1
+      shift
+      ;;
+    *) usage "unknown argument: $1" ;;
+  esac
+  shift
+done
+[ "$have_remove" = 0 ] || [ "$replace" = 1 ] || usage "--remove goes with --replace"
+
+# What this run made, all that a failure or an interrupt removes: its
+# private directory, which holds every temporary file, the libraries'
+# included, and the staging directory, render.md's temporary file and the
+# target, each recorded with signals held off as it is made (decision 226).
+work="" stage="" placed="" tmp="" outd_made=""
+cleanup() {
+  local gone
+  # Held off through cleanup, so a second signal never ends it partway.
+  discard_hold
+  for gone in "$placed" "$stage"; do
+    [ -z "$gone" ] || gone=$(discard_remove "$gone") || printf 'bin/render: %s\n' "$gone" >&2
+  done
+  [ -z "$tmp" ] || rm -f -- "$tmp"
+  # The output folder this run made, only while it holds nothing.
+  [ -z "$outd_made" ] || rmdir -- "$outd_made" 2>/dev/null || true
+  [ -z "$work" ] || rm -rf -- "$work"
+}
+trap cleanup EXIT
+# The private directory, made under TMPDIR made absolute, so it stays the
+# same directory once render enters the workspace.
+tmpdir=${TMPDIR:-/tmp}
+case "$tmpdir" in
+  /*) ;;
+  *) tmpdir=$PWD/$tmpdir ;;
+esac
+discard_hold
+work=$(mktemp -d "$tmpdir/render.XXXXXX") || refuse "cannot make a temporary directory"
+discard_traps
+TMPDIR=$work
+export TMPDIR
+git_hermetic
+fault=$(git_version_ok) || refuse "$fault"
+cd "$ws" || refuse "cannot enter the workspace $ws"
+
+# The answers, confirmed, against the schema at HEAD.
+# Each lookup whose 1 is "none" reads a higher status as a failure, never
+# as that none (decision 228).
+head=$(git rev-parse -q --verify 'HEAD^{commit}')
+case $? in
+  0) ;;
+  1) refuse "the workspace has no commit at HEAD" ;;
+  *) refuse "cannot read the workspace's HEAD" ;;
+esac
+tree_cat "commit:$head" shared/answers.tsv >"$work/schema"
+case $? in
+  0) ;;
+  1) refuse "HEAD holds no shared/answers.tsv" ;;
+  *) refuse "cannot read shared/answers.tsv at HEAD" ;;
+esac
+fault=$(answers_schema_check "$work/schema" shared/answers.tsv)
+case $? in
+  0) ;;
+  1) refuse "shared/answers.tsv at HEAD does not parse:" "$fault" ;;
+  *) refuse "cannot read shared/answers.tsv at HEAD" ${fault:+"$fault"} ;;
+esac
+fault=$(answers_check "$work/schema" NAME "$name") || refuse "$fault"
+outd=stages/01-ask/output/$name
+[ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name, and confirm it"
+[ -f "$outd/confirmed.md" ] ||
+  refuse "the run $name has no confirmed.md; the operator confirms its answers at stage 01's checkpoint"
+cp "$outd/answers.env" "$work/answers.env" || refuse "cannot read $outd/answers.env"
+blob=$(answers_blob "$work/answers.env") || refuse "cannot hash $outd/answers.env"
+named=$(answers_record "$outd/confirmed.md" answers)
+case $? in
+  0) ;;
+  1) named="" ;;
+  *) refuse "cannot read $outd/confirmed.md" ;;
+esac
+[ "$blob" = "$named" ] ||
+  refuse "$outd/answers.env is not the answers confirmed.md names (blob $blob, not ${named:-none}); the operator confirms them again at stage 01's checkpoint"
+fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env")
+case $? in
+  0) ;;
+  1) refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault" ;;
+  *) refuse "cannot judge the answers under shared/answers.tsv at HEAD:" "$fault" ;;
+esac
+named=$(answers_get "$work/answers.env" NAME) || refuse "cannot read NAME from $outd/answers.env"
+[ "$named" = "$name" ] || refuse "$outd/answers.env names another run"
+target=$(answers_target_check "$work/answers.env" "$name")
+case $? in
+  0) ;;
+  1) refuse "$outd/answers.env: $target; change the answers with bin/ask run $name --redo" ;;
+  *) refuse "$outd/answers.env: $target" ;;
+esac
+root=${target%/*}
+
+# Where it goes, and what is in the way.
+render_md=stages/02-render/output/$name/render.md
+if present "$render_md" && [ ! -f "$render_md" ]; then
+  refuse "$render_md is not a file; it is left alone"
+fi
+if [ -f "$render_md" ] && [ "$replace" = 0 ]; then
+  refuse "the run $name is rendered already; render it again with --replace, at stage 02's checkpoint"
+fi
+# --replace removes render.md, so it judges render.md's record first, as a
+# redo does (discard_record): no removal drops the record of a present
+# target the discard may not take. A present target is removed only
+# through the discard, which derives the run's target itself (decision 227)
+# and judges the record too, so the route names it only when the discard
+# would take it.
+rec_st=0
+if [ "$have_remove" = 0 ]; then
+  fault=$(discard_record "$work/answers.env" "$name" "$render_md")
+  rec_st=$?
+fi
+if [ "$have_remove" = 1 ]; then
+  fault=$(discard_check "$remove" "$work/answers.env" "$name" "$render_md") ||
+    refuse "$fault; without --remove, bin/render $name --replace names the way"
+elif [ "$rec_st" = 1 ]; then
+  refuse "--replace may not remove render.md: $fault; it is left alone: the operator may move that target away by hand, then run bin/render $name --replace again"
+elif [ "$rec_st" = 2 ]; then
+  # A record that names no target the discard can judge routes to the step
+  # that works: removing render.md by hand, the run's target dealt with.
+  refuse "--replace may not remove render.md: $fault; it is left alone, as no target it names can be judged: the operator may remove render.md by hand, once the run's target $target is dealt with if it is there, then run bin/render $name again"
+elif [ "$rec_st" != 0 ]; then
+  refuse "--replace may not remove render.md: $fault; it is left alone: the operator may give its owner search permission on the directories above it, then run bin/render $name --replace again"
+elif present "$target" && ! empty_dir "$target"; then
+  fault=$(discard_check "$target" "$work/answers.env" "$name" "$render_md") ||
+    refuse "the target $target is present, and --replace may not remove it: $fault; it is left alone: the operator may move it away by hand, then run bin/render $name again"
+  refuse "the target $target is present: with the operator's yes to \"remove $target\", run bin/render $name --replace --remove \"$target\"; without it, it is left alone"
+elif [ "$replace" = 1 ] && [ ! -f "$render_md" ]; then
+  refuse "--replace: there is no render of $name to replace; run bin/render $name"
+fi
+
+# The foundation, rendered aside.
+mkdir "$work/out" || refuse "cannot make a temporary directory"
+render_tree "$head" "$work/schema" "$work/answers.env" "$work/out" >"$work/faults"
+case "$?" in
+  0) ;;
+  1) refuse "the foundation at HEAD does not render; nothing is written:" "$(cat "$work/faults")" ;;
+  *)
+    fault=$(cat "$work/faults")
+    refuse "cannot read foundation/ at HEAD" ${fault:+"$fault"}
+    ;;
+esac
+
+# A staging directory a killed render of this run left, by the staging name
+# this run uses with another process id, goes first, through the removal
+# helper (decision 226); nothing else beside the target is touched. One at
+# this process's own name is not a leftover to remove: the exclusive mkdir
+# below refuses it.
+fault=$(discard_leftovers "$root" "$name" "$$") || refuse "$fault"
+
+# The places this run writes, each made exclusively where nothing, not even
+# a symbolic link, is in the way, and recorded with signals held off, so
+# cleanup removes all it made and nothing it did not.
+if [ ! -d "${render_md%/*}" ]; then
+  discard_hold
+  mkdir -p "${render_md%/*}" && outd_made=${render_md%/*}
+  discard_traps
+  [ -n "$outd_made" ] || refuse "cannot make ${render_md%/*}"
+fi
+! present "$render_md.tmp.$$" || refuse "cannot write beside $render_md: $render_md.tmp.$$ is in the way"
+discard_hold
+(set -C && : >"$render_md.tmp.$$") 2>/dev/null && tmp=$render_md.tmp.$$
+discard_traps
+[ -n "$tmp" ] || refuse "cannot write beside $render_md: $render_md.tmp.$$"
+mkdir -p "$root" || refuse "cannot make TARGET_ROOT $root"
+discard_hold
+mkdir "$root/.$name.render.$$" 2>/dev/null && stage=$root/.$name.render.$$
+discard_traps
+[ -n "$stage" ] || refuse "cannot make the staging directory $root/.$name.render.$$"
+
+# Remove what the operator's yes names: the old target, then the run's 03
+# outputs, then its render.md, so a failure leaves a render.md asking for
+# --replace again, and one after leaves the run unrendered.
+if [ "$have_remove" = 1 ]; then
+  fault=$(discard_target "$remove" "$work/answers.env" "$name" "$render_md") || refuse "$fault"
+fi
+if [ "$replace" = 1 ]; then
+  fault=$(discard_remove "stages/03-verify/output/$name") || refuse "$fault"
+  fault=$(discard_remove "$render_md") || refuse "$fault"
+fi
+
+# Write, in the staging directory, then one rename into place.
+cp -Rp "$work/out/." "$stage/" || refuse "cannot copy the render into $stage"
+fault=$(render_walk "$stage" "$RENDER_LIST") || refuse "the walk refuses the render:" "$fault"
+fp=$(render_fingerprint "$stage" "$RENDER_LIST") || refuse "cannot fingerprint the render:" "$fp"
+# render.md's text in one write, so its one status is the write's.
+printf '%s\n' "# Render of $name" '' "target: $target" "workspace: $head" "answers: $blob" \
+  "fingerprint: $fp" '' '## Files' '' "$RENDER_LIST" >"$tmp" || refuse "cannot write $tmp"
+# The renames, with signals held off to the end: an empty target this run
+# removes is not put back if a rename then fails (decision 226).
+discard_hold
+if [ -d "$target" ] && [ ! -L "$target" ]; then
+  rmdir -- "$target" 2>/dev/null || refuse "the target $target is no longer an empty directory; it is left alone"
+fi
+mv -- "$stage" "$target" 2>/dev/null || refuse "cannot move the render into $target"
+if [ -e "$target/${stage##*/}" ]; then
+  stage=$target/${stage##*/}
+  refuse "the target $target appeared while render ran; it is left alone"
+fi
+placed=$target stage=""
+mv -f -- "$tmp" "$render_md" || refuse "cannot write $render_md"
+placed="" tmp="" outd_made=""
+# The render is done: a line that cannot be written does not make it a
+# refusal.
+printf 'bin/render: rendered %s into %s, fingerprint %s\n' "$name" "$target" "$fp" || true

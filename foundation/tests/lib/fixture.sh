@@ -4,19 +4,27 @@
 # violation that silently did not land cannot pass as a test.
 #
 # usage: . fixture.sh (after assert.sh); fixture_repo DIR; fixture_replace ...
-# Sourcing it isolates git from the caller's configuration and environment.
+# Sourcing it isolates git from the caller's configuration and environment,
+# and gives the suite failing.sh's fixture_failing.
 
 FIXTURE_FOUNDATION=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=failing.sh
+. "$FIXTURE_FOUNDATION/tests/lib/failing.sh"
 
 # Git in a fixture reads no global or system configuration, no per-user
 # file (the ignore and attributes files under XDG_CONFIG_HOME or HOME) and no
 # template (whose hooks would run in every fixture repository), inherits no
-# repository from its caller (a hook's GIT_DIR, say) and has an identity; and
+# repository from its caller (a hook's GIT_DIR, say) or variable of git's
+# (GIT_TRACE, say) and has an identity; and
 # no check variable leaks in from the caller (CI sets CHECK_REF, say).
 fixture__isolate() {
   local v
-  for v in $(git rev-parse --local-env-vars); do
-    unset "$v"
+  # Every GIT_* variable, each `git rev-parse --local-env-vars` names and
+  # GIT_TRACE* among them, before any git runs.
+  for v in $(compgen -e); do
+    case "$v" in
+      GIT_*) unset "$v" ;;
+    esac
   done
   unset CHECK_MODE CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE CHECK_MSG_FILE \
     PR_TITLE PR_BODY PR_NUMBER
