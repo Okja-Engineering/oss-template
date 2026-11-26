@@ -1049,8 +1049,9 @@ assert_eq "TITLE=E" "$(grep '^TITLE=' "$ANS")" "  are the run's"
 rendered
 mkdir -p "$SCRATCH/moved$n/widget"
 rrefused "a redo whose new target is present, --remove naming the old one" \
-  "the target $SCRATCH/moved$n/widget is present, and no --remove names it" \
+  "the target $SCRATCH/moved$n/widget is present, and this run may not remove it" \
   run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+assert_contains "$OUT" "move it away by hand" "  naming the way out, never a --remove the discard would refuse"
 assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  with the old target left alone"
 # --remove naming another path, the target present: the discard refuses it
 # first, naming the path.
@@ -1084,6 +1085,79 @@ rrefused "confirm of answers whose TARGET_ROOT is inside the workspace" "$INSIDE
 rrefused "a redo --remove naming the run's own folder" "$INSIDE" \
   run widget --redo --remove "$OUTD" 'TITLE=C' 'DESCRIPTION=D'
 assert_eq "present" "$(gone "$ANS")" "  and the run's folder is left"
+
+# --- every route can be followed (S2's third ship gate, call P6) ---------------------------
+# Each refusal that routes to --redo names a step --redo can take, or the
+# refusal names the way out itself. The redo works the new TARGET_ROOT out
+# before it judges the old one, and an old TARGET_ROOT that gives no target
+# is no target to remove, its target judged from render.md's record.
+# M4: the route confirm names, from answers whose TARGET_ROOT gives no
+# target, is a redo that takes the new one.
+ask run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_status 0 "$ST" "a redo of answers whose old TARGET_ROOT gives no target"
+assert_eq "TARGET=$ROOT/widget" "$(grep '^TARGET=' "$ANS")" "  writes the TARGET the new TARGET_ROOT gives"
+assert_eq "present" "$(gone "$OUTD/given.env")" "  and the run's folder is kept"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+sed -e "s|^TARGET_ROOT=.*|TARGET_ROOT=$ROOT/|" -e "s|^TARGET=.*|TARGET=$ROOT//widget|" "$ANS" >"$SCRATCH/ans$n"
+mv "$SCRATCH/ans$n" "$ANS"
+ask confirm widget --by 'A Person'
+assert_contains "$OUT" "bin/ask run widget --redo" "confirm routes a TARGET_ROOT that gives no target to --redo"
+mkdir -p "$SCRATCH/moved$n"
+ask run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
+assert_status 0 "$ST" "  and the redo giving TARGET_ROOT again takes it"
+assert_eq "TARGET=$SCRATCH/moved$n/widget" "$(grep '^TARGET=' "$ANS")" "  writing its TARGET"
+# A recorded target, present, that the old answers give no target for is
+# judged from render.md's record and left, naming the way out; moved away
+# by hand, the redo goes on.
+rendered
+sed "s|^TARGET_ROOT=.*|TARGET_ROOT=$ROOT/|" "$ANS" >"$SCRATCH/ans$n"
+mv "$SCRATCH/ans$n" "$ANS"
+rrefused "a redo whose render.md names a present target the old answers give none for" \
+  "render.md names $ROOT/widget, present" run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_contains "$OUT" "move that target away by hand" "  naming the way out"
+assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and the target is left"
+mv "$ROOT/widget" "$SCRATCH/away$n"
+ask run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_status 0 "$ST" "  and, once it is moved away by hand, the redo goes on"
+# R1: a run rendered under one HOME, redone under another: the target
+# render.md names is left, naming the way out, then the redo goes on.
+fresh
+mkdir -p "$SCRATCH/home$n/a/targets" "$SCRATCH/home$n/b"
+ask setup 'TARGET_ROOT=~/targets'
+OUTD="$R/stages/01-ask/output/widget"
+ANS="$OUTD/answers.env"
+(cd "$R" && HOME="$SCRATCH/home$n/a" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' >/dev/null 2>&1 &&
+  HOME="$SCRATCH/home$n/a" bin/ask confirm widget --by 'A Person' >/dev/null 2>&1)
+mkdir -p "$R/stages/02-render/output/widget" "$SCRATCH/home$n/a/targets/widget"
+printf '%s\n' '# Render of widget' '' "target: $SCRATCH/home$n/a/targets/widget" >"$R/stages/02-render/output/widget/render.md"
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/b" bin/ask run widget --redo 'TITLE=C' 2>&1)
+assert_status 1 "$?" "refused: a redo under another HOME of a run rendered under the first"
+assert_contains "$OUT" "move that target away by hand" "  naming the way out"
+assert_eq "present present" "$(gone "$SCRATCH/home$n/a/targets/widget") $(gone "$R/stages/02-render/output/widget/render.md")" \
+  "  and the target and render.md are left"
+mv "$SCRATCH/home$n/a/targets/widget" "$SCRATCH/away$n"
+OUT=$(cd "$R" && HOME="$SCRATCH/home$n/b" bin/ask run widget --redo 'TITLE=C' 2>&1)
+assert_status 0 "$?" "  and, once it is moved away by hand, the redo goes on"
+assert_eq "TARGET=$SCRATCH/home$n/b/targets/widget" "$(grep '^TARGET=' "$ANS")" "  under this HOME"
+# NIT4: a record file the reader refuses names the way out, which works.
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+printf 'TITLE=A\000\n' >"$OUTD/given.env"
+rrefused "a redo beside a given.env holding a NUL" "remove it by hand" run widget --redo 'DESCRIPTION=D'
+rm "$OUTD/given.env"
+ask run widget --redo 'TITLE=A' 'DESCRIPTION=D'
+assert_status 0 "$ST" "  and, once it is removed, the redo giving its fields goes on"
+printf 'TITLE=A\000\n' >>"$ANS"
+rrefused "a redo of an answers file holding a NUL" "remove the run's folder" run widget --redo 'DESCRIPTION=D'
+rm -rf "$OUTD"
+ask run widget 'TITLE=A' 'DESCRIPTION=D'
+assert_status 0 "$ST" "  and, once it is removed, the run goes on"
+printf 'OWNER=ac\000me\n' >"$R/setup/given.env"
+refused "setup beside a setup/given.env holding a NUL" "remove it by hand" setup
+rm "$R/setup/given.env"
+ask setup
+assert_status 0 "$ST" "  and, once it is removed, setup goes on"
 
 # --- each file bin/ask writes is absent or a regular file (decision 230) ------------------
 # A directory, a link to a directory or a dangling link where bin/ask would
