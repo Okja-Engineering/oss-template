@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# The workspace's runner is a thin caller of the product's runner library,
-# given the workspace's tests/ directory: it runs those suites and no others,
-# and fails when one of them fails.
+# The workspace's runner (decision 233) runs the suites of the workspace's
+# tests/ directory, and no others, through the product's runner library, at
+# most RUN_ALL_JOBS at a time, and fails when one of them fails. Its output is
+# a serial run's: each suite's whole, in the suites' order.
+# shellcheck disable=SC2016 # the generated suites' lines expand when they run, not here
 set -u
 set -o pipefail
 export LC_ALL=C
@@ -11,16 +13,40 @@ ROOT=$(cd "$TEST_DIR/.." && pwd)
 . "$ROOT/foundation/tests/lib/assert.sh"
 
 SCRATCH=$(mktemp -d)
-trap 'rm -rf "$SCRATCH"' EXIT
+SCRATCH=$(CDPATH='' cd -P -- "$SCRATCH" && pwd -P)
+trap 'chmod -R u+rwx "$SCRATCH" 2>/dev/null; rm -rf "$SCRATCH"' EXIT
 
 # write_suite FILE NAME: a suite with one passing assertion. The runner
 # gives a suite no arguments, so it finds the assertion library through
 # ASSERT_LIB, never through a path pasted into its source.
 export ASSERT_LIB="$ROOT/foundation/tests/lib/assert.sh"
 write_suite() {
-  # shellcheck disable=SC2016 # expanded by the generated suite, not here
   printf '%s\n' '#!/usr/bin/env bash' 'set -u' '. "$ASSERT_LIB"' "assert_eq a a '$2'" 'assert_done' >"$1"
 }
+# suite FILE LINE...: a suite of these lines, after the assertion library.
+suite() {
+  local f=$1
+  shift
+  printf '%s\n' '#!/usr/bin/env bash' 'set -u' '. "$ASSERT_LIB"' "$@" >"$f"
+}
+# block OUT SUITE: the lines the runner printed for SUITE, from its === line
+# through its PASS or FAIL line.
+block() {
+  printf '%s\n' "$1" | awk -v s="$2" '
+    $0 == "=== " s { on = 1 }
+    on { print }
+    on && ($0 == "PASS " s || $0 == "FAIL " s) { exit }'
+}
+# wait_for FILE [TENTHS]: until FILE exists, for TENTHS of a second at most,
+# ten seconds by default.
+wait_for() {
+  local i=0
+  while [ ! -e "$1" ] && [ "$i" -lt "${2:-100}" ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+}
+export -f wait_for
 
 # A copy of the workspace layout: tests/run-all.sh beside the product library.
 W="$SCRATCH/ws"
@@ -28,10 +54,12 @@ mkdir -p "$W/tests" "$W/foundation/tests/lib"
 cp "$TEST_DIR/run-all.sh" "$W/tests/run-all.sh" 2>/dev/null
 cp "$ROOT/foundation/tests/lib/runner.sh" "$ROOT/foundation/tests/lib/assert.sh" \
   "$W/foundation/tests/lib/" 2>/dev/null
+cp "$ROOT/foundation/tests/run-all.sh" "$W/foundation/tests/run-all.sh" 2>/dev/null
 write_suite "$W/tests/test_workspace.sh" workspace
 write_suite "$W/foundation/tests/test_product.sh" product
+RUN_ALL="$W/tests/run-all.sh"
 
-out=$(cd "$SCRATCH" && bash "$W/tests/run-all.sh" 2>&1)
+out=$(cd "$SCRATCH" && bash "$RUN_ALL" 2>&1)
 status=$?
 assert_status 0 "$status" "tests/run-all.sh with no argument passes on tests/"
 assert_contains "$out" "$W/tests/test_workspace.sh" "it ran the workspace suite"
@@ -41,5 +69,160 @@ assert_contains "$out" "1 suites passed" "it counted one suite"
 out=$(bash "$TEST_DIR/run-all.sh" "$ROOT/foundation/tests/fixtures/runner/failing" 2>&1)
 status=$?
 assert_status 1 "$status" "tests/run-all.sh fails on the failing fixture"
+mkdir -p "$SCRATCH/empty"
+out=$(bash "$RUN_ALL" "$SCRATCH/empty" 2>&1)
+assert_status 1 "$?" "a directory holding no suite fails the run"
+assert_contains "$out" "no test suites found" "  and the run says so"
+out=$(bash "$RUN_ALL" "$SCRATCH/no-such-dir" 2>&1)
+assert_status 1 "$?" "a directory that does not exist fails the run"
+assert_contains "$out" "not a directory" "  and the run says so"
+
+# --- a failing suite among passing ones ----------------------------------------------------
+D="$SCRATCH/mixed"
+mkdir -p "$D"
+write_suite "$D/test_a.sh" a
+suite "$D/test_b.sh" 'echo "b, before"' 'assert_eq x y "b fails"' 'echo "b, after"' 'assert_done'
+write_suite "$D/test_c.sh" c
+mkdir -p "$SCRATCH/tmp"
+out=$(RUN_ALL_JOBS=3 TMPDIR="$SCRATCH/tmp" bash "$RUN_ALL" "$D" 2>&1)
+assert_status 1 "$?" "a failing suite among passing ones fails the run"
+assert_eq "" "$(ls -A "$SCRATCH/tmp")" "  leaving no private directory"
+assert_eq "=== $D/test_b.sh
+b, before
+not ok 1 - b fails
+#   expected: x
+#   actual:   y
+b, after
+# 1 assertions, 1 failed
+FAIL $D/test_b.sh" "$(block "$out" "$D/test_b.sh")" "  its output printed whole, then FAIL"
+assert_contains "$out" "PASS $D/test_a.sh" "  the suite before it passes"
+assert_contains "$out" "PASS $D/test_c.sh" "  and the one after"
+assert_contains "$out" "run-all: 1 of 3 suites failed: $D/test_b.sh" "  and the run names it"
+
+# --- the suites' order, though they finish out of order -----------------------------------
+# test_a finishes only once test_b has: run side by side, b ends first.
+D="$SCRATCH/order"
+mkdir -p "$D"
+export ORDER_LOG="$SCRATCH/order.log"
+suite "$D/test_a.sh" 'wait_for "$ORDER_LOG.b"' 'echo a >>"$ORDER_LOG"' 'assert_eq a a "a ends after b"' 'assert_done'
+suite "$D/test_b.sh" 'echo b >>"$ORDER_LOG"' ': >"$ORDER_LOG.b"' 'assert_eq b b "b ends first"' 'assert_done'
+out=$(RUN_ALL_JOBS=2 bash "$RUN_ALL" "$D" 2>&1)
+assert_status 0 "$?" "suites that finish out of order pass"
+assert_eq "b
+a" "$(cat "$ORDER_LOG" 2>/dev/null)" "  b finished before a"
+assert_eq "=== $D/test_a.sh
+=== $D/test_b.sh" "$(printf '%s\n' "$out" | grep '^=== ')" "  and the output keeps the suites' order"
+assert_eq "=== $D/test_a.sh
+ok 1 - a ends after b
+# 1 assertions, 0 failed
+PASS $D/test_a.sh" "$(block "$out" "$D/test_a.sh")" "  each suite's output whole, under its own name"
+
+# --- a suite that ends without its plan, or cannot be started -----------------------------
+D="$SCRATCH/noplan"
+mkdir -p "$D"
+suite "$D/test_exits.sh" 'echo "partial"' 'exit 0'
+suite "$D/test_killed.sh" 'assert_eq a a "one"' 'kill -KILL $$'
+write_suite "$D/test_fine.sh" fine
+suite "$D/test_status.sh" "trap 'exit 3' EXIT" 'assert_eq a a "passes, then exits 3"' 'assert_done'
+out=$(RUN_ALL_JOBS=2 bash "$RUN_ALL" "$D" 2>&1)
+assert_status 1 "$?" "a suite that exits 0 without its plan fails the run"
+assert_contains "$out" "partial
+FAIL $D/test_exits.sh" "  marked FAIL after what it printed"
+assert_contains "$out" "FAIL $D/test_killed.sh" "  and a suite killed before its plan is marked FAIL"
+assert_contains "$out" "# 1 assertions, 0 failed
+FAIL $D/test_status.sh" "  and one exiting 3 after a passing plan is marked FAIL"
+assert_contains "$out" "run-all: 3 of 4 suites failed" "  and the run counts the three"
+if [ "$(id -u)" != 0 ]; then
+  D="$SCRATCH/unreadable"
+  mkdir -p "$D"
+  write_suite "$D/test_locked.sh" locked
+  chmod 000 "$D/test_locked.sh"
+  out=$(RUN_ALL_JOBS=2 bash "$RUN_ALL" "$D" 2>&1)
+  assert_status 1 "$?" "a suite that cannot be started fails the run"
+  assert_contains "$out" "FAIL $D/test_locked.sh" "  marked FAIL"
+fi
+
+# --- RUN_ALL_JOBS=1 is a serial run --------------------------------------------------------
+# Each suite logs its start and end; one at a time, they never overlap.
+D="$SCRATCH/serial"
+mkdir -p "$D"
+export SERIAL_LOG="$SCRATCH/serial.log"
+for s in a b c; do
+  suite "$D/test_$s.sh" "echo start $s >>\"\$SERIAL_LOG\"" 'sleep 0.2' "echo end $s >>\"\$SERIAL_LOG\"" \
+    "echo 'to stderr, $s' >&2" "assert_eq $s $s '$s'" 'assert_done'
+done
+out=$(RUN_ALL_JOBS=1 bash "$RUN_ALL" "$D" 2>&1)
+assert_status 0 "$?" "RUN_ALL_JOBS=1 runs the suites"
+assert_eq "start a
+end a
+start b
+end b
+start c
+end c" "$(cat "$SERIAL_LOG")" "  one at a time"
+serial=$(bash "$W/foundation/tests/run-all.sh" "$D" 2>&1)
+assert_eq "$serial" "$out" "  printing what the product's serial runner prints"
+out=$(RUN_ALL_JOBS=3 bash "$RUN_ALL" "$D" 2>&1)
+assert_eq "$serial" "$out" "three at a time print the same"
+# Unset, the CPU count, or sysctl's when getconf has none, or else 2.
+mkdir -p "$SCRATCH/stub"
+printf '#!/bin/sh\nexit 1\n' >"$SCRATCH/stub/getconf"
+printf '#!/bin/sh\necho 1\n' >"$SCRATCH/stub/sysctl"
+chmod +x "$SCRATCH/stub/getconf" "$SCRATCH/stub/sysctl"
+rm -f "$SERIAL_LOG"
+out=$(PATH="$SCRATCH/stub:$PATH" bash "$RUN_ALL" "$D" 2>&1)
+assert_eq "start a
+end a
+start b
+end b
+start c
+end c" "$(cat "$SERIAL_LOG")" "with getconf failing, sysctl's count, 1, is a serial run"
+# Two at a time: test_a and test_b run side by side, each seeing the other
+# start; then, for two seconds, each sees test_c not start; neither ends
+# before both have looked.
+D="$SCRATCH/two"
+mkdir -p "$D"
+export TWO="$SCRATCH/two-"
+for s in a b; do
+  o=$([ "$s" = a ] && echo b || echo a)
+  suite "$D/test_$s.sh" ": >\"\${TWO}$s\"" "wait_for \"\${TWO}$o\"" \
+    "assert_eq yes \"\$([ -e \"\${TWO}$o\" ] && echo yes)\" '$s runs beside $o'" \
+    'wait_for "${TWO}c" 20' \
+    "assert_eq no \"\$([ -e \"\${TWO}c\" ] && echo yes || echo no)\" 'c does not start beside a and b'" \
+    ": >\"\${TWO}$s.looked\"" "wait_for \"\${TWO}$o.looked\"" 'assert_done'
+done
+suite "$D/test_c.sh" ': >"${TWO}c"' 'assert_eq c c "c runs"' 'assert_done'
+printf '#!/bin/sh\necho undefined\n' >"$SCRATCH/stub/getconf"
+printf '#!/bin/sh\nexit 1\n' >"$SCRATCH/stub/sysctl"
+out=$(PATH="$SCRATCH/stub:$PATH" bash "$RUN_ALL" "$D" 2>&1)
+assert_status 0 "$?" "with no count from getconf, undefined, nor sysctl, two run at a time"
+for bad in 0 x -1 ''; do
+  out=$(RUN_ALL_JOBS=$bad bash "$RUN_ALL" "$SCRATCH/serial" 2>&1)
+  assert_status 1 "$?" "RUN_ALL_JOBS='$bad' is refused"
+  assert_contains "$out" "RUN_ALL_JOBS must be a whole number above 0" "  and the refusal says so"
+done
+
+# --- an interrupt ends the suites and removes the private directory ------------------------
+D="$SCRATCH/slow"
+mkdir -p "$D"
+export SLOW_PID="$SCRATCH/slow.pid"
+suite "$D/test_slow.sh" 'echo $$ >"$SLOW_PID.x" && mv "$SLOW_PID.x" "$SLOW_PID"' 'sleep 30' \
+  ': >"$SLOW_PID.finished"' 'assert_done'
+for sig in INT TERM; do
+  rm -f "$SLOW_PID" "$SLOW_PID.finished"
+  set -m
+  TMPDIR="$SCRATCH/tmp" bash "$RUN_ALL" "$D" >/dev/null 2>&1 &
+  pid=$!
+  set +m
+  wait_for "$SLOW_PID"
+  kill -s "$sig" "$pid"
+  wait "$pid"
+  st=$?
+  assert_eq "yes" "$([ "$st" -ne 0 ] && echo yes)" "SIG$sig ends the run, not zero: $st"
+  spid=$(cat "$SLOW_PID" 2>/dev/null)
+  assert_eq "ended" "$(if [ -n "$spid" ] && kill -0 "$spid" 2>/dev/null; then echo running; else echo ended; fi)" \
+    "  the running suite ended"
+  assert_eq "no" "$([ -e "$SLOW_PID.finished" ] && echo yes || echo no)" "  ended by the run, not finished"
+  assert_eq "" "$(ls -A "$SCRATCH/tmp")" "  and the private directory removed"
+done
 
 assert_done

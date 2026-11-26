@@ -4,15 +4,25 @@
 # not run. Fixtures live in subdirectories, so they are not picked up.
 #
 # usage: . runner.sh; runner_main DIR
-# A caller (a run-all.sh) exports LC_ALL=C first.
+# A caller (a run-all.sh) exports LC_ALL=C first. A caller that runs the
+# suites itself checks DIR with runner_dir, then reports with runner_finish.
+#
+#   runner_dir DIR       exit 0 when DIR is a directory; else say so, exit 1
+#   runner_finish DIR RAN FAILED NAMES
+#                        after RAN suites ran, FAILED of them, NAMES, failed:
+#                        exit 1 when none ran, when git tracks a suite in DIR
+#                        that did not run, or when any failed; else exit 0
+
+runner_dir() {
+  [ -d "$1" ] && return 0
+  printf 'run-all: not a directory: %s\n' "$1" >&2
+  return 1
+}
 
 runner_main() {
-  local dir=$1 suite tracked ran=0 failed=0 failed_names="" missing=""
+  local dir=$1 suite ran=0 failed=0 failed_names=""
 
-  if [ ! -d "$dir" ]; then
-    printf 'run-all: not a directory: %s\n' "$dir" >&2
-    return 1
-  fi
+  runner_dir "$dir" || return 1
 
   for suite in "$dir"/test_*.sh; do
     [ -f "$suite" ] || continue
@@ -27,6 +37,11 @@ runner_main() {
     fi
   done
   printf '\n'
+  runner_finish "$dir" "$ran" "$failed" "$failed_names"
+}
+
+runner_finish() {
+  local dir=$1 ran=$2 failed=$3 failed_names=$4 suite tracked missing=""
 
   if [ "$ran" -eq 0 ]; then
     printf 'run-all: no test suites found in %s\n' "$dir" >&2
