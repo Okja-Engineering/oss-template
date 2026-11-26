@@ -216,16 +216,29 @@ stage() {
 # signals held off, so each FILE is either as it was or whole. A rename that
 # fails after the command's removals names what they removed and the route.
 place() {
-  local i
+  local i j
   discard_hold
   for i in ${tmps[@]+"${!tmps[@]}"}; do
     if ! mv -f -- "${tmps[$i]}" "${dests[$i]}"; then
+      # A file already renamed into a directory this run made is this run's
+      # own, and goes with it, so that directory goes too (decision 230).
+      for ((j = 0; j < i; j++)); do
+        ! made_here "${dests[$j]}" || rm -f -- "${dests[$j]}"
+      done
       [ -n "$removed" ] || refuse "cannot write ${dests[$i]}"
       refuse "cannot write ${dests[$i]}, having removed $removed; $route"
     fi
   done
   tmps=() dests=() made_deep=() made_top=()
   discard_traps
+}
+# made_here FILE: FILE's directory is one this run made.
+made_here() {
+  local d
+  for d in ${made_deep[@]+"${made_deep[@]}"}; do
+    [ "${1%/*}" != "$d" ] || return 0
+  done
+  return 1
 }
 # gone_by PATH: remove PATH through the removal helper, or refuse; a PATH
 # that was there is noted among what this command removed.
