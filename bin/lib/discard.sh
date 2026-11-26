@@ -25,7 +25,11 @@
 #       target and be read whole, and a target it names that is present, a
 #       dangling link included, must be the one the discard derives from
 #       ANSWERS. Print the target it names, nothing when it is not a file;
-#       exit 0, or 1 with the reason out.
+#       exit 0; with the reason out, 1 when it names a present target the
+#       discard may not take, whose way out is moving that target away; 2
+#       when it names no target or cannot be read, whose way out is removing
+#       render.md by hand; 3 when it, or the target it names, cannot be told
+#       there, whose way out is the search a directory above it lacks.
 #   discard_there PATH
 #       exit 0 when something is at PATH, a dangling link included, 1 when
 #       nothing is, and 2 when that cannot be told: a directory above PATH
@@ -171,17 +175,17 @@ discard_check() {
 
 discard_record() {
   local answers=$1 name=$2 render_md=$3 recorded target st
-  discard__file "$render_md" || return 1
+  discard__file "$render_md" || return 3
   [ -f "$render_md" ] || return 0
   recorded=$(discard__recorded "$render_md") || {
     printf '%s\n' "$recorded"
-    return 1
+    return 2
   }
   discard_there "$recorded"
   st=$?
   if [ "$st" -gt 1 ]; then
     printf 'cannot tell whether %s is there, the target render.md names: a directory above it cannot be searched\n' "$recorded"
-    return 1
+    return 3
   fi
   if [ "$st" = 0 ]; then
     if ! target=$(answers_target_check "$answers" "$name"); then

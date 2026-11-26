@@ -8,7 +8,8 @@
 # schema, a setup file that bin/lib/answers.sh's validator rejects, and one
 # other than what `bin/ask setup` works out from setup/given.env, the fields
 # the operator gave, routed to restore setup/given.env when it is missing and
-# to stage it when it is not staged, and a setup/given.env holding a field
+# to stage it when it is not staged, each route in staged mode ending in
+# staging what it writes, and a setup/given.env holding a field
 # that is not a setup field, or out of the sorted order setup writes
 # (decision 229).
 set -u
@@ -24,6 +25,11 @@ src=$(tree_source)
 tmp=$(mktemp -d) || exit 2
 trap 'rm -rf "$tmp"' EXIT
 refused=0
+# then_stage FILES: in staged mode, the step that brings a route's writes
+# into the index the check judges, so the route can be followed there
+# (answers' R4 of S2's fourth ship gate); else nothing.
+then_stage() { [ "$src" != index ] || printf ', then stage %s' "$1"; }
+setup_writes='setup/given.env and setup/answers.env'
 
 # get PATH FILE: PATH's bytes in the judged tree into FILE; exit 1 when the
 # tree does not hold PATH, 2 when it cannot be read.
@@ -55,13 +61,13 @@ judge_given() {
       *) exit 2 ;;
     esac
     if [ "$scope" != setup ]; then
-      printf 'setup/given.env:%d: %s is not a setup field of shared/answers.tsv; run bin/ask setup, which drops it\n' "$n" "$field"
+      printf 'setup/given.env:%d: %s is not a setup field of shared/answers.tsv; run bin/ask setup, which drops it%s\n' "$n" "$field" "$(then_stage "$setup_writes")"
       refused=1
     fi
   done <<<"$given"
   order=$(sort <<<"$given") || exit 2
   if [ "$order" != "$given" ]; then
-    printf 'setup/given.env is not in the order bin/ask setup writes; run bin/ask setup, which sorts it\n'
+    printf 'setup/given.env is not in the order bin/ask setup writes; run bin/ask setup, which sorts it%s\n' "$(then_stage "$setup_writes")"
     refused=1
   fi
 }
@@ -82,11 +88,11 @@ esac
 if get setup/questionnaire.md "$tmp/questionnaire"; then
   answers_questionnaire "$tmp/schema" >"$tmp/expected" || exit 2
   if ! cmp -s "$tmp/expected" "$tmp/questionnaire"; then
-    printf 'setup/questionnaire.md is not what bin/ask questionnaire writes from shared/answers.tsv; run bin/ask questionnaire\n'
+    printf 'setup/questionnaire.md is not what bin/ask questionnaire writes from shared/answers.tsv; run bin/ask questionnaire%s\n' "$(then_stage setup/questionnaire.md)"
     refused=1
   fi
 else
-  printf '  run bin/ask questionnaire to write it\n'
+  printf '  run bin/ask questionnaire to write it%s\n' "$(then_stage setup/questionnaire.md)"
 fi
 
 if get setup/answers.env "$tmp/answers"; then
@@ -144,11 +150,11 @@ if get setup/answers.env "$tmp/answers"; then
           esac
         fi
         if [ "$have_given" = 1 ]; then
-          printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup\n'
+          printf 'setup/answers.env is not what bin/ask setup writes from setup/given.env; run bin/ask setup%s\n' "$(then_stage "$setup_writes")"
         elif [ "$unstaged" = 1 ]; then
           printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is not staged; stage it with setup/answers.env\n'
         else
-          printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is missing, so bin/ask setup would set each field to its default: restore setup/given.env, or give each field again with bin/ask setup FIELD=value...\n'
+          printf 'setup/answers.env is not what bin/ask setup writes, and setup/given.env is missing, so bin/ask setup would set each field to its default: restore setup/given.env, or give each field again with bin/ask setup FIELD=value...%s\n' "$(then_stage "$setup_writes")"
         fi
         ;;
       *) exit 2 ;;
@@ -157,7 +163,7 @@ if get setup/answers.env "$tmp/answers"; then
     refused=1
   fi
 else
-  printf '  run bin/ask setup to write it\n'
+  printf '  run bin/ask setup to write it%s\n' "$(then_stage "$setup_writes")"
 fi
 
 printf 'examined shared/answers.tsv, setup/answers.env, setup/given.env and setup/questionnaire.md in %s\n' "$src"

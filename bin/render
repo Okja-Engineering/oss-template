@@ -214,10 +214,22 @@ fi
 # through the discard, which derives the run's target itself (decision 227)
 # and judges the record too, so the route names it only when the discard
 # would take it.
+rec_st=0
+if [ "$have_remove" = 0 ]; then
+  fault=$(discard_record "$work/answers.env" "$name" "$render_md")
+  rec_st=$?
+fi
 if [ "$have_remove" = 1 ]; then
-  fault=$(discard_check "$remove" "$work/answers.env" "$name" "$render_md") || refuse "$fault"
-elif ! fault=$(discard_record "$work/answers.env" "$name" "$render_md"); then
-  refuse "--replace may not remove render.md: $fault; it is left alone: the operator may move that target away by hand, or remove render.md by hand once its target is dealt with, then run bin/render $name --replace again"
+  fault=$(discard_check "$remove" "$work/answers.env" "$name" "$render_md") ||
+    refuse "$fault; without --remove, bin/render $name --replace names the way"
+elif [ "$rec_st" = 1 ]; then
+  refuse "--replace may not remove render.md: $fault; it is left alone: the operator may move that target away by hand, then run bin/render $name --replace again"
+elif [ "$rec_st" = 2 ]; then
+  # A record that names no target the discard can judge routes to the step
+  # that works: removing render.md by hand, the run's target dealt with.
+  refuse "--replace may not remove render.md: $fault; it is left alone, as no target it names can be judged: the operator may remove render.md by hand, once the run's target $target is dealt with if it is there, then run bin/render $name again"
+elif [ "$rec_st" != 0 ]; then
+  refuse "--replace may not remove render.md: $fault; it is left alone: the operator may give its owner search permission on the directories above it, then run bin/render $name --replace again"
 elif present "$target" && ! empty_dir "$target"; then
   fault=$(discard_check "$target" "$work/answers.env" "$name" "$render_md") ||
     refuse "the target $target is present, and --replace may not remove it: $fault; it is left alone: the operator may move it away by hand, then run bin/render $name again"
