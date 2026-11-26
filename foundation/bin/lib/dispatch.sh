@@ -20,6 +20,7 @@
 # dispatcher itself cannot run (outside a repository, an unknown check or
 # option, no checks directory, a check whose third line names no mode or an
 # unknown one): a check it cannot schedule is never "nothing ran".
+# Each status a guard reads is its own, never the caller's pipefail.
 
 dispatch_main() {
   local dir=$1 mode=tree base="" head="" msg="" arg top named=0
@@ -266,7 +267,7 @@ dispatch__run() {
         printf 'FAIL %s (could not run)\n' "$name"
         ;;
     esac
-    [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/  /'
+    [ -z "$out" ] || sed 's/^/  /' <<<"$out"
     [ "$st" -eq 0 ] || failed=$((failed + 1))
     [ "$st" -gt "$worst" ] && worst=$st
   done
@@ -307,7 +308,8 @@ dispatch__modes() {
       *) return 1 ;;
     esac
   done <<EOF
-$(printf '%s\n' "$1" | tr ' ' '\n')
+${1// /
+}
 EOF
   [ -n "$known" ] || return 1
   printf '%s\n' "${known# }"

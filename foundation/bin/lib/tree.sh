@@ -19,6 +19,8 @@
 # `git commit` does, so reading the index takes its lock and writes tree
 # objects, and fails when it cannot. The working tree is what
 # `git add -A` would stage, each file hashed as its bytes stand, unfiltered.
+# Each pipeline sets pipefail itself, never relying on the caller's
+# (decision 228).
 
 tree_source() {
   case "${CHECK_MODE:-tree}" in
@@ -52,7 +54,10 @@ tree_list() {
       ;;
   esac
   [ -n "$listing" ] || return 0
-  printf '%s\n' "$listing" | tree__exclude "$@" | sort -t '	' -k 2
+  (
+    set -o pipefail
+    printf '%s\n' "$listing" | tree__exclude "$@" | sort -t '	' -k 2
+  ) || return 2
 }
 
 tree_cat() {
@@ -177,7 +182,10 @@ tree__worktree_lines() {
     last=$path
     if [ -L "$path" ]; then
       id=$(readlink "./$path") || return 2
-      id=$(printf '%s' "$id" | git hash-object --stdin) || return 2
+      id=$(
+        set -o pipefail
+        printf '%s' "$id" | git hash-object --stdin
+      ) || return 2
       printf '120000 %s\t%s\n' "$id" "$path"
     elif [ -d "$path" ]; then
       if [ -e "$path/.git" ]; then

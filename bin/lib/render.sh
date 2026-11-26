@@ -48,7 +48,10 @@
 #       with the reason out.
 #
 # Source tree.sh, answers.sh and git.sh first, and run git_hermetic; run at
-# the top of the workspace's work tree; the caller exports LC_ALL=C.
+# the top of the workspace's work tree; the caller exports LC_ALL=C. Each
+# pipeline whose status a guard reads sets pipefail itself, never relying on
+# the caller's, and a lookup's failure is never read as its none (decision
+# 228).
 
 render_tree() {
   local commit=$1 schema=$2 answers=$3 out=$4 entries line refused=0
@@ -63,9 +66,8 @@ render_tree() {
   # Only portable paths (decision 224), refused before anything is written:
   # a disk that folds Unicode, or another character, could open one as
   # another, and the twin check below folds ASCII alone.
-  unportable=$(printf '%s\n' "$entries" |
-    awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ && p !~ /^[A-Za-z0-9._ \/-]+$/ {
-      print p ": a path outside the portable set, ASCII letters, digits, ., _, -, / and space" }') || {
+  unportable=$(awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ && p !~ /^[A-Za-z0-9._ \/-]+$/ {
+      print p ": a path outside the portable set, ASCII letters, digits, ., _, -, / and space" }' <<<"$entries") || {
     printf 'cannot judge the foundation paths\n'
     return 2
   }
@@ -76,12 +78,14 @@ render_tree() {
   # Paths, or directories, that differ only in case, refused before anything
   # is written: on a disk that folds case, one would be written through the
   # other. Each foundation path, without .tmpl, and each selected path.
-  twins=$({
-    printf '%s\n' "$entries" |
-      awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ { p = substr(p, 12); print p; if (sub(/\.tmpl$/, "", p)) print p }' &&
-      printf '%s\n' "$sel" | cut -f 2
-  } | awk -F / 'NF { p = $1; print p; for (i = 2; i <= NF; i++) { p = p "/" $i; print p } }' | sort -u |
-    awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }') || {
+  twins=$(
+    set -o pipefail
+    {
+      awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ { p = substr(p, 12); print p; if (sub(/\.tmpl$/, "", p)) print p }' <<<"$entries" &&
+        cut -f 2 <<<"$sel"
+    } | awk -F / 'NF { p = $1; print p; for (i = 2; i <= NF; i++) { p = p "/" $i; print p } }' | sort -u |
+      awk '{ l = tolower($0) } (l in seen) { print "foundation renders " seen[l] " and " $0 ", which differ only in case"; next } { seen[l] = $0 }'
+  ) || {
     printf 'cannot compare the paths for case twins\n'
     return 2
   }
@@ -255,7 +259,10 @@ EOF
 $sel
 EOF
   # shellcheck disable=SC2034 # RENDER_LIST is read by the caller
-  RENDER_LIST=$(printf '%s' "$produced" | sort) || {
+  RENDER_LIST=$(
+    set -o pipefail
+    printf '%s' "$produced" | sort
+  ) || {
     printf 'cannot sort the file list\n'
     return 2
   }
@@ -390,8 +397,8 @@ render_walk() {
     return 1
   fi
   # Each list the walk judges is made with its status read (decision 228).
-  if ! sed -n 's/^F//p' "$tmp/found" | sort >"$tmp/have" ||
-    ! { if [ -n "$list" ]; then printf '%s\n' "$list"; fi | sort >"$tmp/want"; }; then
+  if ! (set -o pipefail && sed -n 's/^F//p' "$tmp/found" | sort >"$tmp/have") ||
+    ! (set -o pipefail && if [ -n "$list" ]; then printf '%s\n' "$list"; fi | sort >"$tmp/want"); then
     printf 'the walk cannot sort the target'"'"'s files and the file list\n'
     rm -rf "$tmp"
     return 1
@@ -403,14 +410,17 @@ render_walk() {
   fi
   # awk's 1 is "no listed file under it"; a higher status is a list it
   # could not read, which ends the loop as a failure.
-  if ! sed -n 's/^D//p' "$tmp/dirs" | while IFS= read -r p; do
-    P="$p/" awk 'index($0, ENVIRON["P"]) == 1 { found = 1; exit } END { exit !found }' "$tmp/want"
-    case $? in
-      0) ;;
-      1) printf 'the target directory %s holds no listed file\n' "$p" ;;
-      *) exit 2 ;;
-    esac
-  done >"$tmp/empty"; then
+  if ! (
+    set -o pipefail
+    sed -n 's/^D//p' "$tmp/dirs" | while IFS= read -r p; do
+      P="$p/" awk 'index($0, ENVIRON["P"]) == 1 { found = 1; exit } END { exit !found }' "$tmp/want"
+      case $? in
+        0) ;;
+        1) printf 'the target directory %s holds no listed file\n' "$p" ;;
+        *) exit 2 ;;
+      esac
+    done >"$tmp/empty"
+  ); then
     printf 'the walk cannot judge the directories of the target\n'
     rm -rf "$tmp"
     return 1
@@ -448,7 +458,7 @@ render_fingerprint() {
     printf 'cannot make a private repository to fingerprint the target\n'
     return 1
   fi
-  if ! { if [ -n "$list" ]; then printf '%s\n' "$list"; fi | tr '\n' '\0' >"$g/paths"; }; then
+  if ! (set -o pipefail && if [ -n "$list" ]; then printf '%s\n' "$list"; fi | tr '\n' '\0' >"$g/paths"); then
     rm -rf "$g"
     printf 'cannot list the paths to fingerprint\n'
     return 1

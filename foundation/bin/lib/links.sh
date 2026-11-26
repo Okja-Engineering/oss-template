@@ -46,6 +46,7 @@
 #                            when SRC cannot be read.
 #
 # Source tree.sh first; the caller exports LC_ALL=C.
+# Each status a guard reads is its own, never the caller's pipefail.
 
 # The awk functions of the subset, prefixed to each awk program that reads
 # Markdown:
@@ -220,7 +221,7 @@ links_targets() {
 }
 
 links_on() {
-  printf '%s\n' "$2" | N="$1" awk -F '\t' '$1 == ENVIRON["N"] { print substr($0, index($0, "\t") + 1) }'
+  N="$1" awk -F '\t' '$1 == ENVIRON["N"] { print substr($0, index($0, "\t") + 1) }' <<<"$2"
 }
 
 links_resolve() {
@@ -243,7 +244,7 @@ links_resolve() {
       *) dir="" ;;
     esac
     path=$(
-      printf '%s\n' "${dir:+$dir/}$path" | awk -F/ '{
+      awk -F/ '{
         n = 0
         for (i = 1; i <= NF; i++) {
           if ($i == "" || $i == ".") continue
@@ -257,7 +258,7 @@ links_resolve() {
         s = ""
         for (i = 1; i <= n; i++) s = s (i > 1 ? "/" : "") p[i]
         print "OK" s
-      }'
+      }' <<<"${dir:+$dir/}$path"
     ) || return 3
     case "$path" in
       UP) return 2 ;;

@@ -37,6 +37,7 @@
 # .github/workflows/ (so `bin/check NAME` names one); it says it is not
 # enforced when it holds "not enforced" or "unenforced", in any case. Source
 # tree.sh and links.sh first; the caller exports LC_ALL=C.
+# Each status a guard reads is its own, never the caller's pipefail.
 
 RULES_CLAIMS_WORDS='must|required|never|refuse[sd]?|blocks?|blocked|rejects?|rejected|enforce[sd]?|prevents?|prevented'
 RULES_TRACE_WORDS="always|do not|don't|don’t"
@@ -110,7 +111,7 @@ rules_claims() {
   shift
   RULES_FILES=0
   listing=$(tree_list "$src" "$@") || return 2
-  paths=$(printf '%s\n' "$listing" | sed 's/^[^	]*	//') || return 2
+  paths=$(sed 's/^[^	]*	//' <<<"$listing") || return 2
   while IFS= read -r file; do
     case "$file" in *.md) ;; *) continue ;; esac
     RULES_FILES=$((RULES_FILES + 1))
@@ -120,7 +121,12 @@ rules_claims() {
     # any line.
     targets=$(set -o pipefail; tree_cat "$src" "$file" | links_targets) || return 2
     while IFS='	' read -r nr text; do
-      rules__unenforced "$text" && continue
+      rules__unenforced "$text"
+      case $? in
+        0) continue ;;
+        1) ;;
+        *) return 2 ;;
+      esac
       on=$(links_on "$nr" "$targets") || return 2
       rules__names_check "$file" "$text" "$paths" "$on"
       case $? in
@@ -140,8 +146,12 @@ EOF
   return "$refused"
 }
 
+# rules__unenforced LINE: LINE says it is not enforced; exit 1 when it does
+# not, 2 when it cannot be read.
 rules__unenforced() {
-  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+  local lower
+  lower=$(tr '[:upper:]' '[:lower:]' <<<"$1") || return 2
+  case "$lower" in
     *'not enforced'* | *unenforced*) return 0 ;;
   esac
   return 1
@@ -186,7 +196,7 @@ EOF
 
 # rules__spans LINE: the first word of each code span in LINE, one a line.
 rules__spans() {
-  printf '%s\n' "$1" | awk '{
+  awk '{
     s = $0
     while ((i = index(s, "`")) > 0) {
       s = substr(s, i)
@@ -201,5 +211,5 @@ rules__spans() {
       print w[1]
       s = substr(s, n + j + n)
     }
-  }'
+  }' <<<"$1"
 }
