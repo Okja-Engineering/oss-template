@@ -1052,6 +1052,14 @@ failing sort '' 3
 stage_refused "the walk's sort of the file list fails" "the walk cannot sort"
 failing sed '-n s/^F//p *'
 stage_refused "the walk's list of files fails" "the walk cannot sort"
+# cmp's 2 is no difference, and no sameness (answers' R7 of S2's fourth
+# ship gate).
+failing cmp '*/have */want' 1 "" 2
+stage_refused "the walk's comparison of the target with the file list fails" "the walk cannot compare"
+failing cmp '*/paths */index.list' 1 "" 2
+stage_refused "the fingerprint's comparison of the index with the file list fails" "cannot compare the index"
+failing git '*ls-files -z' 1
+stage_refused "the fingerprint's listing of the index fails" "cannot list the index git built"
 failing sed '-n s/^D//p *'
 stage_refused "the walk's list of directories fails" "the walk cannot judge the directories"
 failing tr '\\n \\0'

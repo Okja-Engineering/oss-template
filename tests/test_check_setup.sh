@@ -123,6 +123,10 @@ fixture_commit "$R" "test: an owner given"
 fixture_failing "$SCRATCH/stub$n" cmp '*/want *' 1 2
 OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" bin/check setup 2>&1)
 assert_status 2 "$?" "a comparison that cannot run is an error, not a pass or a refusal"
+fixture_failing "$SCRATCH/qstub$n" cmp '*/expected */questionnaire' 1 2
+OUT=$(cd "$R" && PATH="$SCRATCH/qstub$n:$PATH" bin/check setup 2>&1)
+assert_status 2 "$?" "a comparison of the questionnaire that cannot run is an error, not a refusal"
+assert_not_contains "$OUT" "not what bin/ask questionnaire writes" "  and names no refusal"
 fixture_failing "$SCRATCH/gstub$n" cat '*/setup/given.env' 1 1
 OUT=$(cd "$R" && PATH="$SCRATCH/gstub$n:$PATH" bin/check setup 2>&1)
 assert_status 2 "$?" "a setup/given.env that cannot be read is an error, not one that is absent"
