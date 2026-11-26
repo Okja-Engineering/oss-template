@@ -509,6 +509,26 @@ OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" bin/render widget 2>&1)
 assert_status 1 "$?" "refused: a render whose copy brings a file the list does not hold"
 assert_contains "$OUT" "the target holds a file render did not write: extra" "  and the walk says so"
 assert_eq "" "$(left)" "  with nothing written"
+# A staging directory the clean-up cannot remove is reported, not passed
+# over in silence.
+ready
+cpstub ': >"$last/extra"'
+printf '#!/bin/sh\ncase "$*" in *.widget.render.*) exit 0 ;; esac\nexec %s "$@"\n' "$(command -v rm)" >"$SCRATCH/cpstub$n/rm"
+chmod +x "$SCRATCH/cpstub$n/rm"
+OUT=$(cd "$R" && PATH="$SCRATCH/cpstub$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render whose staging directory the clean-up cannot remove"
+assert_contains "$OUT" "bin/render: could not remove $ROOT/.widget.render." "  and the clean-up names it"
+# Each directory render makes, refused when it cannot be made.
+ready
+fixture_failing "$SCRATCH/mkd$n" mkdir '-p stages/02-render/output/widget' 1
+OUT=$(cd "$R" && PATH="$SCRATCH/mkd$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render whose render.md directory cannot be made"
+assert_contains "$OUT" "cannot make stages/02-render/output/widget" "  and the refusal says so"
+ready
+fixture_failing "$SCRATCH/mkr$n" mkdir "-p $ROOT" 1
+OUT=$(cd "$R" && PATH="$SCRATCH/mkr$n:$PATH" bin/render widget 2>&1)
+assert_status 1 "$?" "refused: a render whose TARGET_ROOT cannot be made"
+assert_contains "$OUT" "cannot make TARGET_ROOT $ROOT" "  and the refusal says so"
 ready
 cpstub 'mkdir "$last/a
 b"'
