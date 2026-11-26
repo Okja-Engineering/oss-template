@@ -1244,18 +1244,20 @@ assert_status 0 "$ST" "  and, once it is removed, setup goes on"
 # A directory, a link to a directory or a dangling link where bin/ask would
 # write a file is refused before anything is staged or removed, and left as
 # it was, with nothing written into it or through it.
-in_way() { # KIND PATH: a directory, a link to one, or a dangling link at PATH
+in_way() { # KIND PATH: a directory, a link to one or to a file, or a dangling link at PATH
   rm -rf "$2"
   mkdir -p "${2%/*}" "$SCRATCH/away$n"
+  printf 'kept\n' >"$SCRATCH/file$n"
   case "$1" in
     dir) mkdir "$2" ;;
     dirlink) ln -s "$SCRATCH/away$n" "$2" ;;
+    filelink) ln -s "$SCRATCH/file$n" "$2" ;;
     dangling) ln -s "$SCRATCH/nowhere$n" "$2" ;;
   esac
 }
-kind_of() { # PATH: dir, dirlink, dangling, file or gone
+kind_of() { # PATH: dir, dirlink, filelink, dangling, file or gone
   if [ -L "$1" ]; then
-    if [ -d "$1" ]; then echo dirlink; else echo dangling; fi
+    if [ -d "$1" ]; then echo dirlink; elif [ -f "$1" ]; then echo filelink; else echo dangling; fi
   elif [ -d "$1" ]; then echo dir
   elif [ -e "$1" ]; then echo file
   else echo gone
@@ -1269,9 +1271,10 @@ in_way_refused() { # KIND PATH LABEL ARG...: bin/ask ARG... refused, PATH left
   assert_contains "$OUT" "$label is not a file" "  and the refusal says so"
   assert_eq "$kind" "$(kind_of "$path")" "  and the $kind is left"
   assert_eq "" "$(ls -A "$SCRATCH/away$n")" "  with nothing written through it"
+  assert_eq "kept" "$(cat "$SCRATCH/file$n")" "  nor through a link to a file"
   assert_eq "" "$(find "$R/setup" "$R/stages/01-ask/output" -name '*.tmp.*' 2>/dev/null)" "  and no temporary file left"
 }
-for kind in dir dirlink dangling; do
+for kind in dir dirlink filelink dangling; do
   fresh
   in_way "$kind" "$R/setup/answers.env"
   in_way_refused "$kind" "$R/setup/answers.env" setup/answers.env setup OWNER=acme
@@ -1298,6 +1301,32 @@ for kind in dir dirlink dangling; do
   ask run widget 'TITLE=A' 'DESCRIPTION=B'
   in_way "$kind" "$OUTD/confirmed.md"
   in_way_refused "$kind" "$OUTD/confirmed.md" stages/01-ask/output/widget/confirmed.md confirm widget --by 'A Person'
+  # Every file a run removes, or reads as a record, is judged first: the
+  # confirmation and render.md a redo removes, and setup's files a run reads
+  # (answers' R1 and R8, conformance's N-E, removal's N4 of S2's fourth ship
+  # gate).
+  rendered
+  in_way "$kind" "$OUTD/confirmed.md"
+  in_way_refused "$kind" "$OUTD/confirmed.md" stages/01-ask/output/widget/confirmed.md \
+    run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+  assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and the target is left"
+  rendered
+  in_way "$kind" "$R/stages/02-render/output/widget/render.md"
+  in_way_refused "$kind" "$R/stages/02-render/output/widget/render.md" stages/02-render/output/widget/render.md \
+    run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D'
+  assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and the target is left"
+  ready
+  ask setup OWNER=acme "TARGET_ROOT=$ROOT"
+  in_way "$kind" "$R/setup/given.env"
+  in_way_refused "$kind" "$R/setup/given.env" setup/given.env run widget 'TITLE=A' 'DESCRIPTION=B'
+  assert_eq "gone" "$(gone "$ANS")" "  and no answers are written"
+  ready
+  in_way "$kind" "$R/setup/answers.env"
+  in_way_refused "$kind" "$R/setup/answers.env" setup/answers.env run widget 'TITLE=A' 'DESCRIPTION=B'
+  ready
+  ask run widget 'TITLE=A' 'DESCRIPTION=B'
+  in_way "$kind" "$ANS"
+  in_way_refused "$kind" "$ANS" stages/01-ask/output/widget/answers.env confirm widget --by 'A Person'
 done
 # A redo is refused alike, with the run's files and target as they were.
 rendered
