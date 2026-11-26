@@ -184,6 +184,14 @@ assert_eq "CLAUDE.md" "$(content_of "$O" worktree -link)" "worktree: reads a lin
 fixture_failing "$SCRATCH/stub" readlink '*/-link' 1
 (cd "$O" && PATH="$SCRATCH/stub:$PATH" && tree_cat worktree -link >/dev/null)
 assert_status 2 "$?" "worktree: a link readlink cannot read fails the read"
+# And fails the listing: its text unread, or its blob id not worked out
+# (the tests lens's T3 of S2's fourth ship gate).
+fixture_failing "$SCRATCH/lsstub" readlink '*/-link' 1
+(cd "$O" && PATH="$SCRATCH/lsstub:$PATH" && tree_list worktree >/dev/null)
+assert_status 2 "$?" "worktree: a listed link readlink cannot read fails the listing"
+fixture_failing "$SCRATCH/hashstub" git 'hash-object --stdin' 1 128
+(cd "$O" && PATH="$SCRATCH/hashstub:$PATH" && tree_list worktree >/dev/null)
+assert_status 2 "$?" "worktree: a listed link whose blob id git cannot work out fails the listing"
 # A listed file whose bytes cannot be read fails the read (2); it is not a
 # file the tree lacks (1), whatever status the reader exits with.
 fixture_failing "$SCRATCH/catstub" cat '*/CLAUDE.md' 1 1
