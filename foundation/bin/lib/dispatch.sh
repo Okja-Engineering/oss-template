@@ -86,7 +86,18 @@ dispatch_main() {
 # names no commit and is not an object id, or a git failure.
 dispatch__bases() {
   local mode=$1 base=$2 head=$3 at up commits newref=1
-  at=$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || at=""
+  # Each lookup's 1 is "none": an unborn HEAD, no upstream, no merge base, a
+  # root with no parent. Any higher status is git failing, never that none
+  # (decision 228).
+  at=$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)
+  case $? in
+    0) ;;
+    1) at="" ;;
+    *)
+      printf 'bin/check: cannot read HEAD\n' >&2
+      return 2
+      ;;
+  esac
   CHECK_REF=${CHECK_REF:-}
   CHECK_REF=${CHECK_REF#refs/heads/}
   CHECK_BASE="" CHECK_HEAD=$at DOCS_BASE=""
@@ -95,9 +106,19 @@ dispatch__bases() {
       # Commits over @{upstream}..HEAD, docs base their merge base; without
       # an upstream, docs base HEAD.
       CHECK_BASE=$at DOCS_BASE=$at
-      if [ -n "$at" ] && up=$(git rev-parse -q --verify '@{upstream}^{commit}' 2>/dev/null); then
-        CHECK_BASE=$up
-        DOCS_BASE=$(git merge-base "$up" "$at" 2>/dev/null) || DOCS_BASE=""
+      if [ -n "$at" ]; then
+        up=$(git rev-parse -q --verify '@{upstream}^{commit}' 2>/dev/null)
+        case $? in
+          0)
+            CHECK_BASE=$up
+            dispatch__merge_base "$up" "$at" || return 2
+            ;;
+          1) ;;
+          *)
+            printf 'bin/check: cannot read the upstream of HEAD\n' >&2
+            return 2
+            ;;
+        esac
       fi
       ;;
     staged)
@@ -108,8 +129,17 @@ dispatch__bases() {
         { printf 'bin/check: HEAD is not a commit: %s\n' "$head" >&2; return 2; }
       case "$base" in
         *[!0]*)
-          if CHECK_BASE=$(git rev-parse -q --verify "$base^{commit}" 2>/dev/null); then
-            DOCS_BASE=$(git merge-base "$CHECK_BASE" "$CHECK_HEAD" 2>/dev/null) || DOCS_BASE=""
+          CHECK_BASE=$(git rev-parse -q --verify "$base^{commit}" 2>/dev/null)
+          case $? in
+            0) ;;
+            1) CHECK_BASE="" ;;
+            *)
+              printf 'bin/check: cannot read BASE %s\n' "$base" >&2
+              return 2
+              ;;
+          esac
+          if [ -n "$CHECK_BASE" ]; then
+            dispatch__merge_base "$CHECK_BASE" "$CHECK_HEAD" || return 2
             newref=0
           elif dispatch__object_id "$base"; then
             # The remote moved to a commit this clone never fetched, so what
@@ -134,13 +164,35 @@ dispatch__bases() {
         if [ -z "$commits" ]; then
           DOCS_BASE=$CHECK_HEAD
         else
-          # The oldest is the first line.
-          DOCS_BASE=$(git rev-parse -q --verify "${commits%%[!0-9a-f]*}^" 2>/dev/null) || DOCS_BASE=""
+          # The oldest is the first line; a root has no parent.
+          DOCS_BASE=$(git rev-parse -q --verify "${commits%%[!0-9a-f]*}^" 2>/dev/null)
+          case $? in
+            0) ;;
+            1) DOCS_BASE="" ;;
+            *)
+              printf 'bin/check: cannot read the parent of %s\n' "${commits%%[!0-9a-f]*}" >&2
+              return 2
+              ;;
+          esac
         fi
       fi
       ;;
   esac
   export CHECK_BASE CHECK_HEAD CHECK_REF DOCS_BASE
+}
+
+# dispatch__merge_base A B: DOCS_BASE, the merge base of A and B, or none
+# when they have none (git's 1); exit 2 when git fails.
+dispatch__merge_base() {
+  DOCS_BASE=$(git merge-base "$1" "$2" 2>/dev/null)
+  case $? in
+    0) ;;
+    1) DOCS_BASE="" ;;
+    *)
+      printf 'bin/check: cannot read the merge base of %s and %s\n' "$1" "$2" >&2
+      return 2
+      ;;
+  esac
 }
 
 # dispatch_checked_commits HEAD: for a range with no BASE, the commits

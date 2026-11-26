@@ -36,27 +36,32 @@
 #                                    TARGET, a selects cell on a type other
 #                                    than select and a default naming a
 #                                    field not listed before it among them;
-#                                    exit 0 or 1
+#                                    exit 0 or 1, above 1 when SCHEMA cannot
+#                                    be read
 #   answers_fields SCHEMA [SCOPE]    the fields, in order, one a line
 #   answers_col SCHEMA FIELD COLUMN  a cell, `-` read as empty; exit 1 when
 #                                    the schema has no FIELD, 2 when it has
-#                                    no COLUMN
+#                                    no COLUMN or cannot be read
 #   answers_check SCHEMA FIELD VALUE the reason VALUE is refused, if it is;
-#                                    exit 0 when accepted, 1 when refused
+#                                    exit 0 when accepted, 1 when refused,
+#                                    2, saying what, when it cannot be
+#                                    judged
 #   answers_path VALUE               a `path` value with its `~` expanded;
 #                                    exit 1 when it starts with `~` and HOME
 #                                    is unset or empty
 #   answers_read FILE LABEL          the one reader of an answers file:
 #                                    FILE's text out once the file-level
 #                                    rule holds, no NUL byte; else the
-#                                    reason, naming LABEL, out, exit 1
+#                                    reason, naming LABEL, out, exit 1, or 2
+#                                    when FILE cannot be read
 #   answers_given FILE LABEL         a file of the fields the operator gave
 #                                    (setup/given.env, a run's given.env
 #                                    and setup.override.env), read through
 #                                    answers_read: its text out once each
 #                                    line is FIELD=value, its FIELD once;
-#                                    else the reason out, exit 1. Each value
-#                                    is judged where it is kept
+#                                    else the reason out, exit 1, or 2 when
+#                                    it cannot be read. Each value is judged
+#                                    where it is kept
 #   answers_get FILE FIELD          FIELD's value in an answers file (`-`
 #                                    for standard input, read whole, so a
 #                                    writer on a pipe is never cut off), a
@@ -69,39 +74,47 @@
 #                                    answers lines, holds, else its default,
 #                                    worked out from BASE and the lines
 #                                    before it (decision 229); else one
-#                                    fault a line, naming the field, exit 1
+#                                    fault a line, naming the field, exit 1,
+#                                    or 2 when one cannot be judged
 #   answers_setup SCHEMA GIVEN       setup/answers.env's text, sorted: the
 #                                    setup fields answers_derive gives from
 #                                    GIVEN, setup/given.env's lines; else
-#                                    the faults out, exit 1
+#                                    the faults out, exiting as
+#                                    answers_derive does
 #   answers_default SCHEMA FIELD PAIRS
 #                                    FIELD's default, each `{{OTHER}}` in it
 #                                    given OTHER's value in PAIRS, answers
 #                                    file lines in a string; a `{{OTHER}}`
-#                                    PAIRS lacks is left, for the validator
+#                                    PAIRS lacks is left, for the validator;
+#                                    exit 2 when a cell or a value cannot be
+#                                    read
 #   answers_validate SCHEMA FILE SCOPE [NAME]
 #                                    the whole file, holding exactly the
 #                                    fields of SCOPE (`setup`, or `run` for
 #                                    every field and TARGET), each once and
 #                                    valid; one line out per refusal, naming
 #                                    the file NAME (FILE by default); exit 0
-#                                    or 1
+#                                    or 1, or 2 when it cannot be judged
 #   answers_target VALUE             a TARGET's shape: absolute, not `/`
 #                                    alone, with no empty, `.` or `..`
 #                                    component, the rule a `path` value meets
-#                                    once expanded; exit 0 or 1
+#                                    once expanded; exit 0 or 1, or 2 when
+#                                    it cannot be judged
 #   answers_target_for TARGET_ROOT NAME
 #                                    a run's TARGET, exactly TARGET_ROOT with
 #                                    its `~` expanded, then `/NAME`, under
 #                                    the path rule answers_target holds it
-#                                    to; else the reason out, exit 1
+#                                    to; else the reason out, exit 1, or 2
+#                                    when it cannot be judged
 #   answers_target_check FILE NAME   the run answers FILE's TARGET is still
 #                                    answers_target_for its TARGET_ROOT and
 #                                    NAME, under this HOME: that TARGET out,
-#                                    exit 0; else the reason out, exit 1
+#                                    exit 0; else the reason out, exit 1, or
+#                                    2 when FILE cannot be read
 #   answers_record FILE KEY          the value of a run record's `KEY: `
 #                                    line (confirmed.md, render.md); exit 1
-#                                    when FILE has none
+#                                    when FILE has none, above 1 when it
+#                                    cannot be read
 #   answers_blob FILE                FILE's git blob id, its bytes as they
 #                                    stand
 #   answers_questionnaire SCHEMA     setup/questionnaire.md's text: the
@@ -109,7 +122,10 @@
 #                                    numbered list, each with its field,
 #                                    type and default
 #
-# The caller exports LC_ALL=C.
+# Every lookup whose 1 means "none" or "no" reads any higher status apart,
+# as a failure, never as that answer, and a pipeline's status is each of
+# its stages', whatever the caller's pipefail (decision 228). The caller
+# exports LC_ALL=C.
 
 ANSWERS_HEADER='field	scope	type	render	selects	pattern	default	question'
 ANSWERS_TYPES='name text description list select owner login-or-team email-or-url url path'
@@ -204,35 +220,39 @@ answers_path() {
 
 answers_check() {
   local schema=$1 field=$2 v=$3 type pattern default item rest expanded
-  type=$(answers_col "$schema" "$field" type) || {
-    printf '%s: an unknown field\n' "$field"
-    return 1
-  }
+  type=$(answers_col "$schema" "$field" type)
+  case $? in
+    0) ;;
+    1) answers__no "$field" "an unknown field" ;;
+    *) answers__cannot "$field" "read its row of the schema" ;;
+  esac || return
   # Every cell a rule reads has its status read (decision 228).
   if ! pattern=$(answers_col "$schema" "$field" pattern) || ! default=$(answers_col "$schema" "$field" default); then
-    printf '%s: cannot read its row of the schema\n' "$field"
-    return 1
+    answers__cannot "$field" "read its row of the schema"
+    return
   fi
-  answers__value "$field" "$v" || return 1
+  answers__value "$field" "$v" || return
   case "$type" in
     name)
-      answers__ere "$v" '[a-z0-9][a-z0-9._-]*' ||
-        { answers__no "$field" "a name is lowercase letters, digits, ., _ and -, starting with a letter or digit"; return 1; }
-      [ "${#v}" -le 100 ] || { answers__no "$field" "a name is at most 100 characters"; return 1; }
-      case "$v" in *.git) answers__no "$field" "a name does not end .git"; return 1 ;; esac
+      answers__want "$field" "$v" '[a-z0-9][a-z0-9._-]*' \
+        "a name is lowercase letters, digits, ., _ and -, starting with a letter or digit" || return
+      [ "${#v}" -le 100 ] || { answers__no "$field" "a name is at most 100 characters"; return; }
+      case "$v" in *.git) answers__no "$field" "a name does not end .git"; return ;; esac
       ;;
     owner)
-      answers__ere "$v" "$ANSWERS_OWNER" ||
-        { answers__no "$field" "a GitHub login is letters, digits and single hyphens between them"; return 1; }
-      [ "${#v}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return 1; }
+      answers__want "$field" "$v" "$ANSWERS_OWNER" \
+        "a GitHub login is letters, digits and single hyphens between them" || return
+      [ "${#v}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return; }
       ;;
-    text) answers__free "$field" "$v" || return 1 ;;
+    text) answers__free "$field" "$v" || return ;;
     description)
-      answers__free "$field" "$v" || return 1
+      answers__free "$field" "$v" || return
       # UTF-8 characters: the bytes that are not continuation bytes.
-      item=$(printf '%s' "$v" | tr -d '\200-\277' | wc -c) ||
-        { answers__no "$field" "cannot count the characters of the description"; return 1; }
-      [ "$((item + 0))" -le 350 ] || { answers__no "$field" "a description is at most 350 characters"; return 1; }
+      item=$(
+        set -o pipefail
+        printf '%s' "$v" | tr -d '\200-\277' | wc -c
+      ) || { answers__cannot "$field" "count the characters of the description"; return; }
+      [ "$((item + 0))" -le 350 ] || { answers__no "$field" "a description is at most 350 characters"; return; }
       ;;
     list)
       rest=$v,
@@ -242,8 +262,8 @@ answers_check() {
         # Trimmed of spaces at each end.
         item=${item#"${item%%[! ]*}"}
         item=${item%"${item##*[! ]}"}
-        [ -n "$item" ] || { answers__no "$field" "a list holds an empty item"; return 1; }
-        answers__free "$field" "$item" || return 1
+        [ -n "$item" ] || { answers__no "$field" "a list holds an empty item"; return; }
+        answers__free "$field" "$item" || return
       done
       ;;
     select)
@@ -253,77 +273,95 @@ answers_check() {
         rest=${rest#*|}
         [ "$item" != "$v" ] || break
       done
-      [ "$item" = "$v" ] || { answers__no "$field" "the value is not one of $pattern"; return 1; }
+      [ "$item" = "$v" ] || { answers__no "$field" "the value is not one of $pattern"; return; }
       ;;
     login-or-team)
-      answers__ere "$v" "@$ANSWERS_OWNER(/[A-Za-z0-9]([A-Za-z0-9_-]*[A-Za-z0-9])?)?" ||
-        { answers__no "$field" "the value is not @login or @organization/team"; return 1; }
+      answers__want "$field" "$v" "@$ANSWERS_OWNER(/[A-Za-z0-9]([A-Za-z0-9_-]*[A-Za-z0-9])?)?" \
+        "the value is not @login or @organization/team" || return
       item=${v#@}
       item=${item%%/*}
-      [ "${#item}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return 1; }
+      [ "${#item}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return; }
       ;;
     email-or-url)
-      [ "$v" = "$default" ] || answers__ere "$v" 'https://[^[:space:]]+' ||
-        answers__ere "$v" "$ANSWERS_EMAIL" ||
-        { answers__no "$field" "the value is not an https:// URL or an email address"; return 1; }
+      [ "$v" = "$default" ] || answers__want "$field" "$v" "https://[^[:space:]]+|$ANSWERS_EMAIL" \
+        "the value is not an https:// URL or an email address" || return
       ;;
     url)
-      answers__ere "$v" "https://github\\.com/$ANSWERS_OWNER/[A-Za-z0-9._-]+" ||
-        { answers__no "$field" "the value is not https://github.com/OWNER/REPOSITORY"; return 1; }
+      answers__want "$field" "$v" "https://github\\.com/$ANSWERS_OWNER/[A-Za-z0-9._-]+" \
+        "the value is not https://github.com/OWNER/REPOSITORY" || return
       item=${v#https://github.com/}
       rest=${item#*/}
       item=${item%%/*}
-      [ "${#item}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return 1; }
+      [ "${#item}" -le 39 ] || { answers__no "$field" "a GitHub login is at most 39 characters"; return; }
       case "$rest" in
-        . | ..) answers__no "$field" "a repository is not named . or .."; return 1 ;;
+        . | ..) answers__no "$field" "a repository is not named . or .."; return ;;
       esac
       ;;
     path)
       # shellcheck disable=SC2088 # a literal ~, as the value holds it
       case "$v" in
         '~' | '~/'*) ;;
-        '~'*) answers__no "$field" "a path does not start with ~user; write ~/ or an absolute path"; return 1 ;;
+        '~'*) answers__no "$field" "a path does not start with ~user; write ~/ or an absolute path"; return ;;
       esac
       expanded=$(answers_path "$v") ||
-        { answers__no "$field" "a path starting with ~ needs HOME, which is not set"; return 1; }
+        { answers__no "$field" "a path starting with ~ needs HOME, which is not set"; return; }
       # The expansion meets the value rule and the path rule a TARGET meets.
-      [ "$expanded" = "$v" ] || answers__value "$field, its ~ expanded," "$expanded" || return 1
-      answers__abs "$field" "$expanded" || return 1
+      [ "$expanded" = "$v" ] || answers__value "$field, its ~ expanded," "$expanded" || return
+      answers__abs "$field" "$expanded" || return
       ;;
     *)
-      printf '%s: the type %s is not one this validator knows\n' "$field" "$type"
-      return 1
+      answers__no "$field" "the type $type is not one this validator knows"
+      return
       ;;
   esac
   if [ "$type" != select ] && [ -n "$pattern" ]; then
-    answers__ere "$v" "$pattern" || { answers__no "$field" "the value does not match $pattern"; return 1; }
+    answers__want "$field" "$v" "$pattern" "the value does not match $pattern" || return
   fi
   return 0
 }
 
 answers_target() {
-  answers__value TARGET "$1" || return 1
+  answers__value TARGET "$1" || return
   answers__abs TARGET "$1"
 }
 
 answers_target_for() {
-  local root fault
+  local root fault st
   root=$(answers_path "$1") || {
     printf 'TARGET_ROOT %s gives no target: it starts with ~, and HOME is not set\n' "$1"
     return 1
   }
-  fault=$(answers_target "$root/$2") || {
-    printf 'TARGET_ROOT %s, then /%s, gives no target: %s\n' "$1" "$2" "$fault"
-    return 1
-  }
+  fault=$(answers_target "$root/$2")
+  st=$?
+  case $st in
+    0) ;;
+    1) printf 'TARGET_ROOT %s, then /%s, gives no target: %s\n' "$1" "$2" "$fault" ;;
+    *) printf '%s\n' "$fault" ;;
+  esac
+  [ "$st" = 0 ] || return "$st"
   printf '%s/%s\n' "$root" "$2"
 }
 
 answers_target_check() {
-  local target root want
-  target=$(answers_get "$1" TARGET) || { printf 'the answers hold no TARGET\n'; return 1; }
-  root=$(answers_get "$1" TARGET_ROOT) || { printf 'the answers hold no TARGET_ROOT\n'; return 1; }
-  want=$(answers_target_for "$root" "$2") || { printf '%s\n' "$want"; return 1; }
+  local target root want st
+  target=$(answers_get "$1" TARGET)
+  case $? in
+    0) ;;
+    1) printf 'the answers hold no TARGET\n'; return 1 ;;
+    *) printf 'cannot read TARGET from the answers\n'; return 2 ;;
+  esac
+  root=$(answers_get "$1" TARGET_ROOT)
+  case $? in
+    0) ;;
+    1) printf 'the answers hold no TARGET_ROOT\n'; return 1 ;;
+    *) printf 'cannot read TARGET_ROOT from the answers\n'; return 2 ;;
+  esac
+  want=$(answers_target_for "$root" "$2")
+  st=$?
+  if [ "$st" != 0 ]; then
+    printf '%s\n' "$want"
+    return "$st"
+  fi
   if [ "$target" = "$want" ]; then
     printf '%s\n' "$want"
     return 0
@@ -352,24 +390,30 @@ answers_get() {
 }
 
 answers_read() {
-  answers__file "$1" "$2" || return 1
-  cat -- "$1" || {
-    printf '%s: cannot read the file\n' "$2"
-    return 1
-  }
+  answers__file "$1" "$2" || return
+  cat -- "$1" || answers__cannot "$2" "read the file"
 }
 
 answers_given() {
-  local text line n=0 seen=" " key
-  text=$(answers_read "$1" "$2") || {
+  local text line n=0 seen=" " key st
+  text=$(answers_read "$1" "$2")
+  st=$?
+  if [ "$st" != 0 ]; then
     printf '%s\n' "$text"
-    return 1
-  }
+    return "$st"
+  fi
   [ -z "$text" ] || while IFS= read -r line; do
     n=$((n + 1))
     key=${line%%=*}
     case "$line" in
-      *=*) answers__ere "$key" '[A-Z][A-Z0-9_]*' || key="" ;;
+      *=*)
+        answers__ere "$key" '[A-Z][A-Z0-9_]*'
+        case $? in
+          0) ;;
+          1) key="" ;;
+          *) answers__cannot "$2:$n" "read the line"; return ;;
+        esac
+        ;;
       *) key="" ;;
     esac
     if [ -z "$key" ]; then
@@ -388,72 +432,67 @@ answers_given() {
 }
 
 answers_derive() {
-  local schema=$1 scope=$2 given=$3 base=$4 fields field value fault out="" faults=""
+  local schema=$1 scope=$2 given=$3 base=$4 fields field value fault out="" faults="" st worst=0
   fields=$(answers_fields "$schema" "$scope") || {
     printf 'cannot read the %s fields of the schema\n' "$scope"
-    return 1
+    return 2
   }
   while IFS= read -r field; do
     [ -n "$field" ] || continue
     value=$(answers_get - "$field" <<<"$given")
     case $? in
       0)
-        if ! fault=$(answers_check "$schema" "$field" "$value"); then
-          faults="$faults$fault; give $field again
-"
-          continue
+        fault=$(answers_check "$schema" "$field" "$value")
+        st=$?
+        if [ "$st" = 1 ]; then
+          fault="$fault; give $field again"
         fi
         ;;
       1)
         if ! value=$(answers_col "$schema" "$field" default); then
-          faults="$faults$field: cannot read its default
-"
-          continue
-        fi
-        if [ -z "$value" ]; then
-          faults="$faults$field is missing; give $field=value
-"
-          continue
-        fi
-        if ! value=$(answers_default "$schema" "$field" "$base$out"); then
-          faults="$faults$field: cannot work out its default
-"
-          continue
-        fi
-        if ! fault=$(answers_check "$schema" "$field" "$value"); then
-          faults="$faults$fault
-"
-          continue
+          fault="$field: cannot read its default" st=2
+        elif [ -z "$value" ]; then
+          fault="$field is missing; give $field=value" st=1
+        elif ! value=$(answers_default "$schema" "$field" "$base$out"); then
+          fault="$field: cannot work out its default" st=2
+        else
+          fault=$(answers_check "$schema" "$field" "$value")
+          st=$?
         fi
         ;;
-      *)
-        faults="$faults$field: cannot read what was given
-"
-        continue
-        ;;
+      *) fault="$field: cannot read what was given" st=2 ;;
     esac
+    if [ "$st" != 0 ]; then
+      faults="$faults$fault
+"
+      [ "$st" = 1 ] || st=2
+      [ "$st" -le "$worst" ] || worst=$st
+      continue
+    fi
     out="$out$field=$value
 "
   done <<<"$fields"
   if [ -n "$faults" ]; then
     printf '%s' "$faults"
-    return 1
+    return "$worst"
   fi
   printf '%s' "$out"
 }
 
 answers_setup() {
-  local out
-  out=$(answers_derive "$1" setup "$2" "") || {
+  local out st
+  out=$(answers_derive "$1" setup "$2" "")
+  st=$?
+  if [ "$st" != 0 ]; then
     printf '%s\n' "$out"
-    return 1
-  }
-  [ -z "$out" ] || printf '%s\n' "$out" | sort
+    return "$st"
+  fi
+  [ -z "$out" ] || sort <<<"$out"
 }
 
 answers_default() {
   local d rest out="" name value
-  d=$(answers_col "$1" "$2" default) || return 1
+  d=$(answers_col "$1" "$2" default) || return 2
   rest=$d
   while :; do
     case "$rest" in
@@ -464,11 +503,12 @@ answers_default() {
     rest=${rest#*'{{'}
     name=${rest%%'}}'*}
     rest=${rest#*'}}'}
-    if value=$(printf '%s\n' "$3" | answers_get - "$name"); then
-      out="$out$value"
-    else
-      out="$out{{$name}}"
-    fi
+    value=$(answers_get - "$name" <<<"$3")
+    case $? in
+      0) out="$out$value" ;;
+      1) out="$out{{$name}}" ;;
+      *) return 2 ;;
+    esac
   done
   printf '%s\n' "$out$rest"
 }
@@ -488,7 +528,7 @@ answers_questionnaire() {
 }
 
 answers_validate() {
-  local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field text
+  local schema=$1 file=$2 scope=$3 label=${4:-$2} line n=0 key seen=" " refused=0 want field text fault in
   if [ "$scope" = run ]; then
     want=$(answers_fields "$schema") && want="$want
 TARGET"
@@ -496,14 +536,22 @@ TARGET"
     want=$(answers_fields "$schema" "$scope")
   fi || {
     printf '%s: cannot read the fields of the schema\n' "$label"
-    return 1
+    return 2
   }
   # Read through the one reader, then line by line exactly: the text less
   # the newline that ends its last line, a blank line before it kept.
-  text=$(answers_read "$file" "$label" && printf x) || {
-    printf '%s\n' "$text"
-    return 1
-  }
+  text=$(answers_read "$file" "$label" && printf x)
+  case $? in
+    0) ;;
+    1)
+      printf '%s\n' "$text"
+      return 1
+      ;;
+    *)
+      printf '%s\n' "$text"
+      return 2
+      ;;
+  esac
   text=${text%x}
   [ -z "$text" ] || while IFS= read -r line; do
     n=$((n + 1))
@@ -512,11 +560,19 @@ TARGET"
       *=*) ;;
       *) key="" ;;
     esac
-    if ! answers__ere "$key" '[A-Z][A-Z0-9_]*'; then
-      printf '%s:%d: not a FIELD=value line: %s\n' "$label" "$n" "$line"
-      refused=1
-      continue
-    fi
+    answers__ere "$key" '[A-Z][A-Z0-9_]*'
+    case $? in
+      0) ;;
+      1)
+        printf '%s:%d: not a FIELD=value line: %s\n' "$label" "$n" "$line"
+        refused=1
+        continue
+        ;;
+      *)
+        answers__cannot "$label:$n" "read the line"
+        return
+        ;;
+    esac
     case "$seen" in
       *" $key "*)
         printf '%s:%d: %s is given twice\n' "$label" "$n" "$key"
@@ -527,22 +583,43 @@ TARGET"
     seen="$seen$key "
     # A here-string, not a pipe: grep -q stops at its match, and under
     # pipefail a writer it leaves mid-list fails the lookup.
-    if ! grep -Fxq -e "$key" <<<"$want"; then
-      if answers_col "$schema" "$key" scope >/dev/null; then
-        printf '%s:%d: %s is a %s field, not one of this file\n' "$label" "$n" "$key" \
-          "$(answers_col "$schema" "$key" scope)"
-      else
-        printf '%s:%d: %s: an unknown field\n' "$label" "$n" "$key"
-      fi
-      refused=1
-      continue
-    fi
+    grep -Fxq -e "$key" <<<"$want"
+    case $? in
+      0) ;;
+      1)
+        in=$(answers_col "$schema" "$key" scope)
+        case $? in
+          0) printf '%s:%d: %s is a %s field, not one of this file\n' "$label" "$n" "$key" "$in" ;;
+          1) printf '%s:%d: %s: an unknown field\n' "$label" "$n" "$key" ;;
+          *)
+            answers__cannot "$label:$n" "read the scope of $key in the schema"
+            return
+            ;;
+        esac
+        refused=1
+        continue
+        ;;
+      *)
+        answers__cannot "$label:$n" "look $key up among the fields of the schema"
+        return
+        ;;
+    esac
     if [ "$key" = TARGET ]; then
-      answers_target "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
+      fault=$(answers_target "${line#*=}")
     else
-      answers_check "$schema" "$key" "${line#*=}" | P="$label:$n: " awk '{ print ENVIRON["P"] $0 }'
+      fault=$(answers_check "$schema" "$key" "${line#*=}")
     fi
-    [ "${PIPESTATUS[0]}" = 0 ] || refused=1
+    case $? in
+      0) ;;
+      1)
+        printf '%s:%d: %s\n' "$label" "$n" "$fault"
+        refused=1
+        ;;
+      *)
+        printf '%s:%d: %s\n' "$label" "$n" "$fault"
+        return 2
+        ;;
+    esac
   done <<<"${text%$'\n'}"
   while IFS= read -r field; do
     [ -n "$field" ] || continue
@@ -563,16 +640,26 @@ answers__no() {
   printf '%s: %s\n' "$1" "$2"
   return 1
 }
+# answers__cannot WHAT DOING: "WHAT: cannot DOING" out, and exit 2: a lookup
+# or a read failed, so nothing is judged.
+answers__cannot() {
+  printf '%s: cannot %s\n' "$1" "$2"
+  return 2
+}
 
 # answers__file FILE LABEL: the rule an answers file meets as a whole, before
 # any value from it is kept: it holds no NUL byte, which bash's read and
 # command substitution drop and awk may stop at. Each count has its status
-# read. The reason out, naming LABEL, and exit 1 when refused.
+# read. The reason out, naming LABEL, and exit 1 when refused, 2 when FILE
+# cannot be read.
 answers__file() {
   local all kept
-  if ! all=$(wc -c <"$1") || ! kept=$(tr -d '\000' <"$1" | wc -c); then
-    printf '%s: cannot read the file\n' "$2"
-    return 1
+  if ! all=$(wc -c <"$1") || ! kept=$(
+    set -o pipefail
+    tr -d '\000' <"$1" | wc -c
+  ); then
+    answers__cannot "$2" "read the file"
+    return
   fi
   if [ "$((all + 0))" -ne "$((kept + 0))" ]; then
     printf '%s: the file holds a NUL byte, which some readers drop and others stop at\n' "$2"
@@ -606,25 +693,44 @@ answers__value() {
     *$'\xe2\x80\xa8'* | *$'\xe2\x80\xa9'*) answers__no "$1" "the value holds U+2028 or U+2029, a line or paragraph separator" ;;
     *'{{'*) answers__no "$1" "the value holds {{" ;;
   esac || return 1
-  answers__ere "$2" "$ANSWERS_UTF8" ||
-    answers__no "$1" "the value is not valid UTF-8, or holds a C1 control character"
+  answers__want "$1" "$2" "$ANSWERS_UTF8" "the value is not valid UTF-8, or holds a C1 control character"
 }
 
-# answers__ere VALUE ERE: the whole of VALUE, one line, matches ERE.
+# answers__ere VALUE ERE: the whole of VALUE, one line, matches ERE; exit 1
+# when it does not, 2 when grep cannot match it.
 answers__ere() {
   grep -Eq -e "^($2)\$" <<<"$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+# answers__want FIELD VALUE ERE WHY: VALUE matches ERE; else "FIELD: WHY"
+# out and exit 1, or, when the match cannot be made, that out and exit 2.
+answers__want() {
+  answers__ere "$2" "$3"
+  case $? in
+    0) ;;
+    1) answers__no "$1" "$4" ;;
+    *) answers__cannot "$1" "match the value against its rule" ;;
+  esac
 }
 
 # answers__free FIELD VALUE: free text holds no email address and no rule
-# word.
+# word; exit 2 when either cannot be looked for.
 answers__free() {
   local word
-  if grep -Eq -e "$ANSWERS_EMAIL" <<<"$2"; then
-    answers__no "$1" "free text holds no email address"
-    return 1
-  fi
-  if word=$(rules_word "$2"); then
-    answers__no "$1" "free text holds no rule word, and this holds \"$word\" (foundation/bin/lib/rules.sh)"
-    return 1
-  fi
+  grep -Eq -e "$ANSWERS_EMAIL" <<<"$2"
+  case $? in
+    0) answers__no "$1" "free text holds no email address" ;;
+    1) ;;
+    *) answers__cannot "$1" "look for an email address in the value" ;;
+  esac || return
+  word=$(rules_word "$2")
+  case $? in
+    0) answers__no "$1" "free text holds no rule word, and this holds \"$word\" (foundation/bin/lib/rules.sh)" ;;
+    1) ;;
+    *) answers__cannot "$1" "look for a rule word in the value" ;;
+  esac
 }

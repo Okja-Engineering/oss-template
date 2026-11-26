@@ -113,10 +113,26 @@ fault=$(git_version_ok) || refuse "$fault"
 cd "$ws" || refuse "cannot enter the workspace $ws"
 
 # The answers, confirmed, against the schema at HEAD.
-head=$(git rev-parse -q --verify 'HEAD^{commit}') || refuse "the workspace has no commit at HEAD"
-tree_cat "commit:$head" shared/answers.tsv >"$work/schema" || refuse "HEAD holds no shared/answers.tsv"
-fault=$(answers_schema_check "$work/schema" shared/answers.tsv) ||
-  refuse "shared/answers.tsv at HEAD does not parse:" "$fault"
+# Each lookup whose 1 is "none" reads a higher status as a failure, never
+# as that none (decision 228).
+head=$(git rev-parse -q --verify 'HEAD^{commit}')
+case $? in
+  0) ;;
+  1) refuse "the workspace has no commit at HEAD" ;;
+  *) refuse "cannot read the workspace's HEAD" ;;
+esac
+tree_cat "commit:$head" shared/answers.tsv >"$work/schema"
+case $? in
+  0) ;;
+  1) refuse "HEAD holds no shared/answers.tsv" ;;
+  *) refuse "cannot read shared/answers.tsv at HEAD" ;;
+esac
+fault=$(answers_schema_check "$work/schema" shared/answers.tsv)
+case $? in
+  0) ;;
+  1) refuse "shared/answers.tsv at HEAD does not parse:" "$fault" ;;
+  *) refuse "cannot read shared/answers.tsv at HEAD" ${fault:+"$fault"} ;;
+esac
 fault=$(answers_check "$work/schema" NAME "$name") || refuse "$fault"
 outd=stages/01-ask/output/$name
 [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name, and confirm it"
@@ -124,15 +140,28 @@ outd=stages/01-ask/output/$name
   refuse "the run $name has no confirmed.md; the operator confirms its answers at stage 01's checkpoint"
 cp "$outd/answers.env" "$work/answers.env" || refuse "cannot read $outd/answers.env"
 blob=$(answers_blob "$work/answers.env") || refuse "cannot hash $outd/answers.env"
-named=$(answers_record "$outd/confirmed.md" answers) || named=""
+named=$(answers_record "$outd/confirmed.md" answers)
+case $? in
+  0) ;;
+  1) named="" ;;
+  *) refuse "cannot read $outd/confirmed.md" ;;
+esac
 [ "$blob" = "$named" ] ||
   refuse "$outd/answers.env is not the answers confirmed.md names (blob $blob, not ${named:-none}); the operator confirms them again at stage 01's checkpoint"
-fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env") ||
-  refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault"
+fault=$(answers_validate "$work/schema" "$work/answers.env" run "$outd/answers.env")
+case $? in
+  0) ;;
+  1) refuse "the answers do not hold under shared/answers.tsv at HEAD; change them with bin/ask run $name --redo:" "$fault" ;;
+  *) refuse "cannot judge the answers under shared/answers.tsv at HEAD:" "$fault" ;;
+esac
 named=$(answers_get "$work/answers.env" NAME) || refuse "cannot read NAME from $outd/answers.env"
 [ "$named" = "$name" ] || refuse "$outd/answers.env names another run"
-target=$(answers_target_check "$work/answers.env" "$name") ||
-  refuse "$outd/answers.env: $target; change the answers with bin/ask run $name --redo"
+target=$(answers_target_check "$work/answers.env" "$name")
+case $? in
+  0) ;;
+  1) refuse "$outd/answers.env: $target; change the answers with bin/ask run $name --redo" ;;
+  *) refuse "$outd/answers.env: $target" ;;
+esac
 root=${target%/*}
 
 # Where it goes, and what is in the way.

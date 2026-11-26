@@ -21,7 +21,8 @@
 #                              the product's `claims` and the workspace's.
 #   rules_word TEXT            print the first word of the `trace` list, the
 #                              union of both, that TEXT holds as one line of
-#                              prose; exit 1 when it holds none.
+#                              prose; exit 1 when it holds none, above 1
+#                              when TEXT cannot be read, never read as none.
 #   rules_claims SRC PREFIX... judge every `.md` file the tree.sh source SRC
 #                              lists, but those under a PREFIX: each line
 #                              `rules_lines claims` gives names a check or
@@ -101,7 +102,7 @@ rules_lines() {
 }
 
 rules_word() {
-  printf '%s\n' "$1" | rules__scan trace word
+  rules__scan trace word <<<"$1"
 }
 
 rules_claims() {
@@ -171,7 +172,12 @@ EOF
       bin/?* | .githooks/?* | .claude/hooks/?* | .github/workflows/?*) ;;
       *) continue ;;
     esac
-    links__holds "$paths" "${cand%/}" && return 0
+    links__holds "$paths" "${cand%/}"
+    case $? in
+      0) return 0 ;;
+      1) ;;
+      *) return 2 ;;
+    esac
   done <<EOF
 $cands
 EOF

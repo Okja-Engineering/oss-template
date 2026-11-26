@@ -85,10 +85,18 @@ discard_check() {
     return 1
   fi
   if [ -f "$render_md" ]; then
-    if ! recorded=$(answers_record "$render_md" target); then
-      printf 'remove %s: %s names no target\n' "$path" "$render_md"
-      return 1
-    fi
+    recorded=$(answers_record "$render_md" target)
+    case $? in
+      0) ;;
+      1)
+        printf 'remove %s: %s names no target\n' "$path" "$render_md"
+        return 1
+        ;;
+      *)
+        printf 'remove %s: cannot read %s\n' "$path" "$render_md"
+        return 1
+        ;;
+    esac
     if [ "$recorded" != "$target" ]; then
       printf 'remove %s: render.md names %s, not the run'"'"'s target %s\n' "$path" "$recorded" "$target"
       return 1

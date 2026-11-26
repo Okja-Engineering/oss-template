@@ -329,11 +329,16 @@ links_judge() {
       *) return 2 ;;
     esac
     path=${resolved%%#*}
-    if ! links__holds "$paths" "$path"; then
-      printf '%s:%s: the link %s does not resolve: no %s\n' "$file" "$nr" "$target" "$path"
-      refused=1
-      continue
-    fi
+    links__holds "$paths" "$path"
+    case $? in
+      0) ;;
+      1)
+        printf '%s:%s: the link %s does not resolve: no %s\n' "$file" "$nr" "$target" "$path"
+        refused=1
+        continue
+        ;;
+      *) return 2 ;;
+    esac
     case "$resolved" in *'#'*) ;; *) continue ;; esac
     anchor=${resolved#*#}
     case "$path" in *.md) ;; *) continue ;; esac
@@ -345,12 +350,25 @@ links_judge() {
       1) text="" ;;
       *) return 2 ;;
     esac
-    anchors=$(printf '%s' "${text%x}" | links_anchors && printf x) || return 2
-    if ! printf '%s' "${anchors%x}" | grep -Fx -e "$anchor" >/dev/null; then
-      printf '%s:%s: the link %s does not resolve: %s has no heading #%s\n' \
-        "$file" "$nr" "$target" "$path" "$anchor"
-      refused=1
-    fi
+    anchors=$(
+      set -o pipefail
+      printf '%s' "${text%x}" | links_anchors && printf x
+    ) || return 2
+    # grep's 1 is "no such heading"; a higher status, a list it could not
+    # read, is a link that cannot be judged.
+    (
+      set -o pipefail
+      printf '%s' "${anchors%x}" | grep -Fx -e "$anchor" >/dev/null
+    )
+    case $? in
+      0) ;;
+      1)
+        printf '%s:%s: the link %s does not resolve: %s has no heading #%s\n' \
+          "$file" "$nr" "$target" "$path" "$anchor"
+        refused=1
+        ;;
+      *) return 2 ;;
+    esac
   done <<EOF
 $targets
 EOF
@@ -358,10 +376,11 @@ EOF
 }
 
 # links__holds PATHS PATH: PATHS holds PATH as a file, or as a directory
-# (an empty PATH, the top, always).
+# (an empty PATH, the top, always); exit 1 when it does not, above 1 when
+# PATHS cannot be read.
 links__holds() {
   [ -n "$2" ] || return 0
-  printf '%s\n' "$1" | P="$2" awk '
+  P="$2" awk '
     $0 == ENVIRON["P"] || index($0, ENVIRON["P"] "/") == 1 { found = 1 }
-    END { exit !found }'
+    END { exit !found }' <<<"$1"
 }

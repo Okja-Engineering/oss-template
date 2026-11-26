@@ -66,7 +66,13 @@ tree_cat() {
         cd "$top" &&
           git ls-files -z -c -o --exclude-standard -- ":(literal)$path" | tr '\0' '\n'
       ) || return 2
-      printf '%s\n' "$listed" | grep -Fxq -e "$path" || return 1
+      # grep's 1 is "not listed"; any higher status is a failed read.
+      grep -Fxq -e "$path" <<<"$listed"
+      case $? in
+        0) ;;
+        1) return 1 ;;
+        *) return 2 ;;
+      esac
       if [ -L "$top/$path" ]; then
         listed=$(readlink "$top/$path") || return 2
         printf '%s' "$listed"
@@ -78,7 +84,14 @@ tree_cat() {
       ;;
     index | commit:*)
       tree=$(tree__tree "$src") || return 2
-      type=$(git cat-file -t "$tree:$path" 2>/dev/null) || return 1
+      # cat-file fails alike for a path the tree lacks and for a failed
+      # read; rev-parse tells them apart: its 1 is "no such path", and any
+      # other failure is a read that failed, never "not held".
+      if ! type=$(git cat-file -t "$tree:$path" 2>/dev/null); then
+        git rev-parse -q --verify "$tree:$path" >/dev/null
+        [ "$?" = 1 ] && return 1
+        return 2
+      fi
       [ "$type" = blob ] || return 1
       git cat-file blob "$tree:$path" || return 2
       ;;

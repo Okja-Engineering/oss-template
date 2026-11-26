@@ -74,18 +74,37 @@ refuse() {
   exit 1
 }
 
+# Each lookup whose 1 is "none" reads a higher status as a failure, never as
+# that none (decision 228).
+
 # schema_ok: the schema parses, or the command refuses, naming its faults.
 schema_ok() {
   local faults
-  faults=$(answers_schema_check "$SCHEMA" shared/answers.tsv 2>&1) ||
-    refuse "shared/answers.tsv does not parse:" "$faults"
+  faults=$(answers_schema_check "$SCHEMA" shared/answers.tsv 2>&1)
+  case $? in
+    0) ;;
+    1) refuse "shared/answers.tsv does not parse:" "$faults" ;;
+    *) refuse "cannot read shared/answers.tsv" ${faults:+"$faults"} ;;
+  esac
+}
+
+# pick TEXT FIELD LABEL: in PICKED, FIELD's value in TEXT, answers lines,
+# from the file LABEL names; the command refuses when it holds no FIELD,
+# or when it cannot be read.
+pick() {
+  PICKED=$(answers_get - "$2" <<<"$1")
+  case $? in
+    0) ;;
+    1) refuse "$3 holds no $2" ;;
+    *) refuse "cannot read $2 from $3" ;;
+  esac
 }
 
 # assignments SCOPE ARG...: the FIELD=value arguments as answers lines, in
 # PAIRS; each names a field of SCOPE once, with a value that is one line, or
 # the command refuses.
 assignments() {
-  local scope=$1 arg field seen=" " fault
+  local scope=$1 arg field seen=" " fault in
   shift
   PAIRS=""
   for arg in "$@"; do
@@ -98,11 +117,16 @@ assignments() {
       *" $field "*) refuse "$field is given twice" ;;
     esac
     seen="$seen$field "
-    case "$(answers_col "$SCHEMA" "$field" scope)" in
+    in=$(answers_col "$SCHEMA" "$field" scope)
+    case $? in
+      0) ;;
+      1) refuse "$field: an unknown field" ;;
+      *) refuse "cannot read the scope of $field in shared/answers.tsv" ;;
+    esac
+    case "$in" in
       "$scope") ;;
-      '') refuse "$field: an unknown field" ;;
       setup) refuse "$field is a setup field: give it after --setup-override for this run, or set it with bin/ask setup" ;;
-      *) refuse "$field is a $(answers_col "$SCHEMA" "$field" scope) field, not a $scope field" ;;
+      *) refuse "$field is a $in field, not a $scope field" ;;
     esac
     fault=$(answers_check "$SCHEMA" "$field" "${arg#*=}") || refuse "$fault"
     PAIRS="$PAIRS$arg
@@ -262,10 +286,19 @@ cmd_run() {
   # Everything is judged before anything is removed or written.
   schema_ok
   fault=$(answers_check "$SCHEMA" NAME "$name") || refuse "$fault"
-  answers_col "$SCHEMA" TARGET_ROOT type >/dev/null || refuse "shared/answers.tsv has no TARGET_ROOT"
+  answers_col "$SCHEMA" TARGET_ROOT type >/dev/null
+  case $? in
+    0) ;;
+    1) refuse "shared/answers.tsv has no TARGET_ROOT" ;;
+    *) refuse "cannot read TARGET_ROOT's row of shared/answers.tsv" ;;
+  esac
   [ -f "$SETUP" ] || refuse "setup/answers.env is missing; run bin/ask setup"
-  fault=$(answers_validate "$SCHEMA" "$SETUP" setup setup/answers.env) ||
-    refuse "setup/answers.env is not valid; fix it with bin/ask setup:" "$fault"
+  fault=$(answers_validate "$SCHEMA" "$SETUP" setup setup/answers.env)
+  case $? in
+    0) ;;
+    1) refuse "setup/answers.env is not valid; fix it with bin/ask setup:" "$fault" ;;
+    *) refuse "cannot judge setup/answers.env:" "$fault" ;;
+  esac
   setup_have=$(answers_read "$SETUP" setup/answers.env) || refuse "$setup_have"
   outd=$ws/stages/01-ask/output/$name
   rel=stages/01-ask/output/$name
@@ -274,11 +307,11 @@ cmd_run() {
     [ "$redo" = 1 ] ||
       refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
     old_answers=$(answers_read "$outd/answers.env" "$rel/answers.env") || refuse "$old_answers"
-    answers_get - TARGET <<<"$old_answers" >/dev/null || refuse "$rel/answers.env holds no TARGET"
+    pick "$old_answers" TARGET "$rel/answers.env"
     # The old target, as the discard derives it: the old TARGET_ROOT, from
     # this answers file before it is replaced, then /NAME (decision 227).
-    value=$(answers_get - TARGET_ROOT <<<"$old_answers") || refuse "$rel/answers.env holds no TARGET_ROOT"
-    old_target=$(answers_target_for "$value" "$name") || refuse "$rel/answers.env: $old_target"
+    pick "$old_answers" TARGET_ROOT "$rel/answers.env"
+    old_target=$(answers_target_for "$PICKED" "$name") || refuse "$rel/answers.env: $old_target"
     given "$outd/setup.override.env" "$rel/setup.override.env"
     old_overrides=$GIVEN
     given "$outd/given.env" "$rel/given.env"
@@ -314,7 +347,10 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
     value=$(answers_get - "$field" <<<"$override_pairs")
     case $? in
       0) ;;
-      1) value=$(answers_get - "$field" <<<"$setup_have") || refuse "cannot read $field from setup/answers.env" ;;
+      1)
+        pick "$setup_have" "$field" setup/answers.env
+        value=$PICKED
+        ;;
       *) refuse "cannot read the overrides" ;;
     esac
     out="$out$field=$value
@@ -324,8 +360,8 @@ NAME='*) refuse "NAME is the run's name, given as bin/ask run NAME, not as NAME=
 $given_pairs" "$out") || refuse "the answers are not written:" "$value"
   out="$out$value
 "
-  value=$(answers_get - TARGET_ROOT <<<"$out") || refuse "the answers hold no TARGET_ROOT"
-  target=$(answers_target_for "$value" "$name") || refuse "$target"
+  pick "$out" TARGET_ROOT "this run's answers.env"
+  target=$(answers_target_for "$PICKED" "$name") || refuse "$target"
   out="${out}TARGET=$target
 "
   # What the run writes, made before anything is removed.
@@ -340,7 +376,12 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
   # discard would take it.
   recorded=$old_target
   if [ -f "$render_md" ]; then
-    recorded=$(answers_record "$render_md" target) || refuse "$render_md names no target"
+    recorded=$(answers_record "$render_md" target)
+    case $? in
+      0) ;;
+      1) refuse "$render_md names no target" ;;
+      *) refuse "cannot read $render_md" ;;
+    esac
   fi
   if [ "$have_remove" = 1 ]; then
     fault=$(discard_check "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
@@ -395,8 +436,12 @@ cmd_confirm() {
   git_hermetic
   outd=$ws/stages/01-ask/output/$name
   [ -f "$outd/answers.env" ] || refuse "there is no run $name; write it with bin/ask run $name first"
-  fault=$(answers_target_check "$outd/answers.env" "$name") ||
-    refuse "stages/01-ask/output/$name/answers.env: $fault; change the answers with bin/ask run $name --redo"
+  fault=$(answers_target_check "$outd/answers.env" "$name")
+  case $? in
+    0) ;;
+    1) refuse "stages/01-ask/output/$name/answers.env: $fault; change the answers with bin/ask run $name --redo" ;;
+    *) refuse "stages/01-ask/output/$name/answers.env: $fault" ;;
+  esac
   # The operator's name meets the rule every value meets.
   fault=$(answers__value --by "$who") || refuse "$fault; --by names the operator on one line"
   # Hashed as render hashes it: in the workspace, under git.sh's environment.

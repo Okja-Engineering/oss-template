@@ -52,7 +52,7 @@
 
 render_tree() {
   local commit=$1 schema=$2 answers=$3 out=$4 entries line refused=0
-  local mode rel name tmpl sel field path values value v src produced="" tmp twins unportable
+  local mode rel name tmpl sel selected field path values value v src produced="" tmp twins unportable
   entries=$(tree_list "commit:$commit") || return 2
   # The selecting fields: "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE". Every
   # command a value comes from has its status read (decision 228).
@@ -89,6 +89,11 @@ render_tree() {
     printf '%s\n' "$twins"
     return 1
   fi
+  # The paths a field selects, one a line.
+  selected=$(cut -f 2 <<<"$sel") || {
+    printf 'cannot read the selecting fields\n'
+    return 2
+  }
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/render.XXXXXX") || return 2
   render__fields "$schema" "$answers" >"$tmp/fields" || {
     rm -rf "$tmp"
@@ -140,11 +145,22 @@ render_tree() {
 $sel
 EOF
     [ "$src" != skip ] || continue
-    if [ "$src" = verbatim ] && N=$name awk -F '\t' '$2 == ENVIRON["N"] { f = 1 } END { exit !f }' <<<"$sel"; then
-      printf 'foundation/%s: %s is a selected path, so it comes only from its variants, %s.VALUE or %s.VALUE.tmpl\n' \
-        "$rel" "$name" "$name" "$name"
-      refused=1
-      continue
+    if [ "$src" = verbatim ]; then
+      render__holds "$selected" "$name"
+      case $? in
+        0)
+          printf 'foundation/%s: %s is a selected path, so it comes only from its variants, %s.VALUE or %s.VALUE.tmpl\n' \
+            "$rel" "$name" "$name" "$name"
+          refused=1
+          continue
+          ;;
+        1) ;;
+        *)
+          printf 'cannot look up the selected paths\n'
+          refused=2
+          break
+          ;;
+      esac
     fi
     case "$mode" in
       160000)
@@ -163,11 +179,20 @@ EOF
       refused=1
       continue
     fi
-    if grep -Fxq -e "$name" <<<"$produced"; then
-      printf 'foundation/%s: a second source for %s\n' "$rel" "$name"
-      refused=1
-      continue
-    fi
+    render__holds "$produced" "$name"
+    case $? in
+      0)
+        printf 'foundation/%s: a second source for %s\n' "$rel" "$name"
+        refused=1
+        continue
+        ;;
+      1) ;;
+      *)
+        printf 'cannot look up the paths rendered so far\n'
+        refused=2
+        break
+        ;;
+    esac
     produced="$produced$name
 "
     case "$name" in
@@ -184,9 +209,22 @@ EOF
       if [ -s "$tmp/err" ]; then
         cat "$tmp/err"
         refused=1
-      elif grep -Eq '[{][{][A-Z_]+[}][}]' "$out/$name"; then
-        printf 'foundation/%s: a {{FIELD}} placeholder is left after substitution\n' "$rel"
-        refused=1
+      else
+        # grep's 1 is "none left"; a higher status is a file it could not
+        # read, never read as none.
+        grep -Eq '[{][{][A-Z_]+[}][}]' "$out/$name"
+        case $? in
+          0)
+            printf 'foundation/%s: a {{FIELD}} placeholder is left after substitution\n' "$rel"
+            refused=1
+            ;;
+          1) ;;
+          *)
+            printf 'cannot look for a placeholder left in %s\n' "$name"
+            refused=2
+            break
+            ;;
+        esac
       fi
     else
       tree_cat "commit:$commit" "foundation/$rel" >"$out/$name" || { refused=2; break; }
@@ -201,9 +239,18 @@ EOF
   # A selecting field whose value no variant matches.
   while IFS='	' read -r field path values value; do
     [ -n "$field" ] || continue
-    grep -Fxq -e "$path" <<<"$produced" && continue
-    printf '%s=%s selects foundation/%s.%s, which the foundation does not hold\n' "$field" "$value" "$path" "$value"
-    refused=1
+    render__holds "$produced" "$path"
+    case $? in
+      0) ;;
+      1)
+        printf '%s=%s selects foundation/%s.%s, which the foundation does not hold\n' "$field" "$value" "$path" "$value"
+        refused=1
+        ;;
+      *)
+        printf 'cannot look up the paths rendered\n'
+        return 2
+        ;;
+    esac
   done <<EOF
 $sel
 EOF
@@ -213,6 +260,17 @@ EOF
     return 2
   }
   return "$refused"
+}
+
+# render__holds LIST LINE: LIST, lines, holds LINE exactly; exit 1 when it
+# does not, 2 when grep cannot look, which is never read as "not held".
+render__holds() {
+  grep -Fxq -e "$2" <<<"$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
 # render__selecting SCHEMA ANSWERS: one line per selecting field,
@@ -343,10 +401,15 @@ render_walk() {
     comm -23 "$tmp/want" "$tmp/have" | sed 's/^/the target lacks a file render wrote: /'
     refused=1
   fi
+  # awk's 1 is "no listed file under it"; a higher status is a list it
+  # could not read, which ends the loop as a failure.
   if ! sed -n 's/^D//p' "$tmp/dirs" | while IFS= read -r p; do
-    if ! P="$p/" awk 'index($0, ENVIRON["P"]) == 1 { found = 1; exit } END { exit !found }' "$tmp/want"; then
-      printf 'the target directory %s holds no listed file\n' "$p"
-    fi
+    P="$p/" awk 'index($0, ENVIRON["P"]) == 1 { found = 1; exit } END { exit !found }' "$tmp/want"
+    case $? in
+      0) ;;
+      1) printf 'the target directory %s holds no listed file\n' "$p" ;;
+      *) exit 2 ;;
+    esac
   done >"$tmp/empty"; then
     printf 'the walk cannot judge the directories of the target\n'
     rm -rf "$tmp"

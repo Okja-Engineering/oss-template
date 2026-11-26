@@ -38,10 +38,17 @@ get() {
 }
 
 get shared/answers.tsv "$tmp/schema" || exit 1
-faults=$(answers_schema_check "$tmp/schema" shared/answers.tsv) || {
-  printf '%s\n' "$faults"
-  exit 1
-}
+# Each judge's 1 is a refusal; any higher status is one that could not
+# judge, and the check cannot run (decision 228).
+faults=$(answers_schema_check "$tmp/schema" shared/answers.tsv)
+case $? in
+  0) ;;
+  1)
+    printf '%s\n' "$faults"
+    exit 1
+    ;;
+  *) exit 2 ;;
+esac
 
 if get setup/questionnaire.md "$tmp/questionnaire"; then
   answers_questionnaire "$tmp/schema" >"$tmp/expected" || exit 2
@@ -54,23 +61,41 @@ else
 fi
 
 if get setup/answers.env "$tmp/answers"; then
-  if answers_validate "$tmp/schema" "$tmp/answers" setup setup/answers.env; then
+  answers_validate "$tmp/schema" "$tmp/answers" setup setup/answers.env
+  case $? in
+    0) valid=1 ;;
+    1) valid=0 ;;
+    *) exit 2 ;;
+  esac
+  if [ "$valid" = 1 ]; then
     # setup/answers.env is what bin/ask setup works out from what the
     # operator gave, setup/given.env, none when it is absent (decision 229).
     given=""
     tree_cat "$src" setup/given.env >"$tmp/given"
     case $? in
-      0) given=$(answers_given "$tmp/given" setup/given.env) || {
-        printf '%s\n' "$given"
-        exit 1
-      } ;;
+      0)
+        given=$(answers_given "$tmp/given" setup/given.env)
+        case $? in
+          0) ;;
+          1)
+            printf '%s\n' "$given"
+            exit 1
+            ;;
+          *) exit 2 ;;
+        esac
+        ;;
       1) ;;
       *) exit 2 ;;
     esac
-    want=$(answers_setup "$tmp/schema" "$given") || {
-      printf 'setup/given.env gives no setup/answers.env:\n%s\n' "$want"
-      exit 1
-    }
+    want=$(answers_setup "$tmp/schema" "$given")
+    case $? in
+      0) ;;
+      1)
+        printf 'setup/given.env gives no setup/answers.env:\n%s\n' "$want"
+        exit 1
+        ;;
+      *) exit 2 ;;
+    esac
     printf '%s\n' "$want" >"$tmp/want" || exit 2
     cmp -s "$tmp/want" "$tmp/answers"
     case $? in

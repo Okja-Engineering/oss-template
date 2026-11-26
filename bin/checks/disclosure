@@ -38,7 +38,27 @@ refuse() {
 }
 # Each lookup reads a here-string, not a pipe: grep -q stops at its match,
 # and under pipefail a writer it leaves mid-list would fail the lookup.
-has_path() { grep -Fxq -- "$1" <<<"$paths"; }
+# grep's 1 is "no"; any higher status is a lookup that failed, and the check
+# cannot run (decision 228). Each is called in the check's own shell.
+# holds LIST LINE: LIST, lines, holds LINE exactly.
+holds() {
+  grep -Fxq -- "$2" <<<"$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) exit 2 ;;
+  esac
+}
+# matches TEXT ERE: TEXT, one line, matches ERE.
+matches() {
+  grep -Eq -- "$2" <<<"$1"
+  case $? in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) exit 2 ;;
+  esac
+}
+has_path() { holds "$paths" "$1"; }
 # under DIR: the paths under DIR/, matched literally. Every list a rule reads
 # has its status read, and the check cannot run when one fails (decision
 # 228).
@@ -152,9 +172,18 @@ normalize() {
   }'
 }
 stage_num() { case "$1" in [0-9][0-9]-*) printf '%s' "${1%%-*}" ;; *) printf '' ;; esac; }
-# outputs_of STAGE: the backticked names in STAGE's ## Outputs.
-# shellcheck disable=SC2016 # a literal backtick, the Markdown code span
-outputs_of() { section "stages/$1/CONTEXT.md" Outputs | grep -o '`[^`]*`' | tr -d '`'; }
+# outputs_of STAGE: the backticked names in STAGE's ## Outputs, one a line;
+# none for a stage with no contract. Exit nonzero when it cannot be read.
+outputs_of() {
+  has_path "stages/$1/CONTEXT.md" || return 0
+  section "stages/$1/CONTEXT.md" Outputs | awk '{
+    s = $0
+    while (match(s, /`[^`]*`/)) {
+      print substr(s, RSTART + 1, RLENGTH - 2)
+      s = substr(s, RSTART + RLENGTH)
+    }
+  }'
+}
 
 # --- AC1, the product's rule -------------------------------------------------
 agents_judge "$src" 80
@@ -202,7 +231,7 @@ stages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "stages" && NF >= 3 { print $2 
 # spaces or expanded as a glob; the tree reader refuses a newline in a path.
 while IFS= read -r s <&3; do
   [ -n "$s" ] || continue
-  grep -Eq '^[0-9][0-9]-[a-z]+(-[a-z]+)*$' <<<"$s" ||
+  matches "$s" '^[0-9][0-9]-[a-z]+(-[a-z]+)*$' ||
     refuse "stages/$s/: the name is not NN-slug (NN-[a-z]+(-[a-z]+)*)"
   has_path "stages/$s/CONTEXT.md" || refuse "stages/$s/: no CONTEXT.md"
   if has_path "stages/$s/output/.gitignore"; then
@@ -253,7 +282,7 @@ EOF
     names=$(printf '%s\n' "$routed" | sort -u) || exit 2
     while IFS= read -r s; do
       [ -n "$s" ] || continue
-      grep -Fxq -- "$s" <<<"$stages" ||
+      holds "$stages" "$s" ||
         refuse "CONTEXT.md: the routing table names stages/$s/, which is not a stage folder"
     done <<<"$names"
   else
@@ -347,12 +376,14 @@ while IFS= read -r s <&3; do
       other=${target#stages/}
       other=${other%%/*}
       file=${target##*/}
-      if [ "$target" = "stages/$other/output/<name>/$file" ] && grep -Fxq -- "$other" <<<"$stages"; then
+      if [ "$target" = "stages/$other/output/<name>/$file" ] && holds "$stages" "$other"; then
         onum=$(stage_num "$other")
         if [ -z "$num" ] || [ -z "$onum" ] || [ "$onum" -ge "$num" ]; then
           refuse "$contract: Inputs \`$path\` is an output of the same or a later stage"
-        elif ! outputs_of "$other" | grep -Fx -e "$file" -e "output/<name>/$file" >/dev/null; then
-          refuse "$contract: Inputs \`$path\` is not in stages/$other/'s Outputs"
+        else
+          outs=$(outputs_of "$other") || exit 2
+          holds "$outs" "$file" || holds "$outs" "output/<name>/$file" ||
+            refuse "$contract: Inputs \`$path\` is not in stages/$other/'s Outputs"
         fi
       else
         refuse "$contract: Inputs \`$path\` does not resolve"
@@ -365,7 +396,7 @@ EOF
   held=$(under "stages/$s/references") || exit 2
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    grep -Fxq -- "$p" <<<"$inputs" || refuse "$p: in references/ but not in the stage's Inputs"
+    holds "$inputs" "$p" || refuse "$p: in references/ but not in the stage's Inputs"
   done <<<"$held"
 done 3<<EOF
 $stages
