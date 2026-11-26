@@ -929,23 +929,22 @@ else
   assert_contains "$(cat "$OUTD/given.env")" "TITLE=C" "  as given.env is"
   assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  with no temporary file left"
 fi
-# A second signal while cleanup runs is held off, so cleanup finishes: a
-# first run whose first rename fails, then a TERM as cleanup removes the
-# first of its two temporary files (answers' R9 M19 and removal's N6 v59 of
-# S2's fourth ship gate).
+# A signal while cleanup runs is held off, so cleanup finishes: a redo whose
+# removal of its 03 outputs fails, refused with the signals let through,
+# then a TERM as cleanup removes the first of its two temporary files
+# (answers' R9 M19 and removal's N6 v59 of S2's fourth ship gate). A refusal
+# inside place, where the signals are held already, would not tell.
 if entry_ignored TERM; then
   assert_pass "skipped: SIGTERM was ignored when the suite began, so the hold cannot be told"
 else
-  ready
+  rendered
   mkdir -p "$SCRATCH/clstub$n"
-  printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) exit 1 ;; esac\nexec %s "$@"\n' \
-    "$(command -v mv)" >"$SCRATCH/clstub$n/mv"
-  printf '#!/bin/sh\ncase "$*" in *given.env.tmp.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
+  printf '#!/bin/sh\ncase "$*" in *03-verify*) exit 1 ;; *given.env.tmp.*) kill -s TERM "$PPID" ;; esac\nexec %s "$@"\n' \
     "$(command -v rm)" >"$SCRATCH/clstub$n/rm"
-  chmod +x "$SCRATCH/clstub$n/mv" "$SCRATCH/clstub$n/rm"
-  OUT=$(cd "$R" && PATH="$SCRATCH/clstub$n:$PATH" bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' 2>&1)
-  assert_status 1 "$?" "a TERM while cleanup removes a refused run's temporary files is held off"
-  assert_eq "gone" "$(gone "$OUTD")" "  so cleanup finishes: no temporary file, and no folder it made"
+  chmod +x "$SCRATCH/clstub$n/rm"
+  OUT=$(cd "$R" && PATH="$SCRATCH/clstub$n:$PATH" bin/ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+  assert_status 1 "$?" "a TERM while cleanup removes a refused redo's temporary files is held off"
+  assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  so cleanup finishes, leaving no temporary file"
 fi
 # The signals are let through again once the files are placed: a run whose
 # last line meets a pipe whose reader has gone ends by SIGPIPE, its files
