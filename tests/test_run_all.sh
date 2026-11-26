@@ -262,14 +262,27 @@ for bad in 0 00 x -1 ''; do
 done
 
 # --- an interrupt ends the suites and removes the private directory ------------------------
+# The suite's EXIT trap takes two seconds, as a suite's that cleans its
+# scratch may: run-all exits only once the suite has ended, its trap
+# included, so no suite it started outlives it (the tests lens's T1 of S2's
+# fourth ship gate).
 D="$SCRATCH/slow"
 mkdir -p "$D"
 export SLOW_PID="$SCRATCH/slow.pid"
-suite "$D/test_slow.sh" 'echo $$ >"$SLOW_PID.x" && mv "$SLOW_PID.x" "$SLOW_PID"' 'sleep 30' \
+suite "$D/test_slow.sh" "trap 'sleep 2; : >\"\$SLOW_PID.cleaned\"' EXIT" \
+  'echo $$ >"$SLOW_PID.x" && mv "$SLOW_PID.x" "$SLOW_PID"' 'sleep 30' \
   ': >"$SLOW_PID.finished"' 'assert_done'
+# A signal ignored when this suite began cannot be trapped by any shell it
+# starts (POSIX), as under nohup, which ignores HUP: such a case is
+# skipped, saying so.
+entry_ignored() { [ "$(sh -c "kill -s $1 \$\$; echo alive" 2>/dev/null)" = alive ]; }
 # Each ends the run with 128 and its number (the tests lens's N6 and N10).
 for sig in HUP INT TERM; do
-  rm -f "$SLOW_PID" "$SLOW_PID.finished"
+  if entry_ignored "$sig"; then
+    printf '# skipped: SIG%s was ignored when this suite began, so run-all cannot trap it\n' "$sig"
+    continue
+  fi
+  rm -f "$SLOW_PID" "$SLOW_PID.finished" "$SLOW_PID.cleaned"
   set -m
   TMPDIR="$SCRATCH/tmp" bash "$RUN_ALL" "$D" >/dev/null 2>&1 &
   pid=$!
@@ -279,6 +292,8 @@ for sig in HUP INT TERM; do
   wait "$pid"
   st=$?
   assert_eq "$((128 + $(kill -l "$sig")))" "$st" "SIG$sig ends the run with 128 and its number"
+  assert_eq "yes" "$([ -e "$SLOW_PID.cleaned" ] && echo yes || echo no)" \
+    "  only once the running suite has ended, its EXIT trap done"
   spid=$(cat "$SLOW_PID" 2>/dev/null)
   assert_eq "ended" "$(if [ -n "$spid" ] && kill -0 "$spid" 2>/dev/null; then echo running; else echo ended; fi)" \
     "  the running suite ended"
