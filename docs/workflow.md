@@ -13,11 +13,11 @@ A run creates one repository. It goes through four stages in order, each a folde
 | Stage | What happens | Checkpoint | Lands in |
 |---|---|---|---|
 | 01-ask | the agent drafts the answers; `bin/ask` writes them | the operator confirms the answers, and approves removing the target before a redo | S2 |
-| 02-render | `bin/render` writes the produced files into the target | only before replacing a render | S2 |
+| 02-render | `bin/render` writes the produced files into the target | only before removing a target: a render's, to replace it, or one a killed render left | S2 |
 | 03-verify | `bin/verify` runs the produced repository's checks, then makes its first commit | only before a target is removed | S3 |
 | 04-publish | `bin/publish` creates the repository on GitHub and pushes it | a listed decider approves the plan line; the operator decides whether to abandon an attempted run | S4 |
 
-In a stage, an agent loads its `CONTEXT.md` and only the files its `## Inputs` table names. Scripts do every write. The agent drafts, presents each checkpoint and explains failures; the operator and the deciders make the calls. The checkpoints of the stages not yet built are not enforced.
+In a stage, an agent loads its `CONTEXT.md` and only the files its `## Inputs` table names. Scripts do every write. The agent drafts, presents each checkpoint and explains failures; the operator and the deciders make the calls. A checkpoint's call itself is not enforced: a script cannot tell who made it, or whether the operator said yes. The scripts of the built stages hold each route a checkpoint gates, as each stage's section below says; a stage not yet built holds none.
 
 ## Setup
 
@@ -27,7 +27,7 @@ The operator's defaults, the setup fields of `shared/answers.tsv`, live in `setu
 
 `bin/ask run NAME FIELD=value…` writes the run's answers file, `stages/01-ask/output/NAME/answers.env`: every setup field from `setup/answers.env`, the run fields given or their defaults, and `TARGET`, which is exactly `TARGET_ROOT` with its `~` expanded, then `/NAME`; one `FIELD=value` a line, sorted, with LF endings. A setup field given after `--setup-override` replaces its setup value for this run only, recorded in the run's `setup.override.env`, and `setup/answers.env` stays as it was. The run fields given are recorded in the run's `given.env`. Both are written in the step that writes `answers.env`, and neither exists when it would be empty.
 
-`bin/ask run` refuses, writing nothing: an unknown field; a value its type or pattern refuses, or one holding a newline or `{{`; a rule word or an email address in free text; a missing field; a setup field given outside `--setup-override`; an existing run without `--redo`; and a present target that no `--remove` names.
+`bin/ask run` refuses, writing nothing: an unknown field; a value its type or pattern refuses, or one that is not one line of valid UTF-8, holding a control character, C0, DEL or C1, U+2028, U+2029 or `{{`; a rule word or an email address in free text; a missing field; a setup field given outside `--setup-override`; an answers or given file holding a NUL byte; an existing run without `--redo`, and `--redo` with no run, or of a run whose answers file holds no `TARGET`; a kept answer the schema now refuses; and a present target that no `--remove` names.
 
 The operator confirms the answers at stage 01's checkpoint, and `bin/ask confirm NAME --by "<operator>"` records who, when and the answers file's blob id in the run's `confirmed.md`. It refuses a `TARGET` that is no longer `TARGET_ROOT`, `~` expanded under the current `HOME`, then `/NAME`, as one edited by hand or written under another `HOME`, and `bin/render` refuses it too; the answers change with `bin/ask run NAME --redo`. Who confirmed, and whether the operator saw the answers first, is not enforced.
 

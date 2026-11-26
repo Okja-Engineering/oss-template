@@ -1,6 +1,6 @@
 # oss-template workspace
 
-This repository is a workspace: an agent runs it to create a new Okja repository, and a person decides at each checkpoint. It is pre-launch: setup and stages 01 and 02 run, and each later stage lands with its slice ([docs/workflow.md](docs/workflow.md#status)).
+This repository is a workspace: an agent runs it to create a new Okja repository, and a person decides at each checkpoint. It is pre-launch, and its stages land one slice at a time; what runs today is in [docs/workflow.md](docs/workflow.md#status).
 
 ## Running the workflow
 

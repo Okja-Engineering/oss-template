@@ -3,7 +3,8 @@
 # reader lists, to a path and, for a Markdown file, a heading's anchor.
 #
 # The Markdown read is a subset, defined once here in LINKS_MD_AWK and
-# shared with rules.sh: fenced blocks; code spans; headings, ATX (`#`) and
+# shared with rules.sh and the checks: YAML frontmatter; fenced blocks and
+# indented code; code spans; headings, ATX (`#`) and
 # setext (paragraph lines over a line of `=` or `-`); links, inline
 # (`[text](target)`) and by reference (`[text][label]`, `[label][]` and
 # `[label]`, with `[label]: target` anywhere in the file).
@@ -48,7 +49,10 @@
 
 # The awk functions of the subset, prefixed to each awk program that reads
 # Markdown:
-#   md_block(LINE)  the kind of LINE, read in order: "fence" for a fence line
+#   md_block(LINE)  the kind of LINE, read in order from a file's first:
+#                   "front" for YAML frontmatter, a first line `---` through
+#                   the next `---` or `...`, the one frontmatter rule;
+#                   "fence" for a fence line
 #                   or one inside a fence, "blank", "atx", "under" (a line
 #                   of `=` or of `-`: a setext underline after "text", else
 #                   a thematic break), "break", "item" (a list item or a
@@ -61,7 +65,9 @@
 # shellcheck disable=SC2016 # awk code, its $ kept for awk
 LINKS_MD_AWK='
 function md_block(l,   k) {
-  if (l ~ /^ ? ? ?(```|~~~)/) { md_fence = !md_fence; k = "fence" }
+  if (!md_seen++ && l == "---") { md_front = 1; k = "front" }
+  else if (md_front) { if (l == "---" || l == "...") md_front = 0; k = "front" }
+  else if (l ~ /^ ? ? ?(```|~~~)/) { md_fence = !md_fence; k = "fence" }
   else if (md_fence) k = "fence"
   else if (l ~ /^[ \t]*$/) k = "blank"
   else if (l ~ /^ ? ? ?#+([ \t]|$)/) k = "atx"
@@ -173,7 +179,7 @@ links_targets() {
     {
       line[NR] = $0
       kind[NR] = md_block($0)
-      if (kind[NR] == "fence" || kind[NR] == "code") next
+      if (kind[NR] == "front" || kind[NR] == "fence" || kind[NR] == "code") next
       if (match($0, /^ ? ? ?\[[^]]+\]:/)) {
         l = substr($0, 1, RLENGTH - 2)
         sub(/^ *\[/, "", l)
@@ -185,7 +191,7 @@ links_targets() {
     }
     END {
       for (i = 1; i <= NR; i++) {
-        if (kind[i] == "fence" || kind[i] == "code") continue
+        if (kind[i] == "front" || kind[i] == "fence" || kind[i] == "code") continue
         if (kind[i] == "def") {
           if (i in deft) printf "%d\t%s\n", i, deft[i]
           continue

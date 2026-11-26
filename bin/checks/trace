@@ -87,10 +87,36 @@ case $? in
   0 | 1) ;;
   *) exit 2 ;;
 esac
-guards=$(printf '%s\n' "$contributing" | awk '
-  /^```/ { fence = !fence }
-  !fence && /^## / { insec = ($0 == "## Agent guards"); next }
-  insec { print }') || exit 2
+# § Agent guards, read through links.sh's Markdown subset: from a level-1 or
+# level-2 heading, ATX or setext, "Agent guards", to the next such heading.
+guards=$(printf '%s\n' "$contributing" | awk "$LINKS_MD_AWK"'
+  function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+  # heading T LEVEL: a heading of level 2 or less opens the section or
+  # closes it; a deeper one is part of it.
+  function heading(t, level) { if (level <= 2) insec = (t == "Agent guards") }
+  # flush: the paragraph lines held back, which no underline made a heading.
+  function flush(   i) {
+    if (insec) for (i = 1; i <= held; i++) print hl[i]
+    held = 0
+  }
+  {
+    k = md_block($0)
+    if (k == "text") { para = held ? para " " trim($0) : trim($0); hl[++held] = $0; next }
+    # A setext heading is of level 1 or 2.
+    if (k == "under" && held) { held = 0; heading(para, 2); next }
+    flush()
+    if (k == "atx") {
+      h = trim($0)
+      match(h, /^#+/)
+      level = RLENGTH
+      sub(/^#+[ \t]*/, "", h)
+      sub(/[ \t]+#+$/, "", h)
+      heading(h, level)
+      if (level <= 2) next
+    }
+    if (insec) print
+  }
+  END { flush() }') || exit 2
 # The strings of the "deny" array, each on its own line.
 entries=$(printf '%s\n' "$settings" | awk '
   { s = s $0 "\n" }

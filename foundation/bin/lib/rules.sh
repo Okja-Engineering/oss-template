@@ -11,9 +11,10 @@
 #
 #   rules_lines claims|trace   Markdown in; "NR<TAB>LINE" out for each line
 #                              holding a word of that list, LINE as written.
-#                              YAML frontmatter and fenced blocks are not
-#                              judged, and code spans are blanked first, as
-#                              links.sh's Markdown subset reads them. For
+#                              YAML frontmatter, fenced blocks and
+#                              indented code are not judged, and code spans
+#                              are blanked first, as links.sh's Markdown
+#                              subset reads them. For
 #                              `claims` a heading is not a sentence, so no
 #                              heading line is judged, ATX or setext: the
 #                              heading rule (decisions 173, 179), shared by
@@ -73,8 +74,6 @@ rules__scan() {
       if (!found && (w = word(md_spans($0))) != "") { print w; found = 1 }
       next
     }
-    NR == 1 && $0 == "---" { front = 1; next }
-    front { if ($0 == "---" || $0 == "...") front = 0; next }
     {
       k = md_block($0)
       # For claims a paragraph line waits for the next one, an underline
@@ -82,7 +81,7 @@ rules__scan() {
       if (LIST == "claims" && k == "text") { hnr[++held] = NR; hl[held] = $0; next }
       if (k == "under" && held) { held = 0; next }
       flush()
-      if (k == "fence" || (LIST == "claims" && k == "atx")) next
+      if (k == "front" || k == "fence" || k == "code" || (LIST == "claims" && k == "atx")) next
       judge(NR, $0)
     }
     END {
