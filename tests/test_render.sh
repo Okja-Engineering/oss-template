@@ -725,6 +725,34 @@ mvstub "  *.widget.render.*)$kills ;;"
 mvstubbed widget
 assert_status 0 "$ST" "every signal render traps, sent during the renames, is held off"
 assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
+# In any shell mode (render R1 of S2's fourth ship gate): with POSIXLY_CORRECT
+# set, where kill -l prints bare names, the set is whole, so the same render
+# holds every signal off, and --replace --remove runs as it does without it.
+ready
+mvstub "  *.widget.render.*)$kills ;;"
+OUT=$(cd "$R" && export POSIXLY_CORRECT=1 && PATH="$SCRATCH/mstub$n:$PATH" bin/render widget 2>&1)
+assert_status 0 "$?" "with POSIXLY_CORRECT set, every signal sent during the renames is held off${OUT:+ ($OUT)}"
+assert_eq "$ROOT/widget" "$(record widget target)" "  and render.md is written"
+OUT=$(cd "$R" && export POSIXLY_CORRECT=1 && bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+assert_status 0 "$?" "with POSIXLY_CORRECT set, --replace --remove renders again${OUT:+ ($OUT)}"
+assert_eq "present" "$(gone "$ROOT/widget/README.md")" "  into the target"
+# A shell whose signal list gives no set, or one lacking HUP, INT or TERM,
+# is refused, exit 2, before render makes anything: no private directory,
+# no output folder, no target. A trap exported as a function stands in for
+# the shell's own list.
+for LISTING in '' ' 1) SIGHUP	 2) SIGINT'; do
+  ready
+  mkdir -p "$SCRATCH/tmpd$n"
+  OUT=$(
+    cd "$R" &&
+      trap() { if [ "${1:-}" = -l ]; then printf '%s' "$LISTING"; else builtin trap "$@"; fi; } &&
+      export -f trap && TMPDIR="$SCRATCH/tmpd$n" bin/render widget 2>&1
+  )
+  assert_status 2 "$?" "refused: render where the signals to hold give the set \"$LISTING\""
+  assert_contains "$OUT" "cannot work out the signals to hold off" "  and the refusal says so"
+  assert_eq "gone gone " "$(gone "$ROOT/widget") $(gone "$R/stages/02-render/output/widget") $(ls -A "$SCRATCH/tmpd$n")" \
+    "  and nothing is made"
+done
 if [ "$(id -u)" != 0 ]; then
   ready
   mkdir -p "$ROOT/widget"

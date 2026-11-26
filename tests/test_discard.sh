@@ -212,6 +212,26 @@ done
 if kill -l RTMIN >/dev/null 2>&1; then
   assert_contains " $DISCARD_SIGNALS " " $(kill -l RTMIN) " "DISCARD_SIGNALS holds the first real-time signal"
 fi
+# The set is the same in any shell mode: in POSIX mode kill -l prints bare
+# names, which once gave an empty set (render R1 of S2's fourth ship gate).
+# signals_of: DISCARD_SIGNALS, as a shell sourcing discard.sh works it out.
+signals_of() { bash -c '. "$1/answers.sh" && . "$1/discard.sh" && printf "%s" "$DISCARD_SIGNALS"' _ "$TEST_DIR/../bin/lib"; }
+assert_eq "$DISCARD_SIGNALS" "$(POSIXLY_CORRECT=1 signals_of)" "DISCARD_SIGNALS is the same with POSIXLY_CORRECT set"
+# A listing that gives no set, or one lacking HUP, INT or TERM, gives none,
+# so each caller refuses before it makes anything (its own cases); a trap
+# exported as a function stands in for the shell's own list.
+listed() {
+  (
+    trap() { if [ "${1:-}" = -l ]; then printf '%s' "$LISTING"; else builtin trap "$@"; fi; }
+    export -f trap
+    signals_of
+  )
+}
+for LISTING in '' ' 1) SIGHUP	 2) SIGINT	 3) SIGQUIT' ' 2) SIGINT	15) SIGTERM' 'HUP INT TERM'; do
+  assert_eq "" "$(LISTING=$LISTING listed)" "no set from the listing \"$LISTING\""
+done
+LISTING=' 1) SIGHUP	 2) SIGINT	15) SIGTERM	20) SIGCHLD'
+assert_eq " 1 2 15" "$(LISTING=$LISTING listed)" "the set from a listing holding HUP, INT and TERM"
 
 # --- the root rule: no path in a working tree of the workspace (decision 227) ---------------
 # The workspace is the one these libraries are sourced from.

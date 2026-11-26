@@ -781,6 +781,34 @@ OUT=$(cd "$R" && PATH="$SCRATCH/stub$n:$PATH" sh -c 'echo "$$" >"$1" && shift &&
 ST=$?
 assert_status 143 "$ST" "a redo signalled during its removals ends by the signal"
 assert_eq "" "$(cd "$OUTD" && find . -name '*.tmp.*')" "  and leaves no temporary file"
+# In any shell mode (render R1 of S2's fourth ship gate): with POSIXLY_CORRECT
+# set, where kill -l prints bare names, each command runs to the outcome it
+# has without it, a redo --remove and a refusal included.
+ready
+OUT=$(cd "$R" && export POSIXLY_CORRECT=1 && bin/ask questionnaire 2>&1 && bin/ask setup "TARGET_ROOT=$ROOT" 2>&1 &&
+  bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' 2>&1 && bin/ask confirm widget --by 'A Person' 2>&1)
+assert_status 0 "$?" "with POSIXLY_CORRECT set, questionnaire, setup, run and confirm${OUT:+ ($OUT)}"
+rendered
+OUT=$(cd "$R" && export POSIXLY_CORRECT=1 && bin/ask run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
+assert_status 0 "$?" "with POSIXLY_CORRECT set, a redo --remove${OUT:+ ($OUT)}"
+assert_eq "gone TITLE=C" "$(gone "$ROOT/widget") $(grep '^TITLE=' "$ANS")" "  removes the target and writes the answers"
+OUT=$(cd "$R" && export POSIXLY_CORRECT=1 && bin/ask run widget 'TITLE=E' 2>&1)
+assert_status 1 "$?" "with POSIXLY_CORRECT set, a refusal is a refusal"
+assert_contains "$OUT" "the run widget exists" "  for its own reason"
+# A shell whose signal list gives no set, or one lacking HUP, INT or TERM,
+# is refused, exit 2, before ask makes anything. A trap exported as a
+# function stands in for the shell's own list.
+for LISTING in '' ' 1) SIGHUP	15) SIGTERM'; do
+  ready
+  OUT=$(
+    cd "$R" &&
+      trap() { if [ "${1:-}" = -l ]; then printf '%s' "$LISTING"; else builtin trap "$@"; fi; } &&
+      export -f trap && bin/ask run widget 'TITLE=A' 'DESCRIPTION=B' 2>&1
+  )
+  assert_status 2 "$?" "refused: a run where the signals to hold give the set \"$LISTING\""
+  assert_contains "$OUT" "cannot work out the signals to hold off" "  and the refusal says so"
+  assert_eq "gone" "$(gone "$OUTD")" "  and nothing is made"
+done
 # A redo removes the staging directories a killed render left under the old
 # TARGET_ROOT, so a moved TARGET_ROOT strands none (decision 226), and
 # nothing else there.
