@@ -295,7 +295,7 @@ answers_get "$SCRATCH/nul.env" TITLE >/dev/null 2>&1
 assert_status 2 "$?" "answers_get refuses one too, as unreadable, not as absent"
 assert_eq "$(cat "$A")" "$(answers_read "$A" a)" "answers_read gives an accepted file's text"
 out=$(answers_read "$SCRATCH/no-such.env" the-label 2>&1)
-assert_status 1 "$?" "answers_read refuses a file it cannot read"
+assert_status 2 "$?" "answers_read cannot read a file it cannot read, exiting 2"
 assert_contains "$out" "the-label" "  naming it"
 # answers_setup: the setup fields, each given or its default worked out from
 # those before it, sorted (decision 229).
@@ -514,32 +514,79 @@ k=0
 # subshell, not as a prefix, so bash forgets each tool it has found.
 under() {
   k=$((k + 1))
-  fixture_failing "$SCRATCH/fail$k" "$1" "$2" "$3"
+  fixture_failing "$SCRATCH/fail$k" "$1" "$2" "$3" "${FAIL_STATUS:-1}"
   shift 3
   OUT=$(PATH="$SCRATCH/fail$k:$PATH" && "$@" 2>&1)
   ST=$?
 }
-# answers_check reads a field's type, then its pattern, then its default.
+# A judge's 1 is a refusal; one that cannot judge exits 2, saying what it
+# could not read. answers_check reads a field's type, then its pattern,
+# then its default.
 under awk '*col\[$i] = i*' 2 answers_check "$S" CODE abc
-assert_status 1 "$ST" "refused: a value whose pattern cannot be read"
-assert_contains "$OUT" "CODE: cannot read its row of the schema" "  and the refusal says so"
+assert_status 2 "$ST" "cannot judge: a value whose pattern cannot be read"
+assert_contains "$OUT" "CODE: cannot read its row of the schema" "  and says so"
 under awk '*col\[$i] = i*' 3 answers_check "$S" CONTACT 'not yet set, so launch waits on it'
-assert_status 1 "$ST" "refused: a value whose default cannot be read"
-assert_contains "$OUT" "CONTACT: cannot read its row of the schema" "  and the refusal says so"
+assert_status 2 "$ST" "cannot judge: a value whose default cannot be read"
+assert_contains "$OUT" "CONTACT: cannot read its row of the schema" "  and says so"
 under tr '-d \\200-\\277' 1 answers_check "$S" DESCRIPTION "$(rep 351 a)"
-assert_status 1 "$ST" "refused: a description whose characters cannot be counted"
-assert_contains "$OUT" "cannot count the characters" "  and the refusal says so"
+assert_status 2 "$ST" "cannot judge: a description whose characters cannot be counted"
+assert_contains "$OUT" "cannot count the characters" "  and says so"
 good_setup
 under awk '*ENVIRON\["S"] == ""*' 1 answers_validate "$S" "$SETUP" setup
-assert_status 1 "$ST" "refused: a file whose schema's fields cannot be read"
-assert_contains "$OUT" "cannot read the fields of the schema" "  and the refusal says so"
+assert_status 2 "$ST" "cannot judge: a file whose schema's fields cannot be read"
+assert_contains "$OUT" "cannot read the fields of the schema" "  and says so"
 printf 'OWNER=Ok\000ja\n' >>"$SETUP"
 under tr '-d \\000' 1 answers_validate "$S" "$SETUP" setup
-assert_status 1 "$ST" "refused: a file holding a NUL byte, whose bytes cannot be counted without it"
-assert_contains "$OUT" "cannot read the file" "  and the refusal says so"
+assert_status 2 "$ST" "cannot judge: a file holding a NUL byte, whose bytes cannot be counted without it"
+assert_contains "$OUT" "cannot read the file" "  and says so"
 under wc '-c' 1 answers_validate "$S" "$SETUP" setup
-assert_status 1 "$ST" "refused: a file holding a NUL byte, whose bytes cannot be counted"
-assert_contains "$OUT" "cannot read the file" "  and the refusal says so"
+assert_status 2 "$ST" "cannot judge: a file holding a NUL byte, whose bytes cannot be counted"
+assert_contains "$OUT" "cannot read the file" "  and says so"
+
+# A lookup whose 1 is "none" or "no", a grep or an awk-backed helper,
+# failing with a higher status, is never read as that answer (decision
+# 228): the judge exits 2, saying what it could not read.
+export FAIL_STATUS=2
+under awk '*col\[$i] = i*' 1 answers_check "$S" CODE ABC
+assert_status 2 "$ST" "cannot judge: a value whose type cannot be read, never an unknown field"
+assert_contains "$OUT" "CODE: cannot read its row of the schema" "  and says so"
+under grep '-Eq -e \[A-Za-z0-9._%+-]+@*' 1 answers_check "$S" TITLE 'write to a@b.co'
+assert_status 2 "$ST" "cannot judge: free text whose look for an email address fails"
+assert_contains "$OUT" "TITLE: cannot look for an email address in the value" "  and says so"
+under awk '*MODE=word*' 1 answers_check "$S" TITLE 'you must stop'
+assert_status 2 "$ST" "cannot judge: free text whose look for a rule word fails"
+assert_contains "$OUT" "TITLE: cannot look for a rule word in the value" "  and says so"
+under grep '-Eq -e ^((\[*' 1 answers_check "$S" TITLE 'plain'
+assert_status 2 "$ST" "cannot judge: a value whose UTF-8 match fails"
+assert_contains "$OUT" "TITLE: cannot match the value against its rule" "  and says so"
+under grep '-Eq -e ^(\[a-z0-9]*' 1 answers_check "$S" NAME 'widget'
+assert_status 2 "$ST" "cannot judge: a name whose match fails, never a name refused"
+assert_contains "$OUT" "NAME: cannot match the value against its rule" "  and says so"
+under grep '-Eq -e ^(\[A-Z]{3})*' 1 answers_check "$S" CODE 'abc'
+assert_status 2 "$ST" "cannot judge: a value whose pattern's match fails"
+good_setup
+under grep '-Eq -e ^((\[*' 1 answers_validate "$S" "$SETUP" setup
+assert_status 2 "$ST" "cannot judge: a file with a line that cannot be judged"
+under grep '-Eq -e ^(\[A-Z]\[A-Z0-9_]*' 1 answers_validate "$S" "$SETUP" setup
+assert_status 2 "$ST" "cannot judge: a file whose line's field name cannot be matched"
+under grep '-Fxq -e CONTACT' 1 answers_validate "$S" "$SETUP" setup
+assert_status 2 "$ST" "cannot judge: a file whose field cannot be looked up in the schema"
+printf 'OWNER=acme\n' >"$SCRATCH/given.env"
+under grep '-Eq -e ^(\[A-Z]\[A-Z0-9_]*' 1 answers_given "$SCRATCH/given.env" given.env
+assert_status 2 "$ST" "cannot read: a given file whose field name cannot be matched"
+under awk '*!found && i > 1*' 1 answers_default "$S" TEAM 'OWNER=acme'
+assert_status 2 "$ST" "cannot work out: a default whose field's value cannot be read, never one left as {{OWNER}}"
+under awk '*!found && i > 1*' 1 answers_derive "$S" setup 'OWNER=acme' ''
+assert_status 2 "$ST" "cannot derive: what was given cannot be read"
+assert_contains "$OUT" "cannot read what was given" "  and says so"
+target_file /srv/targets /srv/targets/widget
+under awk '*!found && i > 1*' 1 answers_target_check "$SCRATCH/target.env" widget
+assert_status 2 "$ST" "cannot read: a TARGET that cannot be read, never one the answers lack"
+assert_eq "cannot read TARGET from the answers" "$OUT" "  and says so"
+under awk '*!found && i > 1*' 2 answers_target_check "$SCRATCH/target.env" widget
+assert_status 2 "$ST" "cannot read: a TARGET_ROOT that cannot be read, never one the answers lack"
+assert_eq "cannot read TARGET_ROOT from the answers" "$OUT" "  and says so"
+unset FAIL_STATUS
 
 # A type the validator does not know is refused, even in a schema the
 # schema check has not read.

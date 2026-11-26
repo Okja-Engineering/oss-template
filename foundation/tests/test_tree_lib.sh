@@ -194,7 +194,20 @@ for src in index commit:HEAD; do
   fixture_failing "$SCRATCH/gitstub" git '*cat-file blob *:CLAUDE.md' 1 1
   (cd "$O" && PATH="$SCRATCH/gitstub:$PATH" && tree_cat "$src" CLAUDE.md >/dev/null)
   assert_status 2 "$?" "$src: a blob git cannot read fails the read"
+  # The look for the path failing, git's 128, is a failed read, never a
+  # path the tree lacks; a path the tree lacks is still 1.
+  rm -rf "$SCRATCH/gitstub"
+  fixture_failing "$SCRATCH/gitstub" git '*cat-file -t *:CLAUDE.md' 1 128
+  (cd "$O" && PATH="$SCRATCH/gitstub:$PATH" && tree_cat "$src" CLAUDE.md >/dev/null)
+  assert_status 2 "$?" "$src: a path whose type git cannot read fails the read"
+  (cd "$O" && tree_cat "$src" no-such-file.md >/dev/null)
+  assert_status 1 "$?" "$src: a path the tree lacks is not held"
 done
+# The worktree's look for the path in git's listing failing is a failed
+# read, never a path not listed.
+fixture_failing "$SCRATCH/grepstub" grep '-Fxq -e CLAUDE.md' 1 2
+(cd "$O" && PATH="$SCRATCH/grepstub:$PATH" && tree_cat worktree CLAUDE.md >/dev/null)
+assert_status 2 "$?" "worktree: a look for the path that fails fails the read"
 
 # A path no listing line can hold (a newline) fails every source alike.
 N="$SCRATCH/newline"

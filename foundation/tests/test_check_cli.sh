@@ -179,6 +179,21 @@ run "$R" env
 assert_eq "$(git -C "$R" rev-parse origin/main)" "$(value CHECK_BASE)" "tree mode: base is the upstream"
 assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value CHECK_HEAD)" "tree mode: head is HEAD"
 assert_eq "$MB" "$(value DOCS_BASE)" "tree mode: docs base is the merge base with the upstream"
+# A base lookup whose 1 is "none", git failing with 128, is an error, never
+# an unborn HEAD, no upstream or no merge base (decision 228).
+base_fails() { # PATTERN WHAT [ARGS...]
+  local stub="$SCRATCH/basestub-$2"
+  fixture_failing "$stub" git "$1" 1 128
+  shift 2
+  OUT=$(cd "$R" && PATH="$stub:$PATH" bin/check "$@" 2>&1)
+  ST=$?
+}
+base_fails 'rev-parse -q --verify HEAD^{commit}' head env
+assert_status 2 "$ST" "a HEAD git cannot read exits 2, never unborn"
+base_fails 'rev-parse -q --verify @{upstream}^{commit}' upstream env
+assert_status 2 "$ST" "an upstream git cannot read exits 2, never none"
+base_fails 'merge-base *' mergebase env
+assert_status 2 "$ST" "a merge base git cannot read exits 2, never none"
 run "$R" --staged env
 assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value CHECK_BASE)" "staged mode with a HEAD: base is HEAD"
 assert_eq "$(git -C "$R" rev-parse HEAD)" "$(value DOCS_BASE)" "staged mode with a HEAD: docs base is HEAD"

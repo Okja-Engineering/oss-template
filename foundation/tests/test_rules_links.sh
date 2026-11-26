@@ -64,6 +64,21 @@ fixture_failing "$SCRATCH/sedstub" sed 's/^\[^*' 1
 assert_status 2 "$?" "rules_claims: a tree whose paths cannot be listed cannot be judged"
 rules_lines nolist </dev/null 2>/dev/null
 assert_status 2 "$?" "rules_lines: a list it does not hold is an error"
+# A lookup whose 1 is "no", failing with a higher status, is a judgement
+# that cannot be made, never that no (decision 228): the look for a rule
+# word, for a path the tree holds, and for a heading.
+fixture_failing "$SCRATCH/wordstub" awk '*MODE=word*' 1 2
+(PATH="$SCRATCH/wordstub:$PATH" && rules_word 'You must push.' >/dev/null)
+assert_status 2 "$?" "rules_word: a look for a rule word that fails is not none"
+fixture_failing "$SCRATCH/holdstub" awk '*ENVIRON\["P"] "/") == 1*' 1 2
+(cd "$R" && PATH="$SCRATCH/holdstub:$PATH" && links_judge worktree docs/linked.md "$paths" >/dev/null)
+assert_status 2 "$?" "links_judge: a look for the linked path that fails cannot be judged"
+fixture_failing "$SCRATCH/holdstub2" awk '*ENVIRON\["P"] "/") == 1*' 1 2
+(cd "$R" && PATH="$SCRATCH/holdstub2:$PATH" && rules_claims worktree .claude/ AGENTS.md CLAUDE.md GOVERNANCE.md docs/adr/ docs/linked.md docs/rfcs/ docs/work/ >/dev/null)
+assert_status 2 "$?" "rules_claims: a look for the check a line names that fails cannot be judged"
+fixture_failing "$SCRATCH/anchorstub" grep '-Fx -e deciders' 1 2
+(cd "$R" && PATH="$SCRATCH/anchorstub:$PATH" && links_judge worktree docs/linked.md "$paths" >/dev/null)
+assert_status 2 "$?" "links_judge: a look for the heading that fails cannot be judged"
 
 # --- md_block: the kind of each line, in order --------------------------------
 kinds() { printf '%s\n' "$@" | awk "$LINKS_MD_AWK"'{ printf "%s ", md_block($0) }'; }

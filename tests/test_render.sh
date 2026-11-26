@@ -960,6 +960,36 @@ failing grep '-q ^G *' 1 "" 2
 stage_refused "the walk's look for a .git entry fails" "the walk cannot read its lists of the target"
 failing grep '-qx N *' 1 "" 2
 stage_refused "the walk's look for a name with a newline fails" "the walk cannot read its lists of the target"
+# Every lookup whose 1 is "none", failing with a higher status, refuses,
+# saying what it could not read, never reading it as none (decision 228):
+# HEAD's commit, its schema, confirmed.md's blob id, the selected paths,
+# the paths rendered so far, a placeholder left, and the walk's directories.
+failing git 'rev-parse -q --verify HEAD^{commit}' 1 "" 128
+stage_refused "HEAD cannot be read" "cannot read the workspace's HEAD"
+failing git 'cat-file -t *:shared/answers.tsv' 1 "" 128
+stage_refused "HEAD's schema cannot be read" "cannot read shared/answers.tsv at HEAD"
+failing awk '*ENVIRON\["K"]*confirmed.md' 1 "" 2
+stage_refused "confirmed.md's blob id cannot be read" "cannot read stages/01-ask/output/widget/confirmed.md"
+failing grep '-Fxq -e README.md' 1 "" 2
+stage_refused "the look up of the selected paths fails" "cannot look up the selected paths"
+failing grep '-Fxq -e README.md' 2 "" 2
+stage_refused "the look for a second source fails" "cannot look up the paths rendered so far"
+failing grep '-Fxq -e LICENSE' 2 "" 2
+stage_refused "the look for a selected path's variant fails" "cannot look up the paths rendered"
+failing grep '-Eq \[{]\[{]*' 1 "" 2
+stage_refused "the look for a placeholder left fails" "cannot look for a placeholder left in"
+failing awk '*{ found = 1; exit } END { exit !found }*' 1 "" 2
+stage_refused "the walk's look for a directory's listed file fails" "the walk cannot judge the directories"
+# render.md's record, read by the discard, failing: refused, saying so,
+# with the target and render.md left.
+ready
+render widget
+fixture_failing "$SCRATCH/rec$n" awk '*ENVIRON\["K"]*render.md' 1 2
+OUT=$(cd "$R" && PATH="$SCRATCH/rec$n:$PATH" bin/render widget --replace --remove "$ROOT/widget" 2>&1)
+assert_status 1 "$?" "refused: --replace --remove whose render.md cannot be read"
+assert_contains "$OUT" "cannot read stages/02-render/output/widget/render.md" "  and the refusal says so"
+assert_eq "present present" "$(gone "$ROOT/widget/README.md") $(gone "$R/stages/02-render/output/widget/render.md")" \
+  "  with the target and render.md left"
 kept_target() { mkdir -p "$ROOT/widget/kept"; }
 failing ls '-A -- *' 1 kept_target
 assert_status 1 "$ST" "refused: the listing of a present target fails"

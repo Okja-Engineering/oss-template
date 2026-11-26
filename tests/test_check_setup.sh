@@ -141,6 +141,23 @@ cannot_run cat '*/setup/questionnaire.md' "read setup/questionnaire.md" 2
 cannot_run cat '*/setup/answers.env' "read setup/answers.env" 3
 cannot_run awk '*BEGIN { print ENVIRON\["H"] }*' "write the questionnaire it compares" 4
 cannot_run mktemp '-d' "make its scratch directory" 5
+# A judge that cannot judge, a grep or awk lookup failing with a higher
+# status than its "no", is a check that cannot run, never a refusal or a
+# pass (decision 228): the schema's check, setup/answers.env's lines,
+# setup/given.env's lines, and what setup works out from them.
+cannot_judge() { # TOOL PATTERN NTH WHAT
+  local stub="$SCRATCH/jstub$n-$4"
+  fixture_failing "$stub" "$1" "$2" "$3" 2
+  OUT=$(cd "$R" && PATH="$stub:$PATH" bin/checks/setup 2>&1)
+  assert_status 2 "$?" "the check cannot run when it cannot judge $4"
+  assert_not_contains "$OUT" "examined" "  and judges nothing"
+}
+cannot_judge awk '*function bad(why)*' 1 "the schema"
+cannot_judge grep '-Eq -e ^((\[*' 1 "a value of setup/answers.env"
+# Each line of setup/answers.env has its field name matched first, then
+# setup/given.env's first line.
+cannot_judge grep '-Eq -e ^(\[A-Z]\[A-Z0-9_]*' "$(($(wc -l <"$R/setup/answers.env") + 1))" "a line of setup/given.env"
+cannot_judge awk '*!found && i > 1*' 1 "what was given, for setup/answers.env"
 OUT=$(cd "$R" && CHECK_MODE=range CHECK_HEAD=no-such-commit bin/checks/setup 2>&1)
 assert_status 2 "$?" "the check cannot run on a commit that does not exist"
 assert_not_contains "$OUT" "examined" "  and judges nothing"

@@ -858,9 +858,10 @@ assert_eq "present" "$(gone "$OUTD/confirmed.md")" "  and the confirmation"
 # Every value bin/ask judges or writes comes from a command whose status is
 # read: a stub tool failing one call (fixture_failing) is refused, never written
 # as an empty value or a file missing its fields.
-# asked TOOL PATTERN NTH ARG...: bin/ask ARG... under the stub.
+# asked TOOL PATTERN NTH ARG...: bin/ask ARG... under the stub, which exits
+# FAIL_STATUS, 1 by default.
 asked() {
-  fixture_failing "$SCRATCH/fail$n" "$1" "$2" "$3"
+  fixture_failing "$SCRATCH/fail$n" "$1" "$2" "$3" "${FAIL_STATUS:-1}"
   shift 3
   OUT=$(cd "$R" && PATH="$SCRATCH/fail$n:$PATH" bin/ask "$@" 2>&1)
   ST=$?
@@ -899,6 +900,9 @@ for at in "1 cannot read the fields of the schema" "2 cannot read the setup fiel
 done
 # answers_get's reads, in order: per setup field, its override, then its
 # setup value; per run field given, its value; then TARGET_ROOT.
+# A read that fails, exiting 2, is never read as a field the file lacks
+# (decision 228).
+export FAIL_STATUS=2
 ready
 asked awk '*!found && i > 1*' 2 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
 assert_status 1 "$ST" "refused: run whose setup value cannot be read"
@@ -907,8 +911,40 @@ assert_eq "absent" "$(run_state)" "  and no answers file is written"
 ready
 asked awk '*!found && i > 1*' 13 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
 assert_status 1 "$ST" "refused: run whose TARGET_ROOT cannot be read back"
-assert_contains "$OUT" "the answers hold no TARGET_ROOT" "  and the refusal says so"
+assert_contains "$OUT" "cannot read TARGET_ROOT from this run's answers.env" "  and the refusal says so"
 assert_eq "absent" "$(run_state)" "  and no answers file is written"
+# A lookup whose 1 is "none" failing, exiting 2, is refused, saying what it
+# could not read, never judged as none: the email and rule-word looks in
+# free text, the field's scope, the confirmed TARGET, an old run's TARGET
+# and render.md's target.
+ready
+asked grep '-Eq -e \[A-Za-z0-9._%+-]+@*' 1 run widget 'TITLE=A' 'DESCRIPTION=write to a@b.co'
+assert_status 1 "$ST" "refused: run whose look for an email address fails"
+assert_contains "$OUT" "cannot look for an email address" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+asked awk '*MODE=word*' 1 run widget 'TITLE=A' 'DESCRIPTION=you must stop'
+assert_status 1 "$ST" "refused: run whose look for a rule word fails"
+assert_contains "$OUT" "cannot look for a rule word" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+asked awk '*col\[$i] = i*' 1 setup OWNER=acme
+assert_status 1 "$ST" "refused: setup whose field's scope cannot be read"
+assert_contains "$OUT" "cannot read the scope of OWNER" "  and the refusal says so, never an unknown field"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+asked awk '*!found && i > 1*' 1 confirm widget --by 'A Person'
+assert_status 1 "$ST" "refused: confirm whose TARGET cannot be read"
+assert_contains "$OUT" "cannot read TARGET from the answers" "  and the refusal says so"
+assert_not_contains "$OUT" "--redo" "  routing nowhere a redo would not help"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
+rendered
+before=$(run_state)
+asked awk '*ENVIRON\["K"]*render.md' 1 run widget --redo 'TITLE=C' 'DESCRIPTION=D'
+assert_status 1 "$ST" "refused: a redo whose render.md cannot be read"
+assert_contains "$OUT" "cannot read $R/stages/02-render/output/widget/render.md" "  and the refusal says so"
+assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
+unset FAIL_STATUS
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
 asked date '-u *' 1 confirm widget --by 'A Person'

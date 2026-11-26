@@ -700,6 +700,23 @@ cannot_run awk '*if (n == 0) { print ""; exit }*' 1 "an input's path"
 cannot_run awk '*!found && substr($0, i + 1)*' 1 "an input's mode"
 cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 4 "whether an input is a directory"
 cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 5 "a stage's references/"
+# A lookup whose 1 is "no", grep failing with a higher status, is a check
+# that cannot run, never a path the tree lacks (decision 228): a stage's
+# CONTEXT.md, the top CONTEXT.md, and the contract whose rules would be
+# skipped; a stage's name; a routed stage; an earlier stage's Outputs; a
+# file in references/.
+cannot_look() { # PATTERN NTH WHAT
+  valid
+  fixture_failing "$R-stub" grep "$1" "$2" 2
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/checks/disclosure 2>&1)
+  assert_status 2 "$?" "the check cannot run when it cannot look up $3"
+  assert_not_contains "$OUT" "examined" "  and judges nothing"
+}
+cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 1 "a stage's CONTEXT.md"
+cannot_look '-Fxq -- CONTEXT.md' 1 "CONTEXT.md"
+cannot_look '-Fxq -- stages/01-ask/CONTEXT.md' 2 "a contract"
+cannot_look '-Eq*^\[0-9]\[0-9]-*' 1 "a stage's name"
+cannot_look '-Fxq -- 01-ask' 1 "a routed stage"
 # The tree reader failing on a file's bytes, at each of its reads, and on a
 # commit that does not exist (the tests lens's F3). PATH is the file's path
 # in the workspace, NTH its read; the stub matches it under the workspace's
