@@ -215,6 +215,19 @@ git -C "$R" add setup/answers.env
 run --staged
 assert_status 1 "$ST" "refused: a staged setup/answers.env whose setup/given.env is not staged"
 assert_contains "$OUT" "setup/given.env is not staged" "  naming the step: stage it"
+# The look at the working tree's setup/given.env, for that route, failing
+# is a check that cannot run, never a given.env that is not there (the
+# tests lens's T3 of S2's fourth ship gate).
+fixture_failing "$SCRATCH/wgstub$n" cat '*/setup/given.env' 1
+OUT=$(cd "$R" && PATH="$SCRATCH/wgstub$n:$PATH" bin/check --staged setup 2>&1)
+assert_status 2 "$?" "a working tree's setup/given.env that cannot be read, in staged mode, is an error"
+# An empty setup/given.env gives nothing, so it has no field to judge: a
+# setup/answers.env of defaults beside it passes.
+valid
+: >"$R/setup/given.env"
+fixture_commit "$R" "test: an empty given.env"
+run
+assert_status 0 "$ST" "an empty setup/given.env beside setup/answers.env's defaults passes"
 
 # In staged mode each route ends in the index the check judges: the step
 # that mends the file, then staging what it writes (answers' R4 of S2's
