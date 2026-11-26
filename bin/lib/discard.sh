@@ -122,7 +122,7 @@ discard_record() {
   }
   if [ -e "$recorded" ] || [ -L "$recorded" ]; then
     if ! target=$(answers_target_check "$answers" "$name"); then
-      printf 'render.md names %s, present, and the run has no target to judge it by: %s\n' "$recorded" "$target"
+      printf 'render.md names %s, present, which the discard cannot judge: %s\n' "$recorded" "$target"
       return 1
     fi
     if [ "$recorded" != "$target" ]; then

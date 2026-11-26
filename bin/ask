@@ -245,7 +245,8 @@ kept() {
 given() {
   GIVEN=""
   present "$1" || return 0
-  GIVEN=$(answers_given "$1" "$2") || refuse "$GIVEN"
+  GIVEN=$(answers_given "$1" "$2") ||
+    refuse "$GIVEN; the operator may correct $2 by hand, or remove it by hand and give its fields again"
 }
 
 cmd_setup() {
@@ -345,12 +346,25 @@ cmd_run() {
   if [ -f "$outd/answers.env" ]; then
     [ "$redo" = 1 ] ||
       refuse "the run $name exists; change its answers with --redo, at stage 01's checkpoint"
-    old_answers=$(answers_read "$outd/answers.env" "$rel/answers.env") || refuse "$old_answers"
-    pick "$old_answers" TARGET "$rel/answers.env"
+    old_answers=$(answers_read "$outd/answers.env" "$rel/answers.env") ||
+      refuse "$old_answers; the operator may correct it by hand, or remove the run's folder $rel by hand and run it again"
+    answers_get - TARGET <<<"$old_answers" >/dev/null
+    case $? in
+      0) ;;
+      1) refuse "$rel/answers.env holds no TARGET, so the run is not redone; the operator may remove the run's folder $rel by hand and run it again" ;;
+      *) refuse "cannot read TARGET from $rel/answers.env" ;;
+    esac
     # The old target, as the discard derives it: the old TARGET_ROOT, from
     # this answers file before it is replaced, then /NAME (decision 227).
+    # One that gives no target is none to remove; the new TARGET_ROOT is
+    # worked out below, and a target render.md records is judged from it.
     pick "$old_answers" TARGET_ROOT "$rel/answers.env"
-    old_target=$(answers_target_for "$PICKED" "$name") || refuse "$rel/answers.env: $old_target"
+    old_target=$(answers_target_for "$PICKED" "$name")
+    case $? in
+      0) ;;
+      1) old_target="" ;;
+      *) refuse "$rel/answers.env: $old_target" ;;
+    esac
     given "$outd/setup.override.env" "$rel/setup.override.env"
     old_overrides=$GIVEN
     given "$outd/given.env" "$rel/given.env"
@@ -400,7 +414,12 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
   out="$out$value
 "
   pick "$out" TARGET_ROOT "this run's answers.env"
-  target=$(answers_target_for "$PICKED" "$name") || refuse "$target"
+  target=$(answers_target_for "$PICKED" "$name")
+  case $? in
+    0) ;;
+    1) refuse "$target; give TARGET_ROOT again, with --setup-override or with bin/ask setup" ;;
+    *) refuse "$target" ;;
+  esac
   out="${out}TARGET=$target
 "
   # What the run writes, made before anything is removed.
@@ -419,15 +438,15 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
     fault=$(discard_check "$remove" "$outd/answers.env" "$name" "$render_md") || refuse "$fault"
   elif [ "$redo" = 1 ]; then
     fault=$(discard_record "$outd/answers.env" "$name" "$render_md") ||
-      refuse "a redo may not remove render.md: $fault; it is left alone"
+      refuse "a redo may not remove render.md: $fault; it is left alone: the operator may move that target away by hand, or remove render.md by hand once its target is dealt with, then run the redo again"
     if present "$old_target"; then
       fault=$(discard_check "$old_target" "$outd/answers.env" "$name" "$render_md") ||
-        refuse "the target $old_target is present, and a redo may not remove it: $fault; it is left alone"
+        refuse "the target $old_target is present, and a redo may not remove it: $fault; it is left alone: the operator may move it away by hand, then run the redo again"
       refuse "the target $old_target is present: with the operator's yes to \"remove $old_target\", run bin/ask run $name --redo --remove \"$old_target\" and the answers"
     fi
   fi
   if present "$target" && { [ "$have_remove" = 0 ] || [ "$target" != "$remove" ]; }; then
-    refuse "the target $target is present, and no --remove names it; it is left alone"
+    refuse "the target $target is present, and this run may not remove it; it is left alone: the operator may move it away by hand, or give another TARGET_ROOT, then run the command again"
   fi
 
   # The files it writes, staged beside them, the last thing that can refuse
@@ -448,7 +467,11 @@ $given_pairs" "$out") || refuse "the answers are not written:" "$value"
     done
     # A killed render's staging directories under the old TARGET_ROOT, which
     # a moved TARGET_ROOT would otherwise strand (decision 226).
-    fault=$(discard_leftovers "${old_target%/*}" "$name") || refuse "$fault"
+    # An old TARGET_ROOT that gives no target has no staging directory of
+    # this run's to remove.
+    if [ -n "$old_target" ]; then
+      fault=$(discard_leftovers "${old_target%/*}" "$name") || refuse "$fault"
+    fi
   fi
   if [ -z "$override_pairs" ] && present "$outd/setup.override.env"; then
     fault=$(discard_remove "$outd/setup.override.env") || refuse "$fault"

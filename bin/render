@@ -184,10 +184,10 @@ fi
 if [ "$have_remove" = 1 ]; then
   fault=$(discard_check "$remove" "$work/answers.env" "$name" "$render_md") || refuse "$fault"
 elif ! fault=$(discard_record "$work/answers.env" "$name" "$render_md"); then
-  refuse "--replace may not remove render.md: $fault; it is left alone"
+  refuse "--replace may not remove render.md: $fault; it is left alone: the operator may move that target away by hand, or remove render.md by hand once its target is dealt with, then run bin/render $name --replace again"
 elif present "$target" && ! empty_dir "$target"; then
   fault=$(discard_check "$target" "$work/answers.env" "$name" "$render_md") ||
-    refuse "the target $target is present, and --replace may not remove it: $fault; it is left alone"
+    refuse "the target $target is present, and --replace may not remove it: $fault; it is left alone: the operator may move it away by hand, then run bin/render $name again"
   refuse "the target $target is present: with the operator's yes to \"remove $target\", run bin/render $name --replace --remove \"$target\"; without it, it is left alone"
 elif [ "$replace" = 1 ] && [ ! -f "$render_md" ]; then
   refuse "--replace: there is no render of $name to replace; run bin/render $name"
