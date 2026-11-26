@@ -93,4 +93,14 @@ fixture_write "$R/.git/info/exclude" "CLAUDE.md"
 check
 assert_status 1 "$ST" "tree mode: an ignored, untracked CLAUDE.md is missing"
 
+# A failed count is a check that cannot run: with the stage that counts
+# AGENTS.md's lines failing, through a stub first on PATH, the check exits 2
+# rather than judge an empty count.
+fresh
+fixture_failing "$R-stub" awk 'END { print NR }' 1
+OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/check agents 2>&1)
+ST=$?
+assert_status 2 "$ST" "the check cannot run when it cannot count AGENTS.md's lines"
+assert_contains "$OUT" "FAIL agents (could not run)" "  and bin/check says so"
+
 assert_done

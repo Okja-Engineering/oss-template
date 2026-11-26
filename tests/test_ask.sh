@@ -651,4 +651,64 @@ assert_status 1 "$ST" "refused: a redo whose answers cannot be sorted"
 assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 assert_eq "present" "$(gone "$ROOT/widget/sub/file")" "  and, judged before anything is removed, the target is left alone"
 assert_eq "present" "$(gone "$OUTD/confirmed.md")" "  and the confirmation"
+
+# --- a read that fails, refused (decision 228) ------------------------------------------------
+# Every value bin/ask judges or writes comes from a command whose status is
+# read: a stub tool failing one call (fixture_failing) is refused, never written
+# as an empty value or a file missing its fields.
+# asked TOOL PATTERN NTH ARG...: bin/ask ARG... under the stub.
+asked() {
+  fixture_failing "$SCRATCH/fail$n" "$1" "$2" "$3"
+  shift 3
+  OUT=$(cd "$R" && PATH="$SCRATCH/fail$n:$PATH" bin/ask "$@" 2>&1)
+  ST=$?
+}
+ready
+before=$(state)
+asked awk '*ENVIRON\["S"] == ""*' 1 setup OWNER=acme
+assert_status 1 "$ST" "refused: setup whose setup fields cannot be read"
+assert_contains "$OUT" "cannot read the setup fields" "  and the refusal says so"
+assert_eq "$before" "$(state)" "  and setup/answers.env is as it was"
+# A default that cannot be worked out is refused, never written empty: in
+# setup, the first schema cell read is OWNER's default; in run, the 23rd is
+# VISIBILITY's.
+fresh
+asked awk '*col\[$i] = i*' 1 setup
+assert_status 1 "$ST" "refused: setup whose default cannot be read"
+assert_contains "$OUT" "cannot work out the default of OWNER" "  and the refusal says so"
+assert_eq "absent" "$(state)" "  and no setup/answers.env is written"
+ready
+asked awk '*col\[$i] = i*' 23 run widget 'TITLE=A' 'DESCRIPTION=B'
+assert_status 1 "$ST" "refused: run whose default cannot be read"
+assert_contains "$OUT" "cannot work out the default of VISIBILITY" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+asked awk '*BEGIN { print ENVIRON\["H"] }*' 1 questionnaire
+assert_status 1 "$ST" "refused: a questionnaire whose text cannot be made"
+assert_eq "gone" "$(gone "$R/setup/questionnaire.md")" "  and writes none"
+for at in "1 cannot read the fields of the schema" "2 cannot read the setup fields" "3 cannot read the run fields"; do
+  ready
+  asked awk '*ENVIRON\["S"] == ""*' "${at%% *}" run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+  assert_status 1 "$ST" "refused: run whose schema's fields cannot be read, at read ${at%% *}"
+  assert_contains "$OUT" "${at#* }" "  and the refusal says so"
+  assert_eq "absent" "$(run_state)" "  and no answers file is written"
+done
+# answers_get's reads, in order: per setup field, its override, then its
+# setup value; per run field given, its value; then TARGET_ROOT.
+ready
+asked awk '*!found && i > 1*' 2 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+assert_status 1 "$ST" "refused: run whose setup value cannot be read"
+assert_contains "$OUT" "cannot read OWNER from setup/answers.env" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+asked awk '*!found && i > 1*' 10 run widget 'TITLE=A' 'DESCRIPTION=B' 'VISIBILITY=public'
+assert_status 1 "$ST" "refused: run whose TARGET_ROOT cannot be read back"
+assert_contains "$OUT" "the answers hold no TARGET_ROOT" "  and the refusal says so"
+assert_eq "absent" "$(run_state)" "  and no answers file is written"
+ready
+ask run widget 'TITLE=A' 'DESCRIPTION=B'
+asked date '-u *' 1 confirm widget --by 'A Person'
+assert_status 1 "$ST" "refused: confirm whose time cannot be read"
+assert_contains "$OUT" "cannot read the time" "  and the refusal says so"
+assert_eq "gone" "$(gone "$OUTD/confirmed.md")" "  and no confirmed.md is written"
 assert_done

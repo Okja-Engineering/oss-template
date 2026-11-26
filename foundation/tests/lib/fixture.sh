@@ -4,9 +4,12 @@
 # violation that silently did not land cannot pass as a test.
 #
 # usage: . fixture.sh (after assert.sh); fixture_repo DIR; fixture_replace ...
-# Sourcing it isolates git from the caller's configuration and environment.
+# Sourcing it isolates git from the caller's configuration and environment,
+# and gives the suite failing.sh's fixture_failing.
 
 FIXTURE_FOUNDATION=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=failing.sh
+. "$FIXTURE_FOUNDATION/tests/lib/failing.sh"
 
 # Git in a fixture reads no global or system configuration, no per-user
 # file (the ignore and attributes files under XDG_CONFIG_HOME or HOME) and no

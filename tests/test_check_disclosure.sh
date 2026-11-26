@@ -602,4 +602,40 @@ assert_contains "$OUT" "stages/zz-${long}100/: no CONTEXT.md" "a long list of st
 assert_not_contains "$OUT" "stages/01-ask/, which is not a stage folder" "  and a routed stage early in it is a stage folder"
 assert_not_contains "$OUT" "does not resolve" "  and an earlier stage's output in it still resolves"
 
+# --- a failed read is a check that cannot run (decision 228) -----------------
+# Each case fails one stage of one pipeline on the valid workspace, through a
+# stub first on PATH: the check exits 2, never judging the list that stage did
+# not produce. NTH counts the stub's matching calls, in the check's order.
+cannot_run() { # TOOL PATTERN NTH WHAT
+  valid
+  fixture_failing "$R-stub" "$1" "$2" "$3"
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/check disclosure 2>&1)
+  ST=$?
+  assert_status 2 "$ST" "the check cannot run when it cannot read $4"
+  assert_contains "$OUT" "FAIL disclosure (could not run)" "  and bin/check says so"
+}
+cannot_run sed 's/^\[^*' 1 "the tree's paths"
+cannot_run awk 'END { print NR }' 1 "AGENTS.md's lines"
+cannot_run awk '!/^\[A-Za-z0-9.*' 1 "the unportable paths"
+cannot_run awk '*parent = parent $i*' 1 "the paths, for case twins"
+cannot_run sort '' 1 "the sorted case twins"
+cannot_run awk '*$1 == "stages" && NF >= 3*' 1 "the stage folders"
+cannot_run sort '-u' 1 "the sorted stage folders"
+cannot_run git '*:(literal)stages/01-ask/output/.gitignore' 1 "a stage's output/.gitignore"
+cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 1 "a stage's output/"
+cannot_run awk 'END { print NR }' 2 "CONTEXT.md's lines"
+cannot_run awk '*insec = ($0 == want)*' 1 "the routing table"
+cannot_run awk '*n++; if (n > 2) print*' 1 "the routing table's rows"
+cannot_run awk '*split("", seen)*' 1 "the routed stages"
+cannot_run awk '*$0 == ENVIRON\["S"] { n++ }*' 1 "how often a stage is routed"
+cannot_run sort '-u' 2 "the routed stages, sorted"
+cannot_run awk 'END { print NR }' 3 "a contract's lines"
+cannot_run awk '*printf "%s%s", sep*' 1 "a contract's sections"
+cannot_run awk '*insec = ($0 == want)*' 2 "a contract's Inputs section"
+cannot_run awk '*BEGIN { H = "| Source*' 1 "a contract's Inputs table"
+cannot_run awk '*if (n == 0) { print ""; exit }*' 1 "an input's path"
+cannot_run awk '*!found && substr($0, i + 1)*' 1 "an input's mode"
+cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 4 "whether an input is a directory"
+cannot_run awk "*index(\$0, ENVIRON\[\"P\"]) == 1*" 5 "a stage's references/"
+
 assert_done

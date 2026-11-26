@@ -440,4 +440,42 @@ assert_status 1 "$?" "a key the record lacks reads as absent"
 printf '%s\n' '# Render of widget, once at target: /old' 'target: /srv/widget' >"$SCRATCH/record.md"
 assert_eq "/srv/widget" "$(answers_record "$SCRATCH/record.md" target)" "a key is read only at the start of its line"
 
+# --- a read that fails, refused (decision 228) -------------------------------------
+# Each rule's input comes from a command whose status is read: a stub tool
+# failing one call (fixture_failing) is refused, never judged as an empty value.
+# shellcheck source-path=SCRIPTDIR source=../foundation/tests/lib/failing.sh
+. "$TEST_DIR/../foundation/tests/lib/failing.sh"
+k=0
+# under TOOL PATTERN NTH COMMAND...: COMMAND's output and status, OUT and ST,
+# with a stub TOOL failing as fixture_failing says. PATH is assigned in the
+# subshell, not as a prefix, so bash forgets each tool it has found.
+under() {
+  k=$((k + 1))
+  fixture_failing "$SCRATCH/fail$k" "$1" "$2" "$3"
+  shift 3
+  OUT=$(PATH="$SCRATCH/fail$k:$PATH" && "$@" 2>&1)
+  ST=$?
+}
+# answers_check reads a field's type, then its pattern, then its default.
+under awk '*col\[$i] = i*' 2 answers_check "$S" CODE abc
+assert_status 1 "$ST" "refused: a value whose pattern cannot be read"
+assert_contains "$OUT" "CODE: cannot read its row of the schema" "  and the refusal says so"
+under awk '*col\[$i] = i*' 3 answers_check "$S" CONTACT 'not yet set, so launch waits on it'
+assert_status 1 "$ST" "refused: a value whose default cannot be read"
+assert_contains "$OUT" "CONTACT: cannot read its row of the schema" "  and the refusal says so"
+under tr '-d \\200-\\277' 1 answers_check "$S" DESCRIPTION "$(rep 351 a)"
+assert_status 1 "$ST" "refused: a description whose characters cannot be counted"
+assert_contains "$OUT" "cannot count the characters" "  and the refusal says so"
+good_setup
+under awk '*ENVIRON\["S"] == ""*' 1 answers_validate "$S" "$SETUP" setup
+assert_status 1 "$ST" "refused: a file whose schema's fields cannot be read"
+assert_contains "$OUT" "cannot read the fields of the schema" "  and the refusal says so"
+printf 'OWNER=Ok\000ja\n' >>"$SETUP"
+under tr '-d \\000' 1 answers_validate "$S" "$SETUP" setup
+assert_status 1 "$ST" "refused: a file holding a NUL byte, whose bytes cannot be counted without it"
+assert_contains "$OUT" "cannot read the file" "  and the refusal says so"
+under wc '-c' 1 answers_validate "$S" "$SETUP" setup
+assert_status 1 "$ST" "refused: a file holding a NUL byte, whose bytes cannot be counted"
+assert_contains "$OUT" "cannot read the file" "  and the refusal says so"
+
 assert_done

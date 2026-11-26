@@ -185,4 +185,21 @@ run --staged
 assert_status 1 "$ST" "staged mode judges the index"
 assert_contains "$OUT" "docs/staged.md:1" "  and names the staged file"
 
+# A failed read is a check that cannot run (decision 228): with one stage
+# of one pipeline failing, through a stub first on PATH, the check exits 2
+# rather than judge what that stage did not produce.
+cannot_run() { # TOOL PATTERN WHAT
+  fresh
+  line 'Force pushes to main are refused by [the check](bin/check).'
+  fixture_failing "$R-stub" "$1" "$2" 1
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/check claims 2>&1)
+  ST=$?
+  assert_status 2 "$ST" "the check cannot run when it cannot read $3"
+  assert_contains "$OUT" "FAIL claims (could not run)" "  and bin/check says so"
+}
+cannot_run sed 's/^\[^*' "the tree's paths"
+cannot_run awk '*$1 == ENVIRON\["N"]*' "a rule line's links"
+cannot_run awk '*split(span, w, " ")*' "a rule line's code spans"
+cannot_run awk '*print "OK" s*' "where a rule line's link leads"
+
 assert_done

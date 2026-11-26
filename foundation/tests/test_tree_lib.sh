@@ -180,6 +180,10 @@ done
 assert_contains "$list_wt" "120000 $(printf CLAUDE.md | git -C "$O" hash-object --stdin)${TAB}-link" \
   "worktree: a symbolic link whose name starts with - has its target's blob"
 assert_eq "CLAUDE.md" "$(content_of "$O" worktree -link)" "worktree: reads a link as its target text"
+# A link whose text cannot be read fails the read; it is not an empty file.
+fixture_failing "$SCRATCH/stub" readlink '*/-link' 1
+(cd "$O" && PATH="$SCRATCH/stub:$PATH" && tree_cat worktree -link >/dev/null)
+assert_status 2 "$?" "worktree: a link readlink cannot read fails the read"
 
 # A path no listing line can hold (a newline) fails every source alike.
 N="$SCRATCH/newline"

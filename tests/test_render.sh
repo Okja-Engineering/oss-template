@@ -653,6 +653,87 @@ assert_status 1 "$ST" "refused: a worktree list that fails"
 assert_contains "$OUT" "cannot list the workspace's worktrees" "  and the refusal says so"
 assert_eq "" "$(left)" "  with nothing written"
 
+# --- every stage a guard or record reads, its failure refused (decision 228) ----------------
+# failing TOOL PATTERN [NTH] [SETUP] [STATUS]: a confirmed run rendered with
+# a stub TOOL that fails, exiting STATUS, its NTH call matching PATTERN
+# (fixture_failing); SETUP, when given and not empty, runs once the run is
+# confirmed. stage_refused DESCRIPTION NEEDLE:
+# the render refused, saying NEEDLE, what could not be done, with nothing of
+# this run left, no target, no render.md.
+failing() {
+  fresh
+  confirmed widget
+  [ -z "${4:-}" ] || "$4"
+  fixture_failing "$SCRATCH/fail$n" "$1" "$2" "${3:-1}" "${5:-1}"
+  OUT=$(cd "$R" && PATH="$SCRATCH/fail$n:$PATH" bin/render widget 2>&1)
+  ST=$?
+}
+stage_refused() {
+  assert_status 1 "$ST" "refused: $1"
+  assert_contains "$OUT" "$2" "  saying: $2"
+  assert_eq "" "$(left)" "  with nothing of this run left, no target and no render.md"
+}
+failing awk '*$5 != "" { print $1*'
+stage_refused "the selecting fields' awk fails" "cannot read the selecting fields"
+failing awk '*p ~ /^foundation*'
+stage_refused "the twin check's list of foundation paths fails" "cannot compare the paths for case twins"
+failing cut '-f 2'
+stage_refused "the twin check's list of selected paths fails" "cannot compare the paths for case twins"
+failing awk '*for (i = 2; i <= NF*'
+stage_refused "the twin check's directories fail" "cannot compare the paths for case twins"
+failing awk '*{ l = tolower($0) } (l in seen)*'
+stage_refused "the twin check's comparison fails" "cannot compare the paths for case twins"
+# The twin check's sort -u, over case-only twins through a link to outside
+# (conformance p3b of S2's second ship gate): refused before anything is
+# written, through the link or otherwise.
+outside_twins() {
+  mkdir -p "$SCRATCH/outside$n"
+  printf 'kept\n' >"$SCRATCH/outside$n/x"
+  twin foundation/Lnk 120000 "$SCRATCH/outside$n"
+  twin foundation/lnk/x 100644
+}
+failing sort '-u*' 1 outside_twins
+stage_refused "the twin check's sort -u fails, over case twins" "cannot compare the paths for case twins"
+assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  and nothing is written through the link"
+failing awk '*$4 == "yes"*'
+stage_refused "the render fields' awk fails" "cannot read the render fields"
+# Each value read from the answers, by answers_get's awk, in the order render
+# reads them: NAME first; then TARGET and TARGET_ROOT; then the one
+# selecting field, LICENSE; then the first render field.
+failing awk '*!found && i > 1*' 1
+stage_refused "the read of NAME fails" "cannot read NAME"
+failing awk '*!found && i > 1*' 4
+stage_refused "the read of a selecting field's value fails" "cannot read the selecting fields"
+failing awk '*!found && i > 1*' 5
+stage_refused "the read of a render field's value fails" "cannot read the render fields"
+failing tail '-c 1 *'
+stage_refused "a template's last byte cannot be read" "cannot read foundation/"
+# Every argument-less sort, in order: the file list, then the walk's have and
+# want (render p07 and conformance p3 of S2's second ship gate).
+failing sort '' 1
+stage_refused "the file list's sort fails" "cannot sort the file list"
+failing sort '' 2
+stage_refused "the walk's sort of what the target holds fails" "the walk cannot sort"
+failing sort '' 3
+stage_refused "the walk's sort of the file list fails" "the walk cannot sort"
+failing sed '-n s/^F//p *'
+stage_refused "the walk's list of files fails" "the walk cannot sort"
+failing sed '-n s/^D//p *'
+stage_refused "the walk's list of directories fails" "the walk cannot judge the directories"
+failing tr '\\n \\0'
+stage_refused "the fingerprint's path list fails" "cannot list the paths to fingerprint"
+# grep's 1 is "none found"; a grep that cannot read a list exits 2, which
+# the walk never reads as none.
+failing grep '-q ^G *' 1 "" 2
+stage_refused "the walk's look for a .git entry fails" "the walk cannot read its lists of the target"
+failing grep '-qx N *' 1 "" 2
+stage_refused "the walk's look for a name with a newline fails" "the walk cannot read its lists of the target"
+kept_target() { mkdir -p "$ROOT/widget/kept"; }
+failing ls '-A -- *' 1 kept_target
+assert_status 1 "$ST" "refused: the listing of a present target fails"
+assert_contains "$OUT" "the target $ROOT/widget is present" "  judged present, never empty"
+assert_eq "present" "$(gone "$ROOT/widget/kept")" "  and it is left alone"
+
 # --- each refusal reached, and each path rendered as it must be (T3, T6) ---------------------
 # A render.md that names no target.
 fresh

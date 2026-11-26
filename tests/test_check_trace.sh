@@ -238,4 +238,25 @@ fixture_append "$R/CONTEXT.md" 'Never skip a checkpoint.'
 run --range "" HEAD
 assert_status 0 "$ST" "range mode judges HEAD, not an uncommitted edit"
 
+# --- a failed read is a check that cannot run (decision 228) -----------------
+# Each case fails one stage of one pipeline on the valid workspace, through a
+# stub first on PATH: the check exits 2, never judging what that stage did not
+# produce.
+cannot_run() { # TOOL PATTERN NTH WHAT
+  valid
+  fixture_failing "$R-stub" "$1" "$2" "$3"
+  OUT=$(cd "$R" && PATH="$R-stub:$PATH" bin/check trace 2>&1)
+  ST=$?
+  assert_status 2 "$ST" "the check cannot run when it cannot read $4"
+  assert_contains "$OUT" "FAIL trace (could not run)" "  and bin/check says so"
+}
+cannot_run sed 's/^\[^*' 1 "the tree's paths"
+cannot_run awk '*$0 == "AGENTS.md"*' 1 "the agent files"
+cannot_run awk '*$1 == ENVIRON\["N"]*' 1 "a rule line's links"
+cannot_run awk '*print "OK" s*' 1 "where a rule line's link leads"
+cannot_run awk '*print "OK" s*' 2 "where a link leads"
+cannot_run git '*:(literal)CONTRIBUTING.md' 1 "CONTRIBUTING.md"
+cannot_run awk '*insec = ($0 == "## Agent guards")*' 1 "§ Agent guards"
+cannot_run awk '*s = substr(s, i + 6)*' 1 "the deny entries"
+
 assert_done
