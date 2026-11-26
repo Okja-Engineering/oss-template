@@ -18,9 +18,10 @@
 #       selects nothing (no value of the field is VALUE); a selecting field
 #       with no variant for its value; a selected PATH from anything but
 #       its variants, as a plain PATH or PATH.tmpl; two sources for one
-#       path; a submodule; and, before anything is written, two paths or
-#       directories that differ only in ASCII case, which a disk that folds
-#       case holds as one. One line out per refusal; exit 0, 1 on a
+#       path; a submodule; and, before anything is written, a path holding
+#       anything but ASCII letters, digits, ., _, -, / and space (decision
+#       224), and two paths or directories that differ only in ASCII case,
+#       which a disk that folds case holds as one. One line out per refusal; exit 0, 1 on a
 #       refusal, 2 when
 #       COMMIT cannot be read or OUT written. Sets RENDER_LIST to the
 #       produced paths, sorted, one a line.
@@ -51,7 +52,7 @@
 
 render_tree() {
   local commit=$1 schema=$2 answers=$3 out=$4 entries line refused=0
-  local mode rel name tmpl sel field path values value v src produced="" tmp twins
+  local mode rel name tmpl sel field path values value v src produced="" tmp twins unportable
   entries=$(tree_list "commit:$commit") || return 2
   # The selecting fields: "FIELD<TAB>PATH<TAB>VALUES<TAB>VALUE". Every
   # command a value comes from has its status read (decision 228).
@@ -59,6 +60,19 @@ render_tree() {
     printf 'cannot read the selecting fields\n'
     return 2
   }
+  # Only portable paths (decision 224), refused before anything is written:
+  # a disk that folds Unicode, or another character, could open one as
+  # another, and the twin check below folds ASCII alone.
+  unportable=$(printf '%s\n' "$entries" |
+    awk '{ p = substr($0, index($0, "\t") + 1) } p ~ /^foundation\/./ && p !~ /^[A-Za-z0-9._ \/-]+$/ {
+      print p ": a path outside the portable set, ASCII letters, digits, ., _, -, / and space" }') || {
+    printf 'cannot judge the foundation paths\n'
+    return 2
+  }
+  if [ -n "$unportable" ]; then
+    printf '%s\n' "$unportable"
+    return 1
+  fi
   # Paths, or directories, that differ only in case, refused before anything
   # is written: on a disk that folds case, one would be written through the
   # other. Each foundation path, without .tmpl, and each selected path.
