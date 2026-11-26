@@ -1356,13 +1356,17 @@ mv "$SCRATCH/ans$n" "$A"
 OUT=$(cd "$R" && bin/ask confirm "ws$n" --by 'A Person' 2>&1)
 assert_status 1 "$?" "refused: confirm of answers edited by hand to the workspace as the target"
 assert_contains "$OUT" "a working tree of this workspace" "  and the refusal says so"
-OUT=$(cd "$R" && bin/ask run "ws$n" --redo 'DESCRIPTION=Other' 2>&1)
-assert_status 1 "$?" "refused: a redo of them"
-assert_not_contains "$OUT" "--remove" "  never routed to --remove"
 OUT=$(cd "$R" && bin/ask run "ws$n" --redo --remove "$R" 'DESCRIPTION=Other' 2>&1)
 assert_status 1 "$?" "refused: a redo --remove naming the workspace"
 assert_contains "$OUT" "a working tree of this workspace" "  and the refusal says so"
+OUT=$(cd "$R" && bin/ask run "ws$n" --redo 'DESCRIPTION=Other' --setup-override "TARGET_ROOT=$SCRATCH" 2>&1)
+assert_status 1 "$?" "refused: a redo keeping the workspace as its target"
+assert_contains "$OUT" "give TARGET_ROOT again" "  naming the way out"
+assert_not_contains "$OUT" "--remove" "  never --remove"
 assert_eq "present present" "$(gone "$R/.git") $(gone "$A")" "  and the workspace is left whole"
+OUT=$(cd "$R" && bin/ask run "ws$n" --redo 'DESCRIPTION=Other' 2>&1)
+assert_status 0 "$?" "  and a redo under setup's TARGET_ROOT, the way out, takes it${OUT:+ ($OUT)}"
+assert_eq "TARGET=$ROOT/ws$n" "$(grep '^TARGET=' "$A")" "  writing a target outside the workspace"
 
 # --- the walk (decisions 166, 192), on render's own list ------------------------------------
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/render.sh
