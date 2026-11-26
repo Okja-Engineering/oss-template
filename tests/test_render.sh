@@ -703,6 +703,33 @@ twin foundation/lnk/x 100644
 confirmed widget
 refused "a link and a directory that differ only in case" "differ only in case" widget
 assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  and nothing is written through the link"
+# Only portable paths (decision 224), so the ASCII twin check is complete: a
+# foundation path holding anything but ASCII letters, digits, ., _, -, / and
+# space is refused before anything is written, as twins a disk folds by
+# Unicode, a link Ä to outside and a file ä/x (render F5).
+fresh
+mkdir -p "$SCRATCH/outside$n"
+printf 'kept\n' >"$SCRATCH/outside$n/x"
+twin "$(printf 'foundation/\303\204')" 120000 "$SCRATCH/outside$n"
+twin "$(printf 'foundation/\303\244/x')" 100644
+confirmed widget
+refused "a link and a directory whose names are outside the portable set" "outside the portable set" widget
+assert_contains "$OUT" "$(printf 'foundation/\303\204')" "  naming the path"
+assert_eq "kept" "$(cat "$SCRATCH/outside$n/x")" "  and nothing is written through the link"
+assert_eq "x" "$(entries "$SCRATCH/outside$n")" "  or beside it"
+assert_eq "" "$(left)" "  and nothing of the run is left"
+for bad in 'a+b.md' 'a:b.md' "$(printf 'caf\303\251.md')" 'dir/a~b.md'; do
+  fresh
+  twin "foundation/$bad" 100644
+  confirmed widget
+  refused "a foundation path holding a character outside the portable set: $bad" "foundation/$bad" widget
+  assert_eq "" "$(left)" "  with nothing written"
+done
+fresh
+twin 'foundation/a b_c-d.e.md' 100644
+confirmed widget
+render widget
+assert_status 0 "$ST" "a foundation path of letters, a space, _, - and . renders"
 # A template with CRLF line endings repeats its list line per item, each
 # item's line ending CRLF too.
 fresh
@@ -788,7 +815,9 @@ stage_refused() {
 }
 failing awk '*$5 != "" { print $1*'
 stage_refused "the selecting fields' awk fails" "cannot read the selecting fields"
-failing awk '*p ~ /^foundation*'
+failing awk '*p !~ /^\[A-Za-z0-9*'
+stage_refused "the portability check fails" "cannot judge the foundation paths"
+failing awk '*substr(p, 12)*'
 stage_refused "the twin check's list of foundation paths fails" "cannot compare the paths for case twins"
 failing cut '-f 2'
 stage_refused "the twin check's list of selected paths fails" "cannot compare the paths for case twins"
@@ -1037,12 +1066,14 @@ assert_contains "$OUT" "git add exited" "  and says so"
 
 # --- AC10's planted cases, against render's fingerprint ----------------------------------------
 # planted DESCRIPTION ENV...: render with ENV planted, giving the baseline
-# fingerprint, and the workspace's .git gaining no object or ref.
+# fingerprint, and the workspace's .git as it was.
 fresh
 confirmed widget
 render widget
 BASE=$(record widget fingerprint)
-objects() { (cd "$R/.git" && find objects refs -type f | LC_ALL=C sort | cksum); }
+# objects: every entry of the workspace's .git, by name, and every file's
+# bytes, so a render that writes anything there is seen (render N6).
+objects() { (cd "$R/.git" && find . | LC_ALL=C sort && find . -type f -exec cksum {} + | LC_ALL=C sort); }
 planted() {
   local what=$1 before
   shift
@@ -1051,7 +1082,7 @@ planted() {
   ST=$?
   assert_status 0 "$ST" "render with $what planted"
   assert_eq "$BASE" "$(record widget fingerprint)" "  gives the baseline fingerprint"
-  assert_eq "$before" "$(objects)" "  and the workspace's .git gains no object or ref"
+  assert_eq "$before" "$(objects)" "  and the workspace's .git is as it was, every entry and byte"
 }
 mkdir -p "$SCRATCH/xdg/git" "$SCRATCH/tpl/info"
 printf '.claude/\nbin/\ntool\n' >"$SCRATCH/excludes"
