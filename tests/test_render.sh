@@ -1305,6 +1305,65 @@ confirmed widget --setup-override "TARGET_ROOT=$SCRATCH/prunable$n/targets"
 render widget
 assert_status 0 "$ST" "a TARGET_ROOT under a prunable worktree entry whose directory remains is accepted"
 
+# The target rule judges the target, not only its root (removal N1 of S2's
+# fourth ship gate): no derived target is a working tree of the workspace,
+# or holds one, so render and ask refuse it, no route names it to
+# --remove, and the discard takes none.
+# tree_refused DESCRIPTION TARGET KEPT: render, its --replace --remove, and
+# a redo --remove of TARGET each refuse it, and the file KEPT, uncommitted
+# in a working tree, is left.
+tree_refused() {
+  local what=$1 tgt=$2 kept=$3
+  render widget
+  assert_status 1 "$ST" "refused: a render whose target $what"
+  assert_contains "$OUT" "TARGET $tgt is at or above" "  and the refusal names the target"
+  assert_contains "$OUT" "a working tree of this workspace" "  and the working tree"
+  render widget --replace --remove "$tgt"
+  assert_status 1 "$ST" "refused: --replace --remove naming a target that $what"
+  assert_contains "$OUT" "a working tree of this workspace" "  and the refusal says so"
+  OUT=$(cd "$R" && bin/ask run widget --redo --remove "$tgt" 'DESCRIPTION=Other' 2>&1)
+  assert_status 1 "$?" "refused: a redo --remove naming a target that $what"
+  assert_contains "$OUT" "a working tree of this workspace" "  and the refusal says so"
+  assert_eq "present" "$(gone "$kept")" "  and the working tree is left whole"
+}
+ready
+git -C "$R" worktree add -q "$ROOT/widget" -b wtat$n 2>/dev/null
+printf 'precious\n' >"$ROOT/widget/uncommitted"
+tree_refused "is a linked worktree of the workspace" "$ROOT/widget" "$ROOT/widget/uncommitted"
+ready
+mkdir -p "$ROOT/widget"
+git -C "$R" worktree add -q "$ROOT/widget/inner" -b wtin$n 2>/dev/null
+printf 'precious\n' >"$ROOT/widget/inner/uncommitted"
+tree_refused "holds a linked worktree of the workspace" "$ROOT/widget" "$ROOT/widget/inner/uncommitted"
+fresh
+git -C "$R" worktree add -q "$ROOT/widget" -b wtnew$n 2>/dev/null
+OUT=$(cd "$R" && bin/ask run widget 'DESCRIPTION=One line' 2>&1)
+assert_status 1 "$?" "refused: a run whose new target is a linked worktree of the workspace"
+assert_contains "$OUT" "TARGET $ROOT/widget is at or above" "  and the refusal says so"
+assert_contains "$OUT" "give TARGET_ROOT again" "  naming the way out"
+assert_eq "gone" "$(gone "$R/stages/01-ask/output/widget/answers.env")" "  and nothing is written"
+# r02: TARGET_ROOT the workspace's parent, NAME the workspace's folder: the
+# root passes, the target is the workspace itself.
+fresh
+OUT=$(cd "$R" && bin/ask run "ws$n" 'DESCRIPTION=One line' --setup-override "TARGET_ROOT=$SCRATCH" 2>&1)
+assert_status 1 "$?" "refused: a run whose target is the workspace itself"
+assert_contains "$OUT" "TARGET $SCRATCH/ws$n is at or above" "  and the refusal says so"
+assert_eq "gone" "$(gone "$R/stages/01-ask/output/ws$n")" "  and nothing is written"
+(cd "$R" && bin/ask run "ws$n" 'DESCRIPTION=One line' >/dev/null 2>&1)
+A="$R/stages/01-ask/output/ws$n/answers.env"
+sed -e "s|^TARGET_ROOT=.*|TARGET_ROOT=$SCRATCH|" -e "s|^TARGET=.*|TARGET=$SCRATCH/ws$n|" "$A" >"$SCRATCH/ans$n"
+mv "$SCRATCH/ans$n" "$A"
+OUT=$(cd "$R" && bin/ask confirm "ws$n" --by 'A Person' 2>&1)
+assert_status 1 "$?" "refused: confirm of answers edited by hand to the workspace as the target"
+assert_contains "$OUT" "a working tree of this workspace" "  and the refusal says so"
+OUT=$(cd "$R" && bin/ask run "ws$n" --redo 'DESCRIPTION=Other' 2>&1)
+assert_status 1 "$?" "refused: a redo of them"
+assert_not_contains "$OUT" "--remove" "  never routed to --remove"
+OUT=$(cd "$R" && bin/ask run "ws$n" --redo --remove "$R" 'DESCRIPTION=Other' 2>&1)
+assert_status 1 "$?" "refused: a redo --remove naming the workspace"
+assert_contains "$OUT" "a working tree of this workspace" "  and the refusal says so"
+assert_eq "present present" "$(gone "$R/.git") $(gone "$A")" "  and the workspace is left whole"
+
 # --- the walk (decisions 166, 192), on render's own list ------------------------------------
 # shellcheck source-path=SCRIPTDIR source=../bin/lib/render.sh
 . "$TEST_DIR/../bin/lib/render.sh"

@@ -654,6 +654,30 @@ WSD=$(CDPATH='' cd -- "$TEST_DIR/.." && pwd)
 out=$(answers_target_for "$WSD/stages" widget 2>&1)
 assert_status 1 "$?" "refused: a TARGET_ROOT inside the workspace"
 assert_contains "$out" "is at or under $WSD, a working tree of this workspace" "  and the refusal says so"
+# The target is judged too, not only its root (removal N1 of S2's fourth
+# ship gate): no target is a working tree of the workspace, or holds one.
+# On a workspace of its own, ANSWERS_WS, so where the checkout is is moot.
+PW="$SCRATCH/parent"
+mkdir -p "$PW/t/held"
+git init -q -b main "$PW/ws" && git -C "$PW/ws" commit -q --allow-empty -m 'test: a workspace'
+git -C "$PW/ws" worktree add -q "$PW/t/widget" -b at 2>/dev/null
+git -C "$PW/ws" worktree add -q "$PW/t/held/inner" -b in 2>/dev/null
+tjudge() { OUT=$(ANSWERS_WS="$PW/ws" answers_target_for "$1" "$2" 2>&1); ST=$?; }
+tjudge "$PW" ws
+assert_status 1 "$ST" "refused: the workspace's parent as TARGET_ROOT, its folder as NAME: the workspace itself"
+assert_contains "$OUT" "TARGET $PW/ws is at or above" "  and the refusal names the target"
+assert_contains "$OUT" "a working tree of this workspace" "  and the working tree"
+tjudge "$PW/t" widget
+assert_status 1 "$ST" "refused: a target that is a linked worktree"
+assert_contains "$OUT" "TARGET $PW/t/widget is at or above" "  and the refusal says so"
+tjudge "$PW/t" held
+assert_status 1 "$ST" "refused: a target that holds a linked worktree"
+assert_contains "$OUT" "TARGET $PW/t/held is at or above" "  and the refusal says so"
+tjudge "$PW" other
+assert_status 0 "$ST" "a target beside the workspace, under its parent, is a target${OUT:+ ($OUT)}"
+assert_eq "$PW/other" "$OUT" "  and is printed"
+tjudge "$PW/t" absent
+assert_status 0 "$ST" "a target beside a linked worktree is a target${OUT:+ ($OUT)}"
 under git '*worktree list*' 1 answers_target_for /srv/targets widget
 assert_status 2 "$ST" "a TARGET_ROOT whose workspace's worktrees cannot be listed is not judged"
 assert_contains "$OUT" "cannot list the workspace's worktrees" "  and says so"
