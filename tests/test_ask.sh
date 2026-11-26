@@ -682,7 +682,9 @@ assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 printf '%s\n' '# Render of widget' '' 'target: widget' >"$R/stages/02-render/output/widget/render.md"
 OUT=$(cd "$SCRATCH/p$n" && "$R/bin/ask" run widget --redo --remove "$ROOT/widget" 'TITLE=C' 'DESCRIPTION=D' 2>&1)
 assert_status 1 "$?" "refused: a recorded target that is a relative path"
-assert_contains "$OUT" "render.md names widget, not the run's target $ROOT/widget" "  and the refusal says so"
+# A record names a target only as an absolute TARGET (removal N3 of S2's
+# fourth ship gate).
+assert_contains "$OUT" "render.md names no target: TARGET: a path is absolute" "  and the refusal says so"
 assert_eq "present" "$(gone "$ROOT/kept")" "  with nothing removed"
 # A run's target present with no render.md naming it, left by a render that
 # was killed, or a directory made by hand: the redo names it, and removes it
@@ -1260,7 +1262,7 @@ if [ "$(id -u)" != 0 ]; then
   # gone and dropping its record.
   rendered
   chmod 000 "$ROOT"
-  rrefused "a redo whose recorded target cannot be told there" "cannot tell whether $ROOT/widget is there" \
+  rrefused "a redo whose old root cannot be entered, so its target cannot be judged" "$ROOT cannot be entered, so it cannot be judged" \
     run widget --redo 'TITLE=C' --setup-override "TARGET_ROOT=$SCRATCH/moved$n"
   chmod 755 "$ROOT"
   # r03b: the run's 02 output folder cannot be searched, so whether
@@ -1439,8 +1441,11 @@ assert_eq "$before" "$(run_state)" "  and the run's files are as they were"
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
 sed '/^TARGET_ROOT=/d' "$ANS" >"$ANS.x" && mv "$ANS.x" "$ANS"
-rrefused "a redo whose old answers file, edited by hand, holds no TARGET_ROOT" \
-  "stages/01-ask/output/widget/answers.env holds no TARGET_ROOT" run widget --redo 'TITLE=C'
+# Its old target is none verified, so the route confirm and render name,
+# the redo, goes on (answers' R2 of S2's fourth ship gate).
+ask run widget --redo 'TITLE=C'
+assert_status 0 "$ST" "a redo whose old answers file, edited by hand, holds no TARGET_ROOT, goes on${OUT:+ ($OUT)}"
+assert_eq "TARGET_ROOT=$ROOT" "$(grep '^TARGET_ROOT=' "$ANS")" "  writing setup's TARGET_ROOT"
 ready
 ask run widget 'TITLE=A' 'DESCRIPTION=B'
 before=$(run_state)
